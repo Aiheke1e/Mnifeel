@@ -139,6 +139,10 @@ export async function generateMedia(
   mediaType: "image" | "video" | "audio",
   request: MediaGenerationRequest,
   signal?: AbortSignal,
+  events?: {
+    setProviderTaskId?(providerTaskId: string): Promise<void>;
+    updateProgress?(progress: number): Promise<void>;
+  },
 ): Promise<GeneratedMedia[]> {
   signal?.throwIfAborted();
   if (!request.prompt.trim()) invalid("请输入生成提示词");
@@ -167,8 +171,9 @@ export async function generateMedia(
       lastFrame: request.lastFrame ? await readReference(directory, request.lastFrame, "image", signal) : undefined,
       ratio: request.ratio, resolution: request.resolution, duration: request.duration,
     }, operationSignal);
+    await events?.setProviderTaskId?.(task.id);
     try {
-      const asset = await waitForVideo(configured.adapter.getVideo.bind(configured.adapter), configured.provider, task, operationSignal);
+      const asset = await waitForVideo(configured.adapter.getVideo.bind(configured.adapter), configured.provider, task, operationSignal, events?.updateProgress);
       assets = [asset];
     } catch (error) {
       if (operationSignal.aborted && configured.adapter.cancelVideo) {
@@ -178,6 +183,7 @@ export async function generateMedia(
     }
   }
   if (!Array.isArray(assets) || !assets.length) invalid("供应商未返回生成结果");
+  if (mediaType === "image" && assets.length !== 1) invalid("图片模型单次只能返回一个结果");
   const written: string[] = [];
   const result: GeneratedMedia[] = [];
   try {
@@ -211,6 +217,7 @@ async function waitForVideo(
   provider: Awaited<ReturnType<typeof getRunnableModel>>["provider"],
   task: ProviderVideoTask,
   signal: AbortSignal,
+  updateProgress?: (progress: number) => Promise<void>,
 ) {
   while (true) {
     signal.throwIfAborted();
@@ -220,6 +227,7 @@ async function waitForVideo(
       return result.asset;
     }
     if (result.status === "failed") throw new Error(result.error || "视频生成失败");
+    if (typeof result.progress === "number") await updateProgress?.(result.progress);
     await new Promise<void>((resolve, reject) => {
       const done = () => {
         signal.removeEventListener("abort", abort);

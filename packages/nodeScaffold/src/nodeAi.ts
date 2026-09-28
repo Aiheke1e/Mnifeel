@@ -35,7 +35,7 @@ export type NodeAiRequest = {
   modelId: string;
   prompt: string;
   systemPrompt?: string;
-  projectId?: string;
+  projectId: string;
   references?: Extract<NodeOutput, { dataType: "STRING" | "IMAGE" | "VIDEO" }>[];
   tools?: NodeAiTool[];
   onEvent?: (event: NodeAiEvent) => void;
@@ -111,7 +111,7 @@ async function requestModel(input: NodeAiRequest, context: Context, model: Model
     signal.throwIfAborted();
     const response = await fetch("/api/ai/generate", {
       method: "POST", headers: { "Content-Type": "application/json", "x-minifeel-workspace": "1" },
-      body: JSON.stringify({ providerId, modelId, context, projectId, references }), signal,
+      body: JSON.stringify({ providerId, modelId, context, projectId, references, requestId: crypto.randomUUID() }), signal,
     });
     if (!response.ok) await readResult(response);
     if (!response.body || !response.headers.get("content-type")?.includes("text/event-stream")) throw new Error("AI 未返回 SSE 数据流");
@@ -166,7 +166,7 @@ export function useNodeAi() {
     return readResult<{ path: string; mimeType: string; mediaType: T }[]>(await fetch("/api/ai/media/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-minifeel-workspace": "1" },
-      body: JSON.stringify({ ...input, mediaType }),
+      body: JSON.stringify({ ...input, mediaType, requestId: crypto.randomUUID() }),
       signal: requestSignal(signal),
     }));
   }

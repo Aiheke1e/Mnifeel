@@ -8,6 +8,7 @@ export type GenerationEvent = {
   actualCredits?: number;
   refundedCredits?: number;
   errorMessage?: string;
+  output?: { type: "text" | "reasoning"; delta: string };
 };
 
 type Listener = (event: GenerationEvent) => void;

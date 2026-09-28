@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import type { Request, Response, NextFunction } from "express";
 import buildRoute from "@/core";
 import { error } from "@/lib/responseFormat";
-import { requireAdmin, requireAuth, resolveAuth } from "@/lib/middleware";
+import { getAuth, requireAdmin, requireAuth, resolveAuth } from "@/lib/middleware";
 import desktopRequest from "@/lib/desktop";
 import initializePlugins from "@/utils/plugins/initialize";
 import { redactError, redactErrorMessage } from "@/utils/providers/redact";
@@ -73,6 +73,7 @@ export async function createApp({
   });
   app.use("/api/admin", requireAdmin);
   app.use("/api/providers", requireAdmin);
+  app.use("/api/agents/a2a", requireAdmin);
   app.use(["/api/assets", "/api/workspaces/list", "/api/workspaces/selectDirectory"], requireAdmin);
 
   const router = await import("@/router");
@@ -83,9 +84,14 @@ export async function createApp({
     import("@/utils/mcp/control"),
     import("@/utils/mcp/resources"),
   ]);
-  app.use("/mcp", resolveAuth, requireAuth, createMcpRouter({ getTools: getMcpTools, authorize: authorizeMcp, resources: skillResources }));
+  app.use("/mcp", resolveAuth, requireAuth, createMcpRouter({
+    getTools: (_request, response) => getMcpTools(getAuth(response).user.id),
+    authorize: authorizeMcp,
+    sessionKey: (_request, response) => getAuth(response).user.id,
+    resources: skillResources,
+  }));
   const { createA2aRouter } = await import("@/agent/a2a");
-  app.use("/a2a", resolveAuth, requireAuth, createA2aRouter());
+  app.use("/a2a", createA2aRouter());
   app.use(express.static(webRoot));
 
   // 错误处理
@@ -107,7 +113,11 @@ export async function createApp({
     response.status(status).json(error(message, code ? { code } : null, status));
   });
 
-  const { startGenerationWorker } = await import("@/utils/generation/worker");
+  const [{ startGenerationWorker }, { registerGenerationExecutors }] = await Promise.all([
+    import("@/utils/generation/worker"),
+    import("@/utils/generation/executors"),
+  ]);
+  registerGenerationExecutors();
   await startGenerationWorker();
 
   return app;

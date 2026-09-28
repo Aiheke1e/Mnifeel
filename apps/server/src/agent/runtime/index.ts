@@ -24,6 +24,8 @@ import { isMemoryEnabled } from "@/utils/personalization";
 import { lockWorkspaceFiles, resolveWorkspacePath } from "@/utils/workspace/files";
 
 type AgentOptions = {
+  userId: string;
+  projectId: string;
   prompt: string;
   attachments?: z.infer<typeof agentAttachmentsSchema>;
   cwd: string;
@@ -40,6 +42,8 @@ type AgentOptions = {
 export async function run(
   {
     prompt,
+    userId,
+    projectId,
     attachments = [],
     cwd,
     providerId,
@@ -75,7 +79,7 @@ export async function run(
     send({ type: "accepted" });
     return;
   }
-  const { provider, runtime } = await createAgentModel(providerId, modelId, thinkingLevel);
+  const { provider, runtime, billStream, waitForBilling } = await createAgentModel(userId, projectId, providerId, modelId, thinkingLevel);
   if (sessionPath) {
     const file = await stat(sessionPath).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") throw Object.assign(new Error("会话不存在，请重新打开对话"), { status: 404 });
@@ -107,7 +111,7 @@ export async function run(
       entryOffset: history.getEntries().length,
     };
     unregister = registerAgentSession(history.getSessionFile()!, active);
-    const tools = await createAgentTools(cwd, canvas, question);
+    const tools = await createAgentTools(cwd, canvas, question, { userId, projectId });
     if (isMemoryEnabled()) {
       const memoryTool = createMemoryTool();
       if (tools.some(tool => tool.name === memoryTool.name)) throw new Error("工具名称 memory 已被内置全局记忆工具占用");
@@ -118,9 +122,10 @@ export async function run(
       tools.push(createReportTool(cwd, parentFile, file, child.name, send));
     }
     tools.push(await createSubAgentTool({
-      cwd, tools, canvas, modelRuntime: runtime, model: runtime.getModel(providerId, modelId), thinkingLevel,
+      cwd, tools, canvas, generation: { userId, projectId }, modelRuntime: runtime,
+      model: runtime.getModel(providerId, modelId), thinkingLevel, billStream, waitForBilling,
       runTask: (name, task, taskSignal, onProgress) => runDelegatedAgent({
-        cwd, parentFile: file, name, task, providerId, modelId, thinkingLevel, canvas, signal: taskSignal, send, onProgress,
+        userId, projectId, cwd, parentFile: file, name, task, providerId, modelId, thinkingLevel, canvas, signal: taskSignal, send, onProgress,
       }),
     }));
     const resources = await createAgentResources(cwd, tools, undefined, child
@@ -147,7 +152,7 @@ export async function run(
     active.session = session;
 
     const streamFunction = session.agent.streamFunction;
-    session.agent.streamFunction = async (...args) => {
+    const checkedStream: typeof streamFunction = async (...args) => {
       const compacting = session.isCompacting;
       const stream = await streamFunction(...args);
       // ACT: 摘要落盘前拒绝空正文，压缩、重试和普通回复仍由 SDK 处理。
@@ -159,6 +164,7 @@ export async function run(
       }
       return stream;
     };
+    session.agent.streamFunction = billStream(checkedStream);
 
     // ACT: SDK 原生只有文字和图片；视频复用媒体协议转换，会话仍只保存文件引用。
     const videoContents = new Map<string, ReturnType<typeof readAiReferences>>();
@@ -362,6 +368,7 @@ export async function run(
         }
         // ACT: 只记录有首个内容增量的生成耗时，旧历史和未计时输出不参与速度统计。
         if (timing.decodeMs > 0) history.appendCustomEntry("minifeelTiming", timing);
+        await waitForBilling();
         send({ type: "stats", stats: getAgentStats(history), contextUsage: session.getContextUsage() });
         if (parentFile && child) {
           const entry = history.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant");

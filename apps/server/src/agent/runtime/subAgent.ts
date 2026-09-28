@@ -1,10 +1,14 @@
 import type { Usage } from "@earendil-works/pi-ai";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { createAgentSession, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { AgentSession, CreateAgentSessionOptions, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ToolCall } from "@minifeel/tools-scaffold/runtime";
 import { createAgentResources } from "@/agent/runtime/resources";
 
-export type SubAgentModel = Pick<CreateAgentSessionOptions, "modelRuntime" | "model" | "thinkingLevel">;
+export type SubAgentModel = Pick<CreateAgentSessionOptions, "modelRuntime" | "model" | "thinkingLevel"> & {
+  billStream?: (streamFunction: StreamFn) => StreamFn;
+  waitForBilling?: () => Promise<unknown>;
+};
 export type SubAgentResult = {
   name: string;
   status: "running" | "completed" | "error" | "limited" | "cancelled" | "inputRequired";
@@ -34,7 +38,10 @@ export async function runSubAgent(options: SubAgentModel & {
   onTool?: (tool: ToolCall) => void;
   onProgress?: (message: string) => void;
 }) {
-  const { cwd, name, task, tools, instructions, signal = new AbortController().signal, history, inputRequired, onTool, onProgress, ...modelOptions } = options;
+  const {
+    cwd, name, task, tools, instructions, signal = new AbortController().signal, history,
+    inputRequired, onTool, onProgress, billStream, waitForBilling, ...modelOptions
+  } = options;
   const result: SubAgentResult = { name, status: "running", result: "准备执行" };
   const usage = emptyUsage();
   let session: AgentSession | undefined;
@@ -75,6 +82,7 @@ export async function runSubAgent(options: SubAgentModel & {
       customTools: activeTools,
       tools: activeTools.map(tool => tool.name),
     }));
+    if (billStream) session.agent.streamFunction = billStream(session.agent.streamFunction);
     signal.throwIfAborted();
     session.agent.shouldStopAfterTurn = () => Boolean(inputRequired?.());
     session.subscribe(event => {
@@ -101,6 +109,7 @@ export async function runSubAgent(options: SubAgentModel & {
     if (session) {
       try {
         await session.abort();
+        await waitForBilling?.();
         for (const entry of session.sessionManager.getEntries().slice(previousEntries)) {
           if (entry.type === "message" && (entry.message.role === "assistant" || entry.message.role === "toolResult") && entry.message.usage) addUsage(usage, entry.message.usage);
         }

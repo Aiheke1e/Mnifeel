@@ -1,4 +1,4 @@
-import { listMediaModels, generateMedia } from "@/utils/media/generation";
+import { listMediaModels } from "@/utils/media/generation";
 import { createWorkspaceFfmpeg } from "@/utils/ffmpeg";
 import { dirname, join, relative, resolve } from "node:path";
 import {
@@ -10,8 +10,17 @@ import conf from "@/utils/conf";
 import { isWithin, resolveWorkspacePath, writeWorkspaceFile, lockWorkspaceFiles } from "@/utils/workspace/files";
 import { listTools, loadTool, validateToolConfig } from "@/utils/plugins/tools";
 import { createSkillContext } from "@/agent/skills";
+import { runGenerationTask } from "@/utils/generation";
 
-export function createAgentToolContext(cwd: string, config: Record<string, unknown> = {}, canvas?: CanvasContext, question?: QuestionContext): ToolContext {
+type GenerationContext = { userId: string; projectId: string };
+
+export function createAgentToolContext(
+  cwd: string,
+  config: Record<string, unknown> = {},
+  canvas?: CanvasContext,
+  question?: QuestionContext,
+  generation?: GenerationContext,
+): ToolContext {
   const skillsDirectory = join(dirname(conf.path), "skills");
   const resolvePath = async (path: string, readOnly = false) => {
     const absolute = resolve(cwd, path);
@@ -29,18 +38,30 @@ export function createAgentToolContext(cwd: string, config: Record<string, unkno
     ffmpeg: signal => createWorkspaceFfmpeg(cwd, signal),
     media: {
       listModels: listMediaModels,
-      generateImage: (request, signal) => generateMedia(cwd, "image", request, signal),
-      generateVideo: (request, signal) => generateMedia(cwd, "video", request, signal),
-      generateAudio: (request, signal) => generateMedia(cwd, "audio", request, signal),
+      generateImage: async (request, signal) => {
+        if (!generation) throw new Error("生成媒体需要已认证的项目上下文");
+        const task = await runGenerationTask(generation.userId, {
+          projectId: generation.projectId, modelId: request.modelId, request: { ...request },
+        }, signal);
+        return (task.result as { files: Awaited<ReturnType<NonNullable<ToolContext["media"]>["generateImage"]>> }).files;
+      },
+      generateVideo: async (request, signal) => {
+        if (!generation) throw new Error("生成媒体需要已认证的项目上下文");
+        const task = await runGenerationTask(generation.userId, {
+          projectId: generation.projectId, modelId: request.modelId, request: { ...request },
+        }, signal);
+        return (task.result as { files: Awaited<ReturnType<NonNullable<ToolContext["media"]>["generateVideo"]>> }).files;
+      },
+      generateAudio: async () => { throw new Error("当前没有启用音频生成模型"); },
     },
     sdk: { defineTool, createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createLsToolDefinition, detectSupportedImageMimeTypeFromFile },
   };
 }
 
-export async function createAgentTools(cwd: string, canvas?: CanvasContext, question?: QuestionContext): Promise<ToolDefinition[]> {
+export async function createAgentTools(cwd: string, canvas?: CanvasContext, question?: QuestionContext, generation?: GenerationContext): Promise<ToolDefinition[]> {
   const tools: ToolDefinition[] = [];
   const names = new Set<string>();
-  const context = createAgentToolContext(cwd, {}, canvas, question);
+  const context = createAgentToolContext(cwd, {}, canvas, question, generation);
   for (const item of await listTools()) {
     if (!item.enabled) continue;
     if (item.loadError) throw new Error(`${item.displayName}：${item.loadError}`);

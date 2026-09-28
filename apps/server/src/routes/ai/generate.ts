@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import type { Context, Message } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Message } from "@earendil-works/pi-ai";
 import { getAuth, validateFields } from "@/lib/middleware";
 import u from "@/utils";
 
@@ -51,38 +51,48 @@ const contextSchema: z.ZodType<Context> = z.object({
 }).refine(context => Buffer.byteLength(JSON.stringify(context)) <= 8000000, "模型上下文不能超过 8 MB");
 
 const inputSchema = z.object({
-  providerId: z.string().min(1), modelId: z.string().min(1),
+  providerId: z.literal("deepSeek"), modelId: z.string().min(1),
   context: contextSchema,
-  projectId: z.uuid().optional(),
+  projectId: z.uuid(),
+  requestId: z.string().trim().min(8).max(150).optional(),
   references: z.array(u.ai.aiReferenceSchema).max(32).optional(),
 });
 
 export default Router().post("/", validateFields(inputSchema.shape), async (req, res) => {
   const input = inputSchema.parse(req.body);
-  const configured = await u.ai.getConfiguredModel(input.providerId, input.modelId);
-  const controller = new AbortController();
-  const close = () => controller.abort();
+  const auth = getAuth(res);
+  const created = await u.generation.createGenerationTask(auth.user.id, {
+    projectId: input.projectId,
+    modelId: input.modelId,
+    idempotencyKey: input.requestId ? `ai:${input.requestId}` : crypto.randomUUID(),
+    request: {
+      providerId: input.providerId,
+      context: input.context,
+      references: input.references ?? [],
+    },
+  }, { external: true });
+  res.set("X-Minifeel-Task-Id", created.task.id);
+  res.set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
+  res.flushHeaders();
+  const send = (event: object) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(event)}\n\n`); };
+  const close = () => unsubscribe();
+  const unsubscribe = u.generation.subscribeGenerationEvent(created.task.id, event => {
+    if (event.output) send(event.output);
+  });
   res.once("close", close);
-  req.once("aborted", close);
-  // ACT: 兼容不同运行时的关闭事件；Bun 1.3.14 的静默 SSE 仍可能不通知，不能保证立即停止上游。
-  req.socket.once("close", close);
+  if (created.created) void u.generation.executeGenerationTask(created.task.id).catch(error => {
+    void u.generation.failGenerationTask(created.task.id, error);
+  });
   try {
-    const directory = input.references?.some(item => item.dataType !== "STRING")
-      ? await u.projects.resolveProjectWorkspace(getAuth(res).user.id, input.projectId ?? "") : undefined;
-    const references = await u.ai.readAiReferences(directory, input.references ?? [], controller.signal);
-    const stream = u.ai.streamAi(configured, input.context, controller.signal, references);
-    res.set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
-    res.flushHeaders();
-    const send = (event: object) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(event)}\n\n`); };
     try {
-      for await (const event of stream) {
-        if (event.type === "text_delta" || event.type === "thinking_delta") {
-          send({ type: event.type === "text_delta" ? "text" : "reasoning", delta: event.delta });
-        }
-      }
-      const message = await stream.result();
-      if (message.stopReason === "error" || message.stopReason === "aborted") throw new Error(message.errorMessage || "模型请求失败");
-      send({ type: "done", message });
+      const task = await u.generation.waitGenerationTask(auth.user.id, auth.user.role, created.task.id);
+      if (task.status !== "succeeded") throw new Error(task.errorMessage || "模型请求失败");
+      const result = task.result as { message?: AssistantMessage } | null;
+      if (!result?.message) throw new Error("模型任务结果不完整");
+      send({
+        type: "done", taskId: task.id, message: result.message,
+        usage: { inputTokens: result.message.usage.input, outputTokens: result.message.usage.output },
+      });
     } catch (error) {
       send({ type: "error", message: u.providers.redactErrorMessage(error, "模型请求失败") });
     } finally {
@@ -90,7 +100,6 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
     }
   } finally {
     res.off("close", close);
-    req.off("aborted", close);
-    req.socket.off("close", close);
+    unsubscribe();
   }
 });

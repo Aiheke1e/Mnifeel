@@ -69,6 +69,10 @@ export function listConnections() {
   return [...connections.values()].map(({ id, state }) => ({ id, state }));
 }
 
+export function listUserConnections(userId: string) {
+  return [...connections.values()].filter(connection => connection.userId === userId).map(({ id, state }) => ({ id, state }));
+}
+
 export function getConnection(id?: string, projectId?: string) {
   if (id) {
     const connection = connections.get(id);
@@ -76,6 +80,23 @@ export function getConnection(id?: string, projectId?: string) {
     return connection;
   }
   const matches = [...connections.values()].filter(item => !projectId || item.state.projectId === projectId);
+  if (matches.length > 1) throw new Error("存在多个 Minifeel 页面，请用 target.connectionId 指定操作目标");
+  return matches[0];
+}
+
+export function getUserConnection(userId: string) {
+  const matches = [...connections.values()].filter(item => item.userId === userId && item.state.projectId);
+  if (matches.length > 1) throw new Error("存在多个已打开项目的 Minifeel 页面，请只保留一个页面后重试");
+  return matches[0];
+}
+
+export function getUserTargetConnection(userId: string, id?: string, projectId?: string) {
+  if (id) {
+    const connection = connections.get(id);
+    if (!connection || connection.userId !== userId) throw new Error("Minifeel 页面已断开，请重新调用 getAppState");
+    return connection;
+  }
+  const matches = [...connections.values()].filter(item => item.userId === userId && (!projectId || item.state.projectId === projectId));
   if (matches.length > 1) throw new Error("存在多个 Minifeel 页面，请用 target.connectionId 指定操作目标");
   return matches[0];
 }

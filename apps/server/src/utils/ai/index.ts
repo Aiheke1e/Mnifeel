@@ -2,7 +2,7 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
-import type { Context, Model } from "@earendil-works/pi-ai";
+import type { Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import { readReference } from "@/utils/media/generation";
 import modelContextLimits from "@/utils/ai/modelContextLimits";
@@ -44,7 +44,7 @@ export function getModelLimits(providerId: string, model: z.infer<typeof provide
 
 export async function getConfiguredModel(providerId: string, modelId: string) {
   const configured = await getRunnableModel(modelId, "text");
-  if (configured.provider.type !== "deepSeek" || (providerId && providerId !== configured.provider.type && providerId !== configured.provider.id)) {
+  if (configured.provider.type !== "deepSeek" || providerId !== "deepSeek") {
     throw Object.assign(new Error("所选文本模型与供应商不匹配"), { status: 400 });
   }
   const capabilities = configured.model.capabilities ?? {};
@@ -67,6 +67,7 @@ export async function getConfiguredModel(providerId: string, modelId: string) {
     providerId: configured.provider.type,
     provider,
     model: { ...sourceModel, contextWindow: limits.contextWindow, maxOutputTokens: limits.maxTokens },
+    billingMaxOutputTokens: sourceModel.maxOutputTokens ?? 8192,
     baseUrl: baseUrl.href.replace(/\/+$/, ""),
   };
 }
@@ -136,8 +137,9 @@ export function referenceContent(protocol: string, prompt: string, references: A
 export function streamAi(
   configured: Awaited<ReturnType<typeof getConfiguredModel>>,
   context: Context,
-  signal: AbortSignal,
+  signal?: AbortSignal,
   references: Awaited<ReturnType<typeof readAiReferences>> = [],
+  options: SimpleStreamOptions = {},
 ) {
   const { provider, model: configuredModel, baseUrl } = configured;
   const model: Model<typeof provider.protocol> = {
@@ -149,6 +151,7 @@ export function streamAi(
   };
   // ACT: 不按模型名预判附件能力；按供应商协议传递，是否支持由上游接口决定。
   return aiApis[provider.protocol].streamSimple(model, context, {
+    ...options,
     apiKey: provider.apiKey,
     signal,
     onPayload: references.length ? (payload) => {

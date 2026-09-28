@@ -43,12 +43,14 @@ export type GenerationExecutionTask = Pick<WorkerTaskRow, "id" | "userId" | "pro
 export type GenerationExecutionResult = {
   result: unknown;
   usage: GenerationUsage;
+  rollback?: () => Promise<void>;
 };
 
 export type GenerationExecutionContext = {
   signal: AbortSignal;
   updateProgress(progress: number): Promise<void>;
   setProviderTaskId(providerTaskId: string): Promise<void>;
+  publishOutput(output: { type: "text" | "reasoning"; delta: string }): void;
 };
 
 export type GenerationExecutor = (
@@ -57,7 +59,10 @@ export type GenerationExecutor = (
 ) => Promise<GenerationExecutionResult>;
 
 const executors = new Map<MediaType, GenerationExecutor>();
-const activeTasks = new Map<string, { controller: AbortController; promise: Promise<void> }>();
+type ActiveTask = { controller: AbortController; promise: Promise<void> };
+type ActiveSlot = { controller: AbortController; release(): void; rename(taskId: string): void };
+
+const activeTasks = new Map<string, ActiveTask>();
 let pollingTimer: ReturnType<typeof setInterval> | undefined;
 let recoveryTimer: ReturnType<typeof setInterval> | undefined;
 let workerStarted = false;
@@ -88,6 +93,55 @@ function eventFromTask(task: WorkerTaskRow) {
     refundedCredits: asNumber(task.refundedCredits),
     errorMessage: task.errorMessage ?? undefined,
   };
+}
+
+function reserveSlot(taskId: string, signal?: AbortSignal): ActiveSlot | undefined {
+  if (activeTasks.has(taskId) || activeTasks.size >= workerConcurrency()) return;
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", forwardAbort, { once: true });
+  if (signal?.aborted) forwardAbort();
+  let finish!: () => void;
+  const active: ActiveTask = { controller, promise: new Promise(resolve => { finish = resolve; }) };
+  let key = taskId;
+  let released = false;
+  activeTasks.set(key, active);
+  return {
+    controller,
+    rename(nextTaskId) {
+      if (released || key === nextTaskId) return;
+      if (activeTasks.get(key) === active) activeTasks.delete(key);
+      key = nextTaskId;
+      activeTasks.set(key, active);
+    },
+    release() {
+      if (released) return;
+      released = true;
+      signal?.removeEventListener("abort", forwardAbort);
+      if (activeTasks.get(key) === active) activeTasks.delete(key);
+      finish();
+      void pump();
+    },
+  };
+}
+
+async function acquireSlot(taskId: string, signal?: AbortSignal) {
+  while (true) {
+    signal?.throwIfAborted();
+    const slot = reserveSlot(taskId, signal);
+    if (slot) return slot;
+    if (activeTasks.has(taskId)) return;
+    let abort: (() => void) | undefined;
+    const aborted = signal && new Promise<never>((_resolve, reject) => {
+      abort = () => reject(signal.reason ?? new DOMException("任务已取消", "AbortError"));
+      signal.addEventListener("abort", abort, { once: true });
+    });
+    try {
+      await Promise.race([...activeTasks.values()].map(active => active.promise).concat(aborted ? [aborted] : []));
+    } finally {
+      if (abort) signal?.removeEventListener("abort", abort);
+    }
+  }
 }
 
 async function claimTask() {
@@ -132,7 +186,7 @@ async function setProviderTaskId(taskId: string, providerTaskId: string) {
   `;
 }
 
-async function completeTask(taskId: string, execution: GenerationExecutionResult) {
+export async function completeGenerationTask(taskId: string, execution: GenerationExecutionResult) {
   const task = await getDatabase().begin(async transaction => {
     const rows = await transaction<WorkerTaskRow[]>`
       select * from "generationTasks" where "id" = ${taskId} limit 1 for update
@@ -160,9 +214,10 @@ async function completeTask(taskId: string, execution: GenerationExecutionResult
     return updated[0];
   });
   if (task) publishGenerationEvent(eventFromTask(task));
+  return task?.status;
 }
 
-async function failTask(taskId: string, reason: unknown, code = "generationFailed") {
+export async function failGenerationTask(taskId: string, reason: unknown, code = "generationFailed") {
   const task = await getDatabase().begin(async transaction => {
     const rows = await transaction<WorkerTaskRow[]>`
       select * from "generationTasks" where "id" = ${taskId} limit 1 for update
@@ -185,12 +240,13 @@ async function failTask(taskId: string, reason: unknown, code = "generationFaile
     return updated[0];
   });
   if (task) publishGenerationEvent(eventFromTask(task));
+  return task?.status;
 }
 
 async function executeTask(task: WorkerTaskRow, controller: AbortController) {
   const executor = executors.get(task.taskType);
   if (!executor) {
-    await failTask(task.id, new Error("任务执行器不可用"), "executorUnavailable");
+    await failGenerationTask(task.id, new Error("任务执行器不可用"), "executorUnavailable");
     return;
   }
   publishGenerationEvent(eventFromTask(task));
@@ -201,9 +257,10 @@ async function executeTask(task: WorkerTaskRow, controller: AbortController) {
     `.catch(() => undefined);
   }, 10_000);
   heartbeat.unref?.();
+  let execution: GenerationExecutionResult | undefined;
   try {
     const summary = task.requestSummary;
-    const execution = await executor({
+    execution = await executor({
       id: task.id,
       userId: task.userId,
       projectId: task.projectId,
@@ -215,10 +272,21 @@ async function executeTask(task: WorkerTaskRow, controller: AbortController) {
       signal: controller.signal,
       updateProgress: progress => updateProgress(task.id, progress),
       setProviderTaskId: providerTaskId => setProviderTaskId(task.id, providerTaskId),
+      publishOutput: output => publishGenerationEvent({
+        taskId: task.id, status: "running", progress: task.progress, output,
+      }),
     });
-    await completeTask(task.id, execution);
+    const status = await completeGenerationTask(task.id, execution);
+    if (status !== "succeeded") await execution.rollback?.();
   } catch (reason) {
-    await failTask(task.id, reason, controller.signal.aborted ? "generationAborted" : "generationFailed");
+    let failure = reason;
+    try {
+      const status = await failGenerationTask(task.id, reason, controller.signal.aborted ? "generationAborted" : "generationFailed");
+      if (status !== "succeeded") await execution?.rollback?.();
+    } catch (cleanupError) {
+      failure = new AggregateError([reason, cleanupError], "生成任务结算或回滚失败");
+    }
+    if (failure !== reason) console.error(failure);
   } finally {
     clearInterval(heartbeat);
   }
@@ -228,17 +296,16 @@ function pump() {
   if (!workerStarted) return Promise.resolve();
   if (pumping) return pumping;
   pumping = (async () => {
-    while (workerStarted && activeTasks.size < workerConcurrency()) {
+    while (workerStarted) {
+      const slot = reserveSlot(`claim:${crypto.randomUUID()}`);
+      if (!slot) break;
       const task = await claimTask();
-      if (!task) break;
-      const controller = new AbortController();
-      const active = { controller, promise: Promise.resolve() };
-      activeTasks.set(task.id, active);
-      const promise = executeTask(task, controller).finally(() => {
-        activeTasks.delete(task.id);
-        void pump();
-      });
-      active.promise = promise;
+      if (!task) {
+        slot.release();
+        break;
+      }
+      slot.rename(task.id);
+      void executeTask(task, slot.controller).finally(slot.release);
     }
   })().finally(() => { pumping = undefined; });
   return pumping;
@@ -259,6 +326,67 @@ export function abortGenerationTask(taskId: string) {
 
 export function wakeGenerationWorker() {
   void pump();
+}
+
+export async function executeGenerationTask(taskId: string, signal?: AbortSignal) {
+  const touch = () => getDatabase()`
+    update "generationTasks" set "heartbeatAt" = now()
+    where "id" = ${taskId} and "status" = 'running'
+  `;
+  await touch();
+  const heartbeat = setInterval(() => void touch().catch(() => undefined), 10_000);
+  heartbeat.unref?.();
+  let slot: ActiveSlot | undefined;
+  try {
+    slot = await acquireSlot(taskId, signal);
+    if (!slot) return;
+    const rows = await getDatabase()<WorkerTaskRow[]>`
+      select * from "generationTasks" where "id" = ${taskId} and "status" = 'running' limit 1
+    `;
+    const task = rows[0];
+    if (!task) {
+      slot.release();
+      return;
+    }
+    clearInterval(heartbeat);
+    void executeTask(task, slot.controller).finally(slot.release);
+  } catch (error) {
+    slot?.release();
+    throw error;
+  } finally {
+    clearInterval(heartbeat);
+  }
+}
+
+export async function beginExternalGenerationTask(taskId: string, signal?: AbortSignal) {
+  const touch = () => getDatabase()`
+    update "generationTasks" set "heartbeatAt" = now()
+    where "id" = ${taskId} and "status" = 'running'
+  `;
+  await touch();
+  const heartbeat = setInterval(() => void touch().catch(() => undefined), 10_000);
+  heartbeat.unref?.();
+  try {
+    const slot = await acquireSlot(taskId, signal);
+    if (!slot) throw new Error("生成任务已在执行");
+    const rows = await getDatabase()<Array<{ status: TaskStatus }>>`
+      select "status" from "generationTasks" where "id" = ${taskId} limit 1
+    `;
+    if (rows[0]?.status !== "running") {
+      slot.release();
+      throw new DOMException("生成任务已结束", "AbortError");
+    }
+    return {
+      signal: slot.controller.signal,
+      release() {
+        clearInterval(heartbeat);
+        slot.release();
+      },
+    };
+  } catch (error) {
+    clearInterval(heartbeat);
+    throw error;
+  }
 }
 
 export function recoverStaleGenerationTasks() {

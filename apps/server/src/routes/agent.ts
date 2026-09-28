@@ -26,7 +26,8 @@ const inputSchema = z.object({
 
 export default Router().post("/", validateFields(inputSchema.shape), async (req, res) => {
   const { projectId, canvas, ...options } = req.body as z.infer<typeof inputSchema>;
-  const cwd = await u.projects.resolveProjectWorkspace(getAuth(res).user.id, projectId);
+  const auth = getAuth(res);
+  const cwd = await u.projects.resolveProjectWorkspace(auth.user.id, projectId);
   res.set({ "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
   res.flushHeaders();
   const send = (event: AgentEvent) => {
@@ -39,7 +40,7 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
   const close = () => { bridge?.dispose(); questions.dispose(); controller.abort(); };
   res.once("close", close);
   try {
-    await u.agent.run({ ...options, cwd, canvas: bridge?.context, question: questions.context, signal: controller.signal }, send);
+    await u.agent.run({ ...options, userId: auth.user.id, projectId, cwd, canvas: bridge?.context, question: questions.context, signal: controller.signal }, send);
     send({ type: "done" });
   } catch (error) {
     send({ type: "error", message: error instanceof Error ? error.message : "Agent 运行失败" });

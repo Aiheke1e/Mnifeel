@@ -22,8 +22,9 @@ export async function createTeamRunner(options: SubAgentModel & {
   cwd: string;
   tools: ToolDefinition[];
   canvas?: CanvasContext;
+  generation: { userId: string; projectId: string };
 }) {
-  const { name, cwd, tools, canvas, ...modelOptions } = options;
+  const { name, cwd, tools, canvas, generation, ...modelOptions } = options;
   const { directory, manifest, files, enabled } = await readTeam(name);
   if (!enabled) throw new Error(`团队 ${name} 已禁用`);
   const hostTools = tools.filter(tool => !["subAgent", "report", "askUser", "delegate", "teamResources", "requestInput"].includes(tool.name));
@@ -36,7 +37,7 @@ export async function createTeamRunner(options: SubAgentModel & {
   for (const [memberName, member] of Object.entries(manifest.members)) {
     const available = new Map(hostTools.map(tool => [tool.name, tool]));
     for (const { plugin, metadata, config } of privatePlugins) {
-      const definitions = await plugin.createTools(createAgentToolContext(cwd, config, canvas));
+      const definitions = await plugin.createTools(createAgentToolContext(cwd, config, canvas, undefined, generation));
       for (const tool of definitions) {
         if (!tool.name || typeof tool.execute !== "function" || ["subAgent", "askUser", "delegate", "teamResources", "requestInput"].includes(tool.name) || available.has(tool.name)) {
           throw new Error(`团队私有工具无效或名称重复：${tool.name}`);

@@ -362,7 +362,7 @@ async function generate() {
       basePlan ? directorPlanSchema.parse({ name: basePlan.name, duration: basePlan.duration, tracks: basePlan.tracks, cameraFrames: basePlan.cameraFrames }) : undefined,
       JSON.parse(JSON.stringify(plans.value)),
     );
-    const projectId = mediaReferences.some(item => item.dataType !== "STRING") ? (await workspaceFiles.list()).projectId : undefined;
+    const projectId = (await workspaceFiles.list()).projectId;
     if (disposed) return;
     await ai.generate({
       references: mediaReferences,

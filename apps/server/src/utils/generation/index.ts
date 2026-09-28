@@ -4,8 +4,8 @@ import { freezeTaskCredits, refundTaskCredits } from "@/utils/billing";
 import { calculateCredits, estimateUsage, parsePricing, type GenerationUsage, type Pricing } from "@/utils/billing/pricing";
 import { getDatabase } from "@/utils/database";
 import type { MediaType, TaskStatus, UserRole } from "@/utils/database/types";
-import { publishGenerationEvent, subscribeGenerationEvent } from "@/utils/generation/events";
-import { abortGenerationTask, wakeGenerationWorker } from "@/utils/generation/worker";
+import { publishGenerationEvent, subscribeGenerationEvent, type GenerationEvent } from "@/utils/generation/events";
+import { abortGenerationTask, executeGenerationTask, wakeGenerationWorker } from "@/utils/generation/worker";
 import { redactSecretFields } from "@/utils/providers/redact";
 
 type GenerationTaskRow = {
@@ -89,8 +89,8 @@ function eventFromTask(task: GenerationTaskRow) {
 function safeInput(input: Record<string, unknown>) {
   // 只移除结构化密钥字段，保留提示词中的普通文本原样参与生成。
   const redacted = redactSecretFields(input) as Record<string, unknown>;
-  if (new TextEncoder().encode(JSON.stringify(redacted)).byteLength > 2 * 1024 * 1024) {
-    invalid("生成请求超过 2 MB 限制", 413);
+  if (new TextEncoder().encode(JSON.stringify(redacted)).byteLength > 8 * 1024 * 1024) {
+    invalid("生成请求超过 8 MB 限制", 413);
   }
   return redacted;
 }
@@ -100,7 +100,7 @@ export async function createGenerationTask(userId: string, input: {
   modelId: string;
   idempotencyKey: string;
   request: Record<string, unknown>;
-}) {
+}, options: { wakeWorker?: boolean; external?: boolean; estimatedUsage?: GenerationUsage } = {}) {
   const result = await getDatabase().begin(async transaction => {
     await transaction`select pg_advisory_xact_lock(hashtext(${`${userId}:${input.idempotencyKey}`}))`;
     const existing = await transaction<GenerationTaskRow[]>`
@@ -126,17 +126,21 @@ export async function createGenerationTask(userId: string, input: {
     }
     const pricing = parsePricing(model.mediaType, model.pricing);
     const request = safeInput(input.request);
-    const estimatedUsage = estimateUsage(model.mediaType, request, model.capabilities);
+    const estimatedUsage = options.estimatedUsage ?? estimateUsage(model.mediaType, request, model.capabilities);
     const billable = !(model.mediaType === "video" && model.isWhitelist);
     const frozenCredits = billable ? calculateCredits(model.mediaType, pricing, estimatedUsage) : 0;
     const taskId = randomUUID();
+    const status = options.external ? "running" : "pending";
+    const startedAt = options.external ? new Date() : null;
+    const progress = options.external ? 1 : 0;
     const requestSummary = { input: request, billing: { pricing, estimatedUsage, billable } };
     const rows = await transaction<GenerationTaskRow[]>`
       insert into "generationTasks" (
-        "id", "userId", "projectId", "modelId", "taskType", "idempotencyKey", "requestSummary", "frozenCredits"
+        "id", "userId", "projectId", "modelId", "taskType", "status", "idempotencyKey", "requestSummary",
+        "frozenCredits", "progress", "startedAt", "heartbeatAt"
       ) values (
-        ${taskId}, ${userId}, ${input.projectId}, ${input.modelId}, ${model.mediaType}, ${input.idempotencyKey},
-        ${transaction.json(requestSummary as postgres.JSONValue)}, ${frozenCredits}
+        ${taskId}, ${userId}, ${input.projectId}, ${input.modelId}, ${model.mediaType}, ${status}, ${input.idempotencyKey},
+        ${transaction.json(requestSummary as postgres.JSONValue)}, ${frozenCredits}, ${progress}, ${startedAt}, ${startedAt}
       ) returning *
     `;
     const task = rows[0]!;
@@ -145,7 +149,7 @@ export async function createGenerationTask(userId: string, input: {
   });
   if (result.created) {
     publishGenerationEvent(eventFromTask(result.task));
-    wakeGenerationWorker();
+    if (!options.external && options.wakeWorker !== false) wakeGenerationWorker();
   }
   return { task: publicGenerationTask(result.task), created: result.created };
 }
@@ -206,12 +210,84 @@ export async function cancelGenerationTask(userId: string, role: UserRole, taskI
   return publicGenerationTask(task);
 }
 
+export async function waitGenerationTask(
+  userId: string,
+  role: UserRole,
+  taskId: string,
+  signal?: AbortSignal,
+  onEvent?: (event: GenerationEvent) => void,
+) {
+  signal?.throwIfAborted();
+  return new Promise<Awaited<ReturnType<typeof getGenerationTask>>>((resolve, reject) => {
+    let settled = false;
+    const finish = async () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      try { resolve(await getGenerationTask(userId, role, taskId)); }
+      catch (error) { reject(error); }
+    };
+    const unsubscribe = subscribeGenerationEvent(taskId, event => {
+      try { onEvent?.(event); }
+      catch { /* 观察者错误不能阻止任务终态被读取。 */ }
+      if (["succeeded", "failed", "cancelled"].includes(event.status)) void finish();
+    });
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(signal?.reason ?? new DOMException("任务等待已取消", "AbortError"));
+    };
+    const cleanup = () => {
+      unsubscribe();
+      signal?.removeEventListener("abort", abort);
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    void getGenerationTask(userId, role, taskId).then(task => {
+      if (["succeeded", "failed", "cancelled"].includes(task.status)) void finish();
+    }, error => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    });
+  });
+}
+
+export async function runGenerationTask(userId: string, input: {
+  projectId: string;
+  modelId: string;
+  request: Record<string, unknown>;
+  idempotencyKey?: string;
+}, signal?: AbortSignal, onEvent?: (event: GenerationEvent) => void) {
+  const created = await createGenerationTask(userId, {
+    ...input,
+    idempotencyKey: input.idempotencyKey ?? randomUUID(),
+  }, { external: true });
+  const abort = () => { void cancelGenerationTask(userId, "user", created.task.id).catch(() => undefined); };
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) await cancelGenerationTask(userId, "user", created.task.id);
+  else if (created.created) await executeGenerationTask(created.task.id, signal);
+  try {
+    const task = await waitGenerationTask(userId, "user", created.task.id, signal, onEvent);
+    if (task.status !== "succeeded") throw new Error(task.errorMessage || (task.status === "cancelled" ? "生成已取消" : "生成失败"));
+    return task;
+  } finally {
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
 export { subscribeGenerationEvent };
 export type { GenerationEvent } from "@/utils/generation/events";
 export {
   registerGenerationExecutor,
   unregisterGenerationExecutor,
   recoverStaleGenerationTasks,
+  completeGenerationTask,
+  beginExternalGenerationTask,
+  executeGenerationTask,
+  failGenerationTask,
+  wakeGenerationWorker,
   startGenerationWorker,
   stopGenerationWorker,
 } from "@/utils/generation/worker";

@@ -4,7 +4,7 @@ import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { fromJsonSchema, isInitializeRequest, McpServer, ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 import type { CallToolResult, ReadResourceResult, Resource } from "@modelcontextprotocol/server";
 import { Router } from "express";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 
 export type { ReadResourceResult, Resource } from "@modelcontextprotocol/server";
 
@@ -16,8 +16,9 @@ export type McpTool = {
 };
 
 export type McpOptions = {
-  getTools(): Promise<McpTool[]>;
+  getTools(request: Request, response: Response): Promise<McpTool[]>;
   authorize(request: Request): boolean | Promise<boolean>;
+  sessionKey?(request: Request, response: Response): string;
   resources?: {
     list(signal: AbortSignal): Promise<Resource[]>;
     read(uri: string, signal: AbortSignal): Promise<ReadResourceResult>;
@@ -41,7 +42,7 @@ function toToolResult(value: unknown): CallToolResult {
 }
 
 export function createMcpRouter(options: McpOptions) {
-  const createServer = () => {
+  const createServer = (httpRequest: Request, httpResponse: Response) => {
     const resources = options.resources;
     const server = new McpServer({ name: "minifeel", version: "0.0.0" }, {
       capabilities: { tools: { listChanged: false }, ...(resources ? { resources: { subscribe: false, listChanged: false } } : {}) },
@@ -63,10 +64,10 @@ export function createMcpRouter(options: McpOptions) {
       server.server.setRequestHandler("resources/templates/list", async () => ({ resourceTemplates: [] }));
     }
     server.server.setRequestHandler("tools/list", async () => ({
-      tools: (await options.getTools()).map(tool => ({ name: tool.name, description: tool.description, inputSchema: { ...tool.inputSchema, type: "object" as const } })),
+      tools: (await options.getTools(httpRequest, httpResponse)).map(tool => ({ name: tool.name, description: tool.description, inputSchema: { ...tool.inputSchema, type: "object" as const } })),
     }));
     server.server.setRequestHandler("tools/call", async (request, context) => {
-      const tool = (await options.getTools()).find(item => item.name === request.params.name);
+      const tool = (await options.getTools(httpRequest, httpResponse)).find(item => item.name === request.params.name);
       if (!tool) throw new ProtocolError(ProtocolErrorCode.InvalidParams, `工具不存在或已停用：${request.params.name}`);
       try {
         const parsed = await fromJsonSchema<Record<string, unknown>>(tool.inputSchema)["~standard"].validate(request.params.arguments ?? {});
@@ -79,7 +80,7 @@ export function createMcpRouter(options: McpOptions) {
     return server;
   };
   // ACT: 使用支持取消通知的 Streamable HTTP 会话；单进程宿主不持久化 MCP 会话。
-  const sessions = new Map<string, NodeStreamableHTTPServerTransport>();
+  const sessions = new Map<string, { transport: NodeStreamableHTTPServerTransport; sessionKey?: string }>();
   const router = Router();
   router.use(async (request, response) => {
     try {
@@ -89,16 +90,22 @@ export function createMcpRouter(options: McpOptions) {
         return;
       }
       const sessionId = request.get("mcp-session-id");
-      let transport = sessionId ? sessions.get(sessionId) : undefined;
+      const session = sessionId ? sessions.get(sessionId) : undefined;
+      const sessionKey = options.sessionKey?.(request, response);
+      if (session && session.sessionKey !== sessionKey) {
+        response.status(403).json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "MCP 会话不属于当前用户" } });
+        return;
+      }
+      let transport = session?.transport;
       if (!sessionId && isInitializeRequest(request.body)) {
         transport = new NodeStreamableHTTPServerTransport({
           sessionIdGenerator: randomUUID,
-          onsessioninitialized: id => { sessions.set(id, transport!); },
+          onsessioninitialized: id => { sessions.set(id, { transport: transport!, sessionKey }); },
         });
         transport.onclose = () => {
           if (transport?.sessionId) sessions.delete(transport.sessionId);
         };
-        await createServer().connect(transport);
+        await createServer(request, response).connect(transport);
       }
       if (!transport) {
         response.status(sessionId ? 404 : 400).json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "MCP 会话不存在，请重新连接" } });
@@ -114,6 +121,6 @@ export function createMcpRouter(options: McpOptions) {
     }
   });
   return Object.assign(router, { close: async () => {
-    await Promise.all([...sessions.values()].map(transport => transport.close()));
+    await Promise.all([...sessions.values()].map(session => session.transport.close()));
   } });
 }

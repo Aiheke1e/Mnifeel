@@ -20,6 +20,7 @@
     "@babel/parser": "^7.29.8",
     "@breezystack/lamejs": "^1.2.7",
     "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-coding-agent": "^0.85.1",
     "@minifeel/ffmpeg": "workspace:*",
     "@minifeel/mcp": "workspace:*",

@@ -6,8 +6,9 @@ import { createAgentModel } from "@/agent/runtime/model";
 import { createAgentTools } from "@/agent/tools";
 import { createTeamRunner } from "@/agent/teams";
 import { readTeam } from "@/utils/teams";
-import { callControl, getConnection } from "@/utils/mcp/control";
-import { authenticateA2a, getA2aSettings, getA2aSignal, getA2aUrl, resolveA2aWorkspace } from "./settings";
+import { callControl, getUserConnection } from "@/utils/mcp/control";
+import { resolveProjectWorkspace } from "@/utils/projects";
+import { authenticateA2a, getA2aSettings, getA2aSignal, getA2aUrl } from "./settings";
 
 export function createA2aRouter() {
   const router = Router();
@@ -16,8 +17,11 @@ export function createA2aRouter() {
     try {
       if (!getA2aSettings().enabled) { res.sendStatus(404); return; }
       const name = teamNameSchema.parse(req.params.name);
+      const userId = getA2aSettings().userId;
+      if (!userId) { res.sendStatus(404); return; }
+      const endpointId = `${userId}:${name}`;
       const configurationSignal = getA2aSignal();
-      let endpoint = endpoints.get(name);
+      let endpoint = endpoints.get(endpointId);
       // 已接收任务的查询和取消继续交给 SDK；禁用/卸载只阻止 execute 接收新消息。
       if (endpoint?.signal === configurationSignal && req.method === "POST") { endpoint.router(req, res, next); return; }
       const team = await readTeam(name);
@@ -39,18 +43,18 @@ export function createA2aRouter() {
             if (request.task && !current) throw new Error("任务上下文已释放，请创建新任务");
             if (!current) {
               const settings = getA2aSettings();
-              const cwd = await resolveA2aWorkspace();
-              // 保存时已规范化目录；不允许运行前把该目录替换成指向其他位置的链接。
-              if (cwd !== settings.directory) throw new Error("A2A 工作目录已变化，请在设置中重新授权");
-              const { runtime } = await createAgentModel(settings.providerId, settings.modelId, settings.thinkingLevel);
-              const connection = getConnection(undefined, cwd);
+              const connection = getUserConnection(userId);
+              const projectId = connection?.state.projectId;
+              if (!connection || !projectId) throw new Error("请先在当前账号的 Minifeel 页面打开项目");
+              const cwd = await resolveProjectWorkspace(userId, projectId);
+              const { runtime, billStream, waitForBilling } = await createAgentModel(userId, projectId, settings.providerId, settings.modelId, settings.thinkingLevel);
               const canvas: CanvasContext | undefined = connection ? {
                 id: connection.state.canvasId ?? "a2a", tools: connection.state.tools,
-                call: (call, callSignal) => callControl(connection.id, call.name, call.args, callSignal ?? signal, cwd),
+                call: (call, callSignal) => callControl(connection.id, call.name, call.args, callSignal ?? signal, projectId),
               } : undefined;
-              const tools = await createAgentTools(cwd, canvas);
+              const tools = await createAgentTools(cwd, canvas, undefined, { userId, projectId });
               current = { userId: request.userId, runner: await createTeamRunner({
-                name, cwd, tools, canvas, modelRuntime: runtime,
+                name, cwd, tools, canvas, generation: { userId, projectId }, modelRuntime: runtime, billStream, waitForBilling,
                 model: runtime.getModel(settings.providerId, settings.modelId), thinkingLevel: settings.thinkingLevel,
               }) };
               pending.set(request.taskId, current);
@@ -69,8 +73,8 @@ export function createA2aRouter() {
           card, authenticate: authenticateA2a, execute,
           onCancel: taskId => { pending.delete(taskId); },
         }) };
-        endpoints.set(name, endpoint);
-        configurationSignal.addEventListener("abort", () => { pending.clear(); endpoints.delete(name); }, { once: true });
+        endpoints.set(endpointId, endpoint);
+        configurationSignal.addEventListener("abort", () => { pending.clear(); endpoints.delete(endpointId); }, { once: true });
       } else Object.assign(endpoint.card, card);
       endpoint.router(req, res, next);
     } catch (error) { next(error); }
