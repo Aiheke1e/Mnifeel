@@ -31,6 +31,12 @@ export async function createApp({
 }) {
   // conf 由下方的路由动态加载，必须先确定整个进程共用的数据目录。
   if (dataDirectory) process.env.MINIFEEL_DATA_DIR = resolve(dataDirectory);
+  const [{ checkDatabase }, { default: migrateDatabase }] = await Promise.all([
+    import("@/utils/database"),
+    import("@/utils/database/migrate"),
+  ]);
+  await checkDatabase();
+  await migrateDatabase();
   if (dataDirectory && toolsRoot)
     await initializePlugins(resolve(dataDirectory, "tools"), toolsRoot, /^[a-z][a-zA-Z0-9]*\.tool\.js$/, pluginRevision);
   if (dataDirectory && nodesRoot) await initializePlugins(resolve(dataDirectory, "nodes"), nodesRoot, /^[a-z][a-zA-Z0-9]*\.umd\.js$/, pluginRevision);

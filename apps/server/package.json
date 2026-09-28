@@ -10,6 +10,7 @@
   },
   "scripts": {
     "routes": "bun src/core.ts",
+    "migrate": "bun src/utils/database/migrate.ts",
     "dev": "NODE_ENV=dev bun --watch src/index.ts",
     "build": "bun scripts/build.ts",
     "start": "bun ../../build/server/index.js",
@@ -33,6 +34,7 @@
     "fast-glob": "^3.3.3",
     "fflate": "^0.8.3",
     "morgan": "^1.12.1",
+    "postgres": "^3.4.7",
     "wavefile": "^11.0.0",
     "zod": "^4.6.2"
   },

@@ -18,8 +18,27 @@ const app = await createApp({
   skillsRoot: resolve(appDirectory, fromSource ? "packages/skills" : "build/skills"),
 });
 const { initializeMcpRuntime } = await import("./utils/mcp/runtime");
-app.listen(realPort, async () => {
-  await initializeMcpRuntime(app, `http://127.0.0.1:${realPort}`, resolve(appDirectory, fromSource ? "packages/mcp/src/stdio.ts" : "build/mcp/stdio.js"));
-  console.log(`[服务启动成功]: http://localhost:${realPort}`);
+const server = app.listen(Number(process.env.PORT) || realPort, async () => {
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : realPort;
+  await initializeMcpRuntime(app, `http://127.0.0.1:${port}`, resolve(appDirectory, fromSource ? "packages/mcp/src/stdio.ts" : "build/mcp/stdio.js"));
+  console.log(`[服务启动成功]: http://localhost:${port}`);
   console.log(`[启动耗时]: ${(Date.now() - startTime).toFixed(2)}ms`);
 });
+
+let closing = false;
+async function close() {
+  if (closing) return;
+  closing = true;
+  await new Promise<void>((resolveClose, rejectClose) => server.close(error => error ? rejectClose(error) : resolveClose()));
+  const { closeDatabase } = await import("./utils/database");
+  await closeDatabase();
+}
+
+function handleCloseError(error: unknown) {
+  console.error("服务关闭失败：", error);
+  process.exitCode = 1;
+}
+
+process.once("SIGINT", () => void close().catch(handleCloseError));
+process.once("SIGTERM", () => void close().catch(handleCloseError));

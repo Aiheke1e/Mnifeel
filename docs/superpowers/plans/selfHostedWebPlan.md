@@ -35,7 +35,7 @@
 | 任务 | 状态 | 实际改动 | 验证结果 | 剩余事项 |
 | --- | --- | --- | --- | --- |
 | 1. 本地工具与运行配置 | 已完成 | 安装 Bun 1.3.14 与 PostgreSQL 17；创建本地 `minifeel` 数据库；添加环境示例、迁移脚本入口和自托管开发说明 | 锁定依赖安装无变化；`select 1`、差异检查和密钥扫描通过 | 根类型检查受现有桌面 `.hutch` 类型缺失影响，随 Task 12 删除桌面入口解决 |
-| 2. PostgreSQL 与数据库迁移 | 未开始 | — | — | — |
+| 2. PostgreSQL 与数据库迁移 | 已完成 | 添加进程级 PostgreSQL 客户端、事务入口、串行迁移、12 张业务表、启动健康检查和优雅关闭 | 临时 schema 双迁移保持 1 条记录；12 张业务表、13 个外键和 36 个索引；不可连接时未监听端口；Server 类型检查与构建通过 | — |
 | 3. 本地账号、会话与权限 | 未开始 | — | — | — |
 | 4. 登录页与前端会话路由 | 未开始 | — | — | — |
 | 5. 项目归属与文件隔离 | 未开始 | — | — | — |
@@ -100,19 +100,19 @@
 
 **步骤：**
 
-- [ ] 给 `apps/server` 增加 `postgres` 依赖和单独的 `migrate` 脚本。
-- [ ] 创建进程级数据库客户端，要求 `DATABASE_URL` 存在；为事务、健康检查和关闭连接提供小而明确的入口。
-- [ ] 建立 `schemaMigrations` 表和串行迁移器；每个迁移在事务中只执行一次，失败时阻止应用启动。
-- [ ] 初始迁移创建 `users`、`userIdentities`、`userSessions`、`verificationCodes`、`providerConfigs`、`modelConfigs`、`creditAccounts`、`creditTransactions`、`projects`、`projectAssets`、`generationTasks`、`auditLogs`，并添加唯一约束、外键、状态检查、任务幂等索引和常用查询索引。
-- [ ] 金额统一使用整数积分，时间统一使用 `timestamptz`，业务 ID 使用应用生成的 UUID；结构化能力、价格、请求摘要和结果使用 `jsonb`。
-- [ ] 在 `createApp` 动态加载路由前完成数据库健康检查和迁移；在独立启动入口处理关闭信号并释放连接。
+- [x] 给 `apps/server` 增加 `postgres` 依赖和单独的 `migrate` 脚本。
+- [x] 创建进程级数据库客户端，要求 `DATABASE_URL` 存在；为事务、健康检查和关闭连接提供小而明确的入口。
+- [x] 建立 `schemaMigrations` 表和串行迁移器；每个迁移在事务中只执行一次，失败时阻止应用启动。
+- [x] 初始迁移创建 `users`、`userIdentities`、`userSessions`、`verificationCodes`、`providerConfigs`、`modelConfigs`、`creditAccounts`、`creditTransactions`、`projects`、`projectAssets`、`generationTasks`、`auditLogs`，并添加唯一约束、外键、状态检查、任务幂等索引和常用查询索引。
+- [x] 金额统一使用整数积分，时间统一使用 `timestamptz`，业务 ID 使用应用生成的 UUID；结构化能力、价格、请求摘要和结果使用 `jsonb`。
+- [x] 在 `createApp` 动态加载路由前完成数据库健康检查和迁移；在独立启动入口处理关闭信号并释放连接。
 
 **验证：**
 
-- [ ] 对临时空数据库执行 `bun run migrate` 两次，第二次无重复对象错误且迁移记录不增加。
-- [ ] 查询 PostgreSQL 系统表，确认 11 个业务表、外键、唯一约束和索引存在。
-- [ ] 临时改成不可连接的 `DATABASE_URL` 启动 Server，确认明确失败且不开始监听端口。
-- [ ] 在 `apps/server` 执行 `bun run typecheck` 和 `bun run build`。
+- [x] 对临时空数据库执行 `bun run migrate` 两次，第二次无重复对象错误且迁移记录不增加。
+- [x] 查询 PostgreSQL 系统表，确认 12 个业务表、外键、唯一约束和索引存在。
+- [x] 临时改成不可连接的 `DATABASE_URL` 启动 Server，确认明确失败且不开始监听端口。
+- [x] 在 `apps/server` 执行 `bun run typecheck` 和 `bun run build`。
 
 **提交：** `feat(server): 添加 PostgreSQL 持久化基础`
 
