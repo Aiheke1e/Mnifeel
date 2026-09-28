@@ -10,6 +10,7 @@ import type { ProviderAdapter, ProviderModelDefinition, ProviderRuntimeConfig } 
 import deepSeek from "@/utils/providers/deepSeek";
 import agnes from "@/utils/providers/agnes";
 import bananaPro from "@/utils/providers/bananaPro";
+import { parsePricing } from "@/utils/billing/pricing";
 
 export * from "@/utils/providers/redact";
 export type * from "@/utils/providers/types";
@@ -276,6 +277,7 @@ export async function saveModel(adminUserId: string, input: {
   const displayName = input.displayName.trim();
   if (!displayName) invalid("模型名称不能为空");
   const capabilities = redactSecrets(input.capabilities) as Record<string, unknown>;
+  const pricing = parsePricing(input.mediaType, input.pricing) as Record<string, number>;
   return getDatabase().begin(async transaction => {
     const rows = await transaction<(ModelRow & { connectionStatus: ConnectionStatus })[]>`
       select m.*, p."type" as "providerType", p."displayName" as "providerDisplayName",
@@ -298,7 +300,7 @@ export async function saveModel(adminUserId: string, input: {
         "enabled" = ${input.enabled},
         "isDefault" = ${input.isDefault},
         "capabilities" = ${transaction.json(capabilities as postgres.JSONValue)},
-        "pricing" = ${transaction.json(input.pricing as postgres.JSONValue)},
+        "pricing" = ${transaction.json(pricing as postgres.JSONValue)},
         "updatedAt" = now()
       where "id" = ${input.modelId}
       returning *
@@ -307,7 +309,7 @@ export async function saveModel(adminUserId: string, input: {
       adminUserId, action: "modelUpdated", targetType: "model", targetId: input.modelId,
       details: {
         displayName, mediaType: input.mediaType, enabled: input.enabled, isDefault: input.isDefault,
-        capabilities, pricing: input.pricing,
+        capabilities, pricing,
       } as postgres.JSONValue,
       database: transaction,
     });

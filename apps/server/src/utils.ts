@@ -26,6 +26,8 @@ import * as audit from "@/utils/audit";
 import * as projects from "@/utils/projects";
 import * as providers from "@/utils/providers";
 import * as secrets from "@/utils/secrets";
+import * as billing from "@/utils/billing";
+import * as generation from "@/utils/generation";
 
 export default {
   assets,
@@ -57,4 +59,6 @@ export default {
   projects,
   providers,
   secrets,
+  billing,
+  generation,
 };

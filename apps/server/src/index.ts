@@ -31,6 +31,8 @@ async function close() {
   if (closing) return;
   closing = true;
   await new Promise<void>((resolveClose, rejectClose) => server.close(error => error ? rejectClose(error) : resolveClose()));
+  const { stopGenerationWorker } = await import("./utils/generation/worker");
+  await stopGenerationWorker();
   const { closeDatabase } = await import("./utils/database");
   await closeDatabase();
 }

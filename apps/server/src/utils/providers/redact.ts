@@ -17,6 +17,15 @@ export function redactSecrets(value: unknown): unknown {
   ]));
 }
 
+export function redactSecretFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSecretFields);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    key,
+    secretKeyPattern.test(key) ? (item ? "[REDACTED]" : item) : redactSecretFields(item),
+  ]));
+}
+
 export function redactError(error: unknown) {
   if (!(error instanceof Error)) return redactSecrets(error);
   return {

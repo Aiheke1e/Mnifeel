@@ -1,0 +1,223 @@
+import type postgres from "postgres";
+import { randomUUID } from "node:crypto";
+import { freezeTaskCredits, refundTaskCredits } from "@/utils/billing";
+import { calculateCredits, estimateUsage, parsePricing, type GenerationUsage, type Pricing } from "@/utils/billing/pricing";
+import { getDatabase } from "@/utils/database";
+import type { MediaType, TaskStatus, UserRole } from "@/utils/database/types";
+import { publishGenerationEvent, subscribeGenerationEvent } from "@/utils/generation/events";
+import { abortGenerationTask, wakeGenerationWorker } from "@/utils/generation/worker";
+import { redactSecretFields } from "@/utils/providers/redact";
+
+type GenerationTaskRow = {
+  id: string;
+  userId: string;
+  projectId: string;
+  modelId: string;
+  taskType: MediaType;
+  status: TaskStatus;
+  idempotencyKey: string;
+  requestSummary: {
+    input: Record<string, unknown>;
+    billing: { pricing: Pricing; estimatedUsage: GenerationUsage; billable: boolean };
+  };
+  result: unknown;
+  providerTaskId: string | null;
+  progress: number;
+  frozenCredits: number;
+  actualCredits: number;
+  refundedCredits: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: Date;
+  startedAt: Date | null;
+  heartbeatAt: Date | null;
+  completedAt: Date | null;
+  cancelRequestedAt: Date | null;
+};
+
+type ModelRow = {
+  mediaType: MediaType;
+  pricing: Record<string, number>;
+  capabilities: Record<string, unknown>;
+  modelEnabled: boolean;
+  providerEnabled: boolean;
+  connectionStatus: string;
+  userStatus: string;
+  isWhitelist: boolean;
+};
+
+function invalid(message: string, status = 400): never {
+  throw Object.assign(new Error(message), { status });
+}
+
+function numberValue(value: number) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error("任务积分数据无效");
+  return parsed;
+}
+
+function dateValue(value: Date | null) {
+  return value?.toISOString() ?? null;
+}
+
+export function publicGenerationTask(task: GenerationTaskRow) {
+  return {
+    ...task,
+    frozenCredits: numberValue(task.frozenCredits),
+    actualCredits: numberValue(task.actualCredits),
+    refundedCredits: numberValue(task.refundedCredits),
+    createdAt: task.createdAt.toISOString(),
+    startedAt: dateValue(task.startedAt),
+    heartbeatAt: dateValue(task.heartbeatAt),
+    completedAt: dateValue(task.completedAt),
+    cancelRequestedAt: dateValue(task.cancelRequestedAt),
+  };
+}
+
+function eventFromTask(task: GenerationTaskRow) {
+  return {
+    taskId: task.id,
+    status: task.status,
+    progress: task.progress,
+    result: task.result ?? undefined,
+    actualCredits: numberValue(task.actualCredits),
+    refundedCredits: numberValue(task.refundedCredits),
+    errorMessage: task.errorMessage ?? undefined,
+  };
+}
+
+function safeInput(input: Record<string, unknown>) {
+  // 只移除结构化密钥字段，保留提示词中的普通文本原样参与生成。
+  const redacted = redactSecretFields(input) as Record<string, unknown>;
+  if (new TextEncoder().encode(JSON.stringify(redacted)).byteLength > 2 * 1024 * 1024) {
+    invalid("生成请求超过 2 MB 限制", 413);
+  }
+  return redacted;
+}
+
+export async function createGenerationTask(userId: string, input: {
+  projectId: string;
+  modelId: string;
+  idempotencyKey: string;
+  request: Record<string, unknown>;
+}) {
+  const result = await getDatabase().begin(async transaction => {
+    await transaction`select pg_advisory_xact_lock(hashtext(${`${userId}:${input.idempotencyKey}`}))`;
+    const existing = await transaction<GenerationTaskRow[]>`
+      select * from "generationTasks"
+      where "userId" = ${userId} and "idempotencyKey" = ${input.idempotencyKey}
+      limit 1
+    `;
+    if (existing[0]) return { task: existing[0], created: false };
+    const models = await transaction<ModelRow[]>`
+      select m."mediaType", m."pricing", m."capabilities", m."enabled" as "modelEnabled",
+        p."enabled" as "providerEnabled", p."connectionStatus", u."status" as "userStatus", u."isWhitelist"
+      from "modelConfigs" m
+      join "providerConfigs" p on p."id" = m."providerId"
+      join "users" u on u."id" = ${userId}
+      join "projects" pr on pr."id" = ${input.projectId} and pr."userId" = u."id" and pr."status" = 'active'
+      where m."id" = ${input.modelId}
+      limit 1
+    `;
+    const model = models[0] ?? invalid("项目或模型不存在", 404);
+    if (model.userStatus !== "active") invalid("账号已被禁用", 403);
+    if (!model.modelEnabled || !model.providerEnabled || model.connectionStatus !== "passed") {
+      invalid("所选模型尚未启用或供应商未通过连接测试", 409);
+    }
+    const pricing = parsePricing(model.mediaType, model.pricing);
+    const request = safeInput(input.request);
+    const estimatedUsage = estimateUsage(model.mediaType, request, model.capabilities);
+    const billable = !(model.mediaType === "video" && model.isWhitelist);
+    const frozenCredits = billable ? calculateCredits(model.mediaType, pricing, estimatedUsage) : 0;
+    const taskId = randomUUID();
+    const requestSummary = { input: request, billing: { pricing, estimatedUsage, billable } };
+    const rows = await transaction<GenerationTaskRow[]>`
+      insert into "generationTasks" (
+        "id", "userId", "projectId", "modelId", "taskType", "idempotencyKey", "requestSummary", "frozenCredits"
+      ) values (
+        ${taskId}, ${userId}, ${input.projectId}, ${input.modelId}, ${model.mediaType}, ${input.idempotencyKey},
+        ${transaction.json(requestSummary as postgres.JSONValue)}, ${frozenCredits}
+      ) returning *
+    `;
+    const task = rows[0]!;
+    await freezeTaskCredits(transaction, { id: taskId, userId, frozenCredits });
+    return { task, created: true };
+  });
+  if (result.created) {
+    publishGenerationEvent(eventFromTask(result.task));
+    wakeGenerationWorker();
+  }
+  return { task: publicGenerationTask(result.task), created: result.created };
+}
+
+export async function getGenerationTask(userId: string, role: UserRole, taskId: string) {
+  const rows = await getDatabase()<GenerationTaskRow[]>`
+    select * from "generationTasks"
+    where "id" = ${taskId} and ("userId" = ${userId} or ${role} = 'admin')
+    limit 1
+  `;
+  const task = rows[0] ?? invalid("生成任务不存在", 404);
+  return publicGenerationTask(task);
+}
+
+export async function listGenerationTasks(userId: string, input: {
+  projectId?: string;
+  status?: TaskStatus;
+  limit: number;
+  offset: number;
+}) {
+  const projectId = input.projectId ?? null;
+  const status = input.status ?? null;
+  const rows = await getDatabase()<GenerationTaskRow[]>`
+    select * from "generationTasks"
+    where "userId" = ${userId}
+      and (${projectId}::uuid is null or "projectId" = ${projectId})
+      and (${status}::text is null or "status" = ${status})
+    order by "createdAt" desc, "id" desc
+    limit ${input.limit} offset ${input.offset}
+  `;
+  return rows.map(publicGenerationTask);
+}
+
+export async function cancelGenerationTask(userId: string, role: UserRole, taskId: string) {
+  const task = await getDatabase().begin(async transaction => {
+    const rows = await transaction<GenerationTaskRow[]>`
+      select * from "generationTasks" where "id" = ${taskId} limit 1 for update
+    `;
+    const current = rows[0] ?? invalid("生成任务不存在", 404);
+    if (current.userId !== userId && role !== "admin") invalid("无权取消这个任务", 403);
+    if (["succeeded", "failed", "cancelled"].includes(current.status)) return current;
+    const refundedCredits = await refundTaskCredits(transaction, {
+      id: current.id,
+      userId: current.userId,
+      frozenCredits: numberValue(current.frozenCredits),
+    });
+    const updated = await transaction<GenerationTaskRow[]>`
+      update "generationTasks" set
+        "status" = 'cancelled', "cancelRequestedAt" = now(), "completedAt" = now(),
+        "refundedCredits" = ${refundedCredits}, "errorCode" = null, "errorMessage" = null
+      where "id" = ${taskId}
+      returning *
+    `;
+    return updated[0]!;
+  });
+  abortGenerationTask(taskId);
+  publishGenerationEvent(eventFromTask(task));
+  return publicGenerationTask(task);
+}
+
+export { subscribeGenerationEvent };
+export type { GenerationEvent } from "@/utils/generation/events";
+export {
+  registerGenerationExecutor,
+  unregisterGenerationExecutor,
+  recoverStaleGenerationTasks,
+  startGenerationWorker,
+  stopGenerationWorker,
+} from "@/utils/generation/worker";
+export type {
+  GenerationExecutionContext,
+  GenerationExecutionResult,
+  GenerationExecutionTask,
+  GenerationExecutor,
+} from "@/utils/generation/worker";

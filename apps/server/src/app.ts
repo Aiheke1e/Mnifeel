@@ -107,5 +107,8 @@ export async function createApp({
     response.status(status).json(error(message, code ? { code } : null, status));
   });
 
+  const { startGenerationWorker } = await import("@/utils/generation/worker");
+  await startGenerationWorker();
+
   return app;
 }
