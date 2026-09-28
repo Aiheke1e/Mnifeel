@@ -43,7 +43,7 @@
 | 7. 三家模型供应商适配 | 进行中 | 添加 DeepSeek、Agnes、BananaPro 适配器；文本和媒体生成改读数据库配置；移除 TF-Router 默认模型入口 | Server/Web 类型检查与构建通过；三家协议模拟、临时数据库生成落盘、错误密钥、未知模型和取消回滚通过；BananaPro 公开模型接口实测通过 | 需使用轮换后的新密钥完成三家连接、最小真实生成和真实错误场景 |
 | 8. 积分账本与生成任务 Worker | 已完成 | 添加固定计价、事务冻结/结算/退款、幂等任务接口、SSE 事件、并发领取、心跳、取消和失联恢复；模型保存同步校验计价结构 | 路由生成、Server 类型检查与构建通过；临时 schema 验证余额不足、结算、失败/取消退款、幂等、白名单、2 并发领取、重启恢复和流水不可修改；实际 HTTP 验证鉴权、创建、查询、SSE 与取消 | — |
 | 9. 现有生成链路接入任务与计费 | 已完成 | 文本、图片、视频、Agent、子 Agent、媒体工具、MCP 与 A2A 统一使用任务和积分账本；节点继续使用原返回格式 | Server/Web/MCP/节点/媒体包检查通过；临时 schema 和本地模拟三供应商验证流式输出、媒体落盘、Agent 逐次计费、并发心跳、取消回滚、越权拒绝和素材索引 | 三家真实密钥联调仍归 Task 7，需轮换新密钥后执行 |
-| 10. 用户端 UI 重构 | 未开始 | — | — | — |
+| 10. 用户端 UI 重构 | 已完成 | 添加普通用户创作首页、项目向导、任务中心、账户页和高级模式；模型只读管理员配置；普通偏好与全局管理员设置隔离 | Server/Web 类型检查与构建、权限 HTTP 验证、桌面/手机浏览器创作流程和高级工作区验证通过 | — |
 | 11. 管理端 UI | 未开始 | — | — | — |
 | 12. 外部依赖与桌面入口清理 | 未开始 | — | — | — |
 | 13. 旧项目导入与全流程验收 | 未开始 | — | — | — |
@@ -459,35 +459,64 @@
 - 创建：`apps/web/src/pages/project/index.vue`
 - 创建：`apps/web/src/pages/project/components/projectHeader.vue`
 - 创建：`apps/web/src/pages/project/components/projectStages.vue`
+- 创建：`apps/web/src/stores/userApp.ts`
+- 创建：`apps/web/src/lib/projectMode.ts`
+- 创建：`apps/server/src/routes/account/get.ts`
+- 修改：`apps/server/src/routes/settings/get.ts`
+- 修改：`apps/server/src/routes/settings/save.ts`
+- 修改：`apps/server/src/routes/settings/systemPrompt.ts`
+- 修改：`apps/server/src/routes/settings/personalization/get.ts`
+- 修改：`apps/server/src/routes/settings/personalization/save.ts`
+- 修改：`apps/server/src/routes/agent.ts`
+- 修改：`apps/server/src/agent/runtime/index.ts`
+- 修改：`apps/server/src/agent/runtime/delegation.ts`
+- 修改：`apps/server/src/agent/runtime/subAgent.ts`
+- 修改：`apps/server/src/agent/runtime/resources.ts`
+- 修改：`apps/server/src/utils/mcp/tools.ts`
+- 修改：`apps/web/src/pages/home/index.vue`
 - 修改：`apps/web/src/pages/workspace/index.vue`
 - 修改：`apps/web/src/pages/workspace/components/workspaceMenu.vue`
-- 修改：`apps/web/src/pages/workspace/panels/canvas/index.vue`
-- 修改：`apps/web/src/pages/workspace/panels/document/index.vue`
+- 修改：`apps/web/src/lib/mcpControl.ts`
+- 修改：`apps/web/src/components/settings/index.vue`
+- 修改：`apps/web/src/components/modelPopover.vue`
+- 修改：`apps/web/src/components/agent/conversation.vue`
+- 修改：`apps/web/src/stores/auth.ts`
+- 修改：`apps/web/src/stores/settings.ts`
 - 修改：`apps/web/src/stores/workspace.ts`
 - 修改：`apps/web/src/router/index.ts`
 - 修改：`apps/web/src/assets/main.scss`
-- 删除：`apps/web/src/pages/home/index.vue`
-- 删除：`apps/web/src/pages/home/bg.vue`
-- 删除：`apps/web/src/pages/home/workspacePicker.vue`
+- 修改：`apps/server/src/utils/projects/index.ts`
 - 同步：`docs/superpowers/plans/selfHostedWebPlan.md`
 
 **步骤：**
 
-- [ ] 建立普通用户应用外壳和统一视觉变量，首页只展示开始创作、最近项目、内置模板、积分和最近任务。
-- [ ] 创建项目只收集名称、创作描述和模板；调用服务端创建工作区后进入 `/app/projects/:projectId`。
-- [ ] 项目页默认显示创作阶段、内容区域、管理员启用模型、任务状态和下一步操作；不新增规格外的自动配音、字幕或成片能力。
-- [ ] 高级模式复用现有工作区、无限画布、文档和 Agent，技术术语只在高级模式出现；模式选择存入用户浏览器偏好。
-- [ ] 任务中心从持久任务接口显示等待、运行、成功、失败、取消、消费和退款，并支持取消可取消任务。
-- [ ] 账户页显示手机号、密码设置提醒、两个有效会话、积分余额和不可修改的积分流水；支持设置密码、重置密码、撤销其他会话和登出。
-- [ ] 移除普通用户设置中的供应商、API Key、插件市场、充值、赞助商、桌面更新、MCP/A2A 管理入口。
+- [x] 建立普通用户应用外壳和统一视觉变量，首页只展示开始创作、最近项目、内置模板、积分和最近任务。
+- [x] 创建项目只收集名称、创作描述和模板；调用服务端创建工作区后进入 `/app/projects/:projectId`。
+- [x] 项目页默认显示创作阶段、内容区域、管理员启用模型、任务状态和下一步操作；不新增规格外的自动配音、字幕或成片能力。
+- [x] 高级模式复用现有工作区、无限画布、文档和 Agent，技术术语只在高级模式出现；模式与项目模型选择存入用户浏览器偏好。
+- [x] 任务中心从持久任务接口显示等待、运行、成功、失败、取消、消费和退款，并支持取消可取消任务。
+- [x] 账户页显示手机号或邮箱、密码设置提醒、两个有效会话、积分余额和不可修改的积分流水；支持设置密码、重置密码、撤销其他会话和登出。
+- [x] 移除普通用户设置中的供应商、API Key、插件市场、充值、赞助商、桌面更新、MCP/A2A 管理入口。
+
+**实现说明：**
+
+- 新增只读账户摘要接口，账户页直接读取当前登录用户的余额、冻结积分和最近 100 条不可修改流水。
+- 工作台模型选择改为读取管理员启用的 `/api/ai/models`，不再依赖用户自配供应商；引导页选择会带入同一项目的高级工作台。
+- 普通用户的界面、常规和隐私偏好只保存在当前浏览器；项目元数据不再进入全局设置。全局设置、系统提示词和个性化文档接口仅管理员可访问。
+- 普通用户及 MCP 发起的 Agent 不加载全局个性化文档或全局记忆工具；管理员在网页内启动的 Agent 继续沿用管理员维护的全局个性化配置，子 Agent 继承同一权限。
+- 原首页暂时保留给 `/admin/dashboard`，避免在 Task 11 管理端页面完成前让管理员登录后无页面可用；Task 11 完成新管理端后再删除旧首页文件。
+- 未改动画布和文档内部实现，只在工作区入口补充项目路由加载、普通/高级模式返回和用户设置权限收口；管理员旧首页与 MCP 打开项目统一使用带项目 ID 的高级模式路由。
 
 **验证：**
 
-- [ ] 在 `apps/web` 执行类型检查和构建。
-- [ ] 分别在桌面宽度和手机宽度浏览器走通登录、创建项目、打开项目、切换普通/高级模式、查看任务和账户。
-- [ ] 使用键盘检查主导航、表单、对话框、模式切换和任务操作；检查可见焦点、标签关联和错误状态。
-- [ ] 全局搜索普通模式页面，确认不出现 API Key、供应商、Agent、Skill、节点或工作区绝对路径。
-- [ ] 打开已有画布项目，确认高级模式没有破坏节点、文档和 Agent 的既有交互。
+- [x] 在 `apps/web` 执行 `bun run typecheck` 和 `bun run build`，均通过；同时执行 server 路由生成、类型检查和构建，均通过。
+- [x] 在 1280 像素桌面宽度和 390×844 手机宽度浏览器走通模拟 Google 登录、创建项目、打开项目、切换普通/高级模式、查看任务和账户。
+- [x] 使用键盘检查主导航、创建表单、设置对话框、模式切换和任务筛选；可见焦点、标签关联和错误状态正常。
+- [x] 全局搜索普通模式页面，确认用户可见文案不出现 API Key、供应商、Agent、Skill、节点或工作区绝对路径。
+- [x] 打开已保存画布项目，确认高级模式可加载画布、切换文档、打开创作助手，并能保存返回引导模式。
+- [x] 实际请求模拟手机号验证码并使用任意验证码注册登录，确认新用户角色为 `user`、初始积分和流水均为 0；账户摘要接口返回正确。
+- [x] 实际请求确认普通用户读取、保存全局设置和读取个性化文档均返回 403，仍可读取管理员启用模型；管理员可读取全局设置与系统提示词。
+- [x] 复审 Agent 主会话、委派子 Agent、团队成员和 MCP Agent 的资源装配，确认普通用户路径不再加载或读写全局记忆与全局个性化文档。
 
 **提交：** `feat(web): 重构短剧创作端界面`
 

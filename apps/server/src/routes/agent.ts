@@ -40,7 +40,16 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
   const close = () => { bridge?.dispose(); questions.dispose(); controller.abort(); };
   res.once("close", close);
   try {
-    await u.agent.run({ ...options, userId: auth.user.id, projectId, cwd, canvas: bridge?.context, question: questions.context, signal: controller.signal }, send);
+    await u.agent.run({
+      ...options,
+      userId: auth.user.id,
+      projectId,
+      cwd,
+      allowGlobalPersonalization: auth.user.role === "admin",
+      canvas: bridge?.context,
+      question: questions.context,
+      signal: controller.signal,
+    }, send);
     send({ type: "done" });
   } catch (error) {
     send({ type: "error", message: error instanceof Error ? error.message : "Agent 运行失败" });

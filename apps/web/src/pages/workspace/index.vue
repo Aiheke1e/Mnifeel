@@ -1,6 +1,7 @@
 <template>
   <main class="workspacePage" :style="{ '--agentWidth': `${agentVisible ? agentWidth : 0}px` }">
-    <canvasPanel
+    <template v-if="ready && workspaceStore.project">
+      <canvasPanel
       :key="workspaceStore.project?.id"
       ref="canvasPanelRef"
       class="canvasPanel"
@@ -9,56 +10,67 @@
       :aria-hidden="activePanel !== 'canvas'"
       :active="activePanel === 'canvas'"
       :settingsVisible="settingsVisible" />
-    <keep-alive :max="1">
-      <documentPanel
+      <keep-alive :max="1">
+        <documentPanel
         v-if="activePanel === 'document'"
         :key="workspaceStore.project?.id"
         ref="documentPanelRef"
         :readNode="readDocumentNode"
-        :saveNode="saveDocumentNode" />
-    </keep-alive>
-    <workspaceMenu class="workspaceMenu" @openSettings="settingsVisible = true" />
-    <el-segmented :modelValue="activePanel" class="panelSwitcher" :options="panelOptions" size="small" aria-label="切换面板" @change="switchPanel">
+          :saveNode="saveDocumentNode" />
+      </keep-alive>
+      <workspaceMenu class="workspaceMenu" :returnPath="returnPath" @openSettings="settingsVisible = true" />
+      <el-segmented :modelValue="activePanel" class="panelSwitcher" :options="panelOptions" size="small" aria-label="切换面板" @change="switchPanel">
       <template #default="{ item }">
         <span class="panelOption">
           <component :is="item.icon" :size="14" aria-hidden="true" />
           {{ item.label }}
         </span>
       </template>
-    </el-segmented>
-    <el-tooltip v-if="!agentVisible" content="Minifeel Agent" placement="bottom" :showArrow="false" :hideAfter="0">
-      <el-button
+      </el-segmented>
+      <el-tooltip v-if="!agentVisible" content="智能创作助手" placement="bottom" :showArrow="false" :hideAfter="0">
+        <el-button
         class="agentButton"
         :class="{ active: agentVisible }"
         :aria-expanded="agentVisible"
-        aria-label="Minifeel Agent"
+        aria-label="智能创作助手"
         aria-controls="agentPanel"
-        @click="agentVisible = !agentVisible"></el-button>
-    </el-tooltip>
-    <floatingAgent v-model="agentVisible" @resize="agentWidth = $event" />
-    <settings v-model="settingsVisible" />
+          @click="agentVisible = !agentVisible"></el-button>
+      </el-tooltip>
+      <floatingAgent v-model="agentVisible" @resize="agentWidth = $event" />
+      <settings v-model="settingsVisible" />
+    </template>
+    <div v-else class="workspaceLoading" role="status">正在打开创作工作台…</div>
   </main>
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, nextTick, onMounted, onScopeDispose, provide, ref } from "vue";
-import { onBeforeRouteLeave } from "vue-router";
+import { computed, defineAsyncComponent, nextTick, onBeforeMount, onMounted, onScopeDispose, provide, ref } from "vue";
+import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import axios from "axios";
 import { IconLayoutDashboard, IconFileText } from "@tabler/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import settings from "@/components/settings/index.vue";
+import { useAuthStore } from "@/stores/auth";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { registerWorkspaceControl, waitForControlValue } from "@/lib/mcpControl";
 import anonymousData from "@/lib/anonymousData";
+import { setProjectMode } from "@/lib/projectMode";
 import canvasPanel from "./panels/canvas/canvasHost.vue";
 import workspaceMenu from "./components/workspaceMenu.vue";
 import floatingAgent from "./components/floatingAgent.vue";
 
 const documentPanel = defineAsyncComponent(() => import("./panels/document/index.vue"));
 
+const route = useRoute();
+const router = useRouter();
+const authStore = useAuthStore();
 const activePanel = ref<"canvas" | "document">("canvas");
 onMounted(() => anonymousData.track("workspace.canvas"));
 const workspaceStore = useWorkspaceStore();
+const returnPath = computed(() => authStore.user?.role === "admin"
+  ? "/admin/dashboard"
+  : workspaceStore.project?.id ? `/app/projects/${workspaceStore.project.id}` : "/app");
+const ready = ref(false);
 const panelOptions = [
   { label: "画布", value: "canvas", icon: IconLayoutDashboard },
   { label: "文档", value: "document", icon: IconFileText },
@@ -70,6 +82,21 @@ const canvasPanelRef = ref<InstanceType<typeof canvasPanel>>();
 const documentPanelRef = ref<InstanceType<typeof documentPanel>>();
 provide("canvas", () => canvasPanelRef.value?.getCanvasContext());
 provide("activateCanvasPanel", () => switchPanel("canvas"));
+
+onBeforeMount(async () => {
+  const projectId = String(route.params.projectId || "");
+  if (!projectId) return void router.replace(returnPath.value);
+  setProjectMode("advanced");
+  try {
+    if (workspaceStore.project?.id !== projectId) await workspaceStore.openProject(projectId);
+    ready.value = true;
+  } catch (error) {
+    ElMessage.error(axios.isAxiosError<{ message?: string }>(error)
+      ? error.response?.data?.message || "项目打开失败"
+      : error instanceof Error ? error.message : "项目打开失败");
+    await router.replace(returnPath.value);
+  }
+});
 
 const controlLifetime = new AbortController();
 onScopeDispose(() => controlLifetime.abort(new Error("工作区已关闭")));
@@ -304,6 +331,14 @@ function saveDocumentNode(projectId: string, canvasPath: string, nodeId: string,
         animation: none;
       }
     }
+  }
+
+  .workspaceLoading {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    color: var(--el-text-color-secondary);
   }
 }
 

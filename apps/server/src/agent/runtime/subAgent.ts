@@ -6,6 +6,7 @@ import type { ToolCall } from "@minifeel/tools-scaffold/runtime";
 import { createAgentResources } from "@/agent/runtime/resources";
 
 export type SubAgentModel = Pick<CreateAgentSessionOptions, "modelRuntime" | "model" | "thinkingLevel"> & {
+  allowGlobalPersonalization?: boolean;
   billStream?: (streamFunction: StreamFn) => StreamFn;
   waitForBilling?: () => Promise<unknown>;
 };
@@ -40,7 +41,7 @@ export async function runSubAgent(options: SubAgentModel & {
 }) {
   const {
     cwd, name, task, tools, instructions, signal = new AbortController().signal, history,
-    inputRequired, onTool, onProgress, billStream, waitForBilling, ...modelOptions
+    inputRequired, onTool, onProgress, allowGlobalPersonalization = false, billStream, waitForBilling, ...modelOptions
   } = options;
   const result: SubAgentResult = { name, status: "running", result: "准备执行" };
   const usage = emptyUsage();
@@ -74,7 +75,7 @@ export async function runSubAgent(options: SubAgentModel & {
     const resources = await createAgentResources(cwd, activeTools, SettingsManager.inMemory({
       compaction: { enabled: false },
       retry: { enabled: false, provider: { maxRetries: 0 } },
-    }), instructions);
+    }), instructions, allowGlobalPersonalization);
     signal.throwIfAborted();
     ({ session } = await createAgentSession({
       ...modelOptions, ...resources, cwd,

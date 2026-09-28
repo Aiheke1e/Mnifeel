@@ -1,13 +1,13 @@
 import u from "@/utils";
 import { Router } from "express";
 import { z } from "zod";
-import { validateFields } from "@/lib/middleware";
+import { requireAdmin, validateFields } from "@/lib/middleware";
 import { success } from "@/lib/responseFormat";
 import { maxSystemPromptLength } from "@/agent/runtime/prompt";
 
 const router = Router();
 
-export default router.put("/", validateFields({ settings: z.record(z.string(), z.json()).and(z.object({
+export default router.put("/", requireAdmin, validateFields({ settings: z.record(z.string(), z.json()).and(z.object({
   agentSystemPrompt: z.string().max(maxSystemPromptLength, `系统提示词不能超过 ${maxSystemPromptLength} 个字符`).optional(),
   desktopUpdateSource: z.enum(["official", "github", "custom"]).optional(),
   desktopUpdateCustomUrl: z.string().max(2048).refine(value => !value || u.desktop.isValidUpdateUrl(value),

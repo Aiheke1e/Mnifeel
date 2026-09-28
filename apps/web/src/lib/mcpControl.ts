@@ -3,6 +3,7 @@ import { useRouter } from "vue-router";
 import type { NodeToolInfo } from "@minifeel/tools-scaffold/runtime";
 import { invalidateNodeModels } from "@minifeel/nodes-scaffold/nodeAi";
 import { saveSettings, settings } from "@/stores/settings";
+import { useAuthStore } from "@/stores/auth";
 import { useWorkspaceStore } from "@/stores/workspace";
 
 type ControlCall = { type: "call"; callId: string; name: string; args: Record<string, unknown>; projectId?: string };
@@ -41,6 +42,7 @@ export function waitForControlValue<T>(read: WatchSource<T | undefined>, signal:
 
 export function useMcpControl() {
   const router = useRouter();
+  const authStore = useAuthStore();
   const workspaceStore = useWorkspaceStore();
   const calls = new Map<string, AbortController>();
   const readSettings = () => JSON.parse(JSON.stringify(settings.value, (key, value) =>
@@ -129,12 +131,16 @@ export function useMcpControl() {
             calls.delete(request.callId);
             await workspaceStore.openProject(projectId, callSignal);
             const openedProjectId = workspaceStore.project?.id;
+            if (!openedProjectId) throw new Error("项目打开失败");
             calls.set(request.callId, controller);
             callSignal.throwIfAborted();
-            await router.push("/app/workspace");
+            const workspacePath = authStore.user?.role === "admin"
+              ? `/admin/projects/${openedProjectId}/advanced`
+              : `/app/projects/${openedProjectId}/advanced`;
+            await router.push(workspacePath);
             await waitForControlValue(() => workspaceControl.value, callSignal);
             callSignal.throwIfAborted();
-            if (router.currentRoute.value.path !== "/app/workspace" || workspaceStore.project?.id !== openedProjectId) throw new Error("项目打开已取消");
+            if (router.currentRoute.value.path !== workspacePath || workspaceStore.project?.id !== openedProjectId) throw new Error("项目打开已取消");
             result = getState();
           } else {
             const control = workspaceControl.value;

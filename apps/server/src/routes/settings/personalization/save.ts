@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
 import u from "@/utils";
-import { validateFields } from "@/lib/middleware";
+import { requireAdmin, validateFields } from "@/lib/middleware";
 import { success } from "@/lib/responseFormat";
 
 const router = Router();
 
-export default router.put("/", validateFields({
+export default router.put("/", requireAdmin, validateFields({
   document: z.enum(["memory", "agents"]),
   content: z.string().max(u.personalization.maxDocumentLength),
   revision: z.string().regex(/^[a-f0-9]{64}$/),

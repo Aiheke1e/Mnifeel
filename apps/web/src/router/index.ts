@@ -4,6 +4,9 @@ import { loadSettings } from "@/stores/settings";
 
 const router = createRouter({
   history: createWebHashHistory(),
+  scrollBehavior(_to, _from, savedPosition) {
+    return savedPosition ?? { left: 0, top: 0 };
+  },
   routes: [
     {
       path: "/",
@@ -16,17 +19,29 @@ const router = createRouter({
     },
     {
       path: "/app",
-      component: () => import("@/pages/home/index.vue"),
+      component: () => import("@/pages/app/index.vue"),
       meta: { role: "user" },
+      children: [
+        { path: "", component: () => import("@/pages/app/dashboard.vue") },
+        { path: "tasks", component: () => import("@/pages/app/tasks.vue") },
+        { path: "account", component: () => import("@/pages/app/account.vue") },
+        { path: "projects/new", component: () => import("@/pages/app/projectCreate.vue") },
+        { path: "projects/:projectId", component: () => import("@/pages/project/index.vue") },
+      ],
     },
     {
-      path: "/app/workspace",
+      path: "/app/projects/:projectId/advanced",
       component: () => import("@/pages/workspace/index.vue"),
       meta: { role: "user" },
     },
     {
       path: "/admin/dashboard",
       component: () => import("@/pages/home/index.vue"),
+      meta: { role: "admin" },
+    },
+    {
+      path: "/admin/projects/:projectId/advanced",
+      component: () => import("@/pages/workspace/index.vue"),
       meta: { role: "admin" },
     },
     {
@@ -39,11 +54,15 @@ const router = createRouter({
     },
     {
       path: "/canvas",
-      redirect: "/app/workspace",
+      redirect: "/app",
     },
     {
       path: "/workspace",
-      redirect: "/app/workspace",
+      redirect: "/app",
+    },
+    {
+      path: "/app/workspace",
+      redirect: "/app",
     },
   ],
 });
@@ -57,7 +76,7 @@ router.beforeEach(async to => {
   }
   if (!auth.user) return { path: "/login", query: { redirect: to.fullPath } };
   if (to.meta.role && to.meta.role !== auth.user.role) return auth.user.role === "admin" ? "/admin/dashboard" : "/app";
-  await loadSettings();
+  await loadSettings(auth.user.role);
   return true;
 });
 

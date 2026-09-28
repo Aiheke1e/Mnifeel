@@ -213,7 +213,7 @@ export async function getMcpTools(userId: string): Promise<McpTool[]> {
     } : undefined;
     const blocks = new Map<string, string>();
     let sessionFile = args.sessionFile;
-    await runAgent({ ...args, userId, projectId: projectId!, cwd: directory!, canvas, signal }, event => {
+    await runAgent({ ...args, userId, projectId: projectId!, cwd: directory!, allowGlobalPersonalization: false, canvas, signal }, event => {
       if (event.type === "session") sessionFile = event.file;
       if (event.type === "text") blocks.set(event.blockId, event.content ?? (blocks.get(event.blockId) ?? "") + (event.delta ?? ""));
     });

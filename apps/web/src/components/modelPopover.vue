@@ -20,12 +20,12 @@
       </template>
       <el-form class="modelOptions" labelPosition="top">
         <el-form-item label="模型">
-          <el-select v-model="selectedModel" filterable :disabled="disabled" :teleported="false" placeholder="选择模型" aria-label="选择模型" noDataText="请先在设置中添加模型">
+          <el-select v-model="selectedModel" filterable :disabled="disabled" :teleported="false" placeholder="选择模型" aria-label="选择模型" noDataText="管理员暂未启用文本模型">
             <template #prefix><modelIcon v-if="selectedModelChoice" :model="selectedModelChoice.modelId" :size="18" /></template>
             <el-option-group v-for="provider in modelGroups" :key="provider.id" :label="provider.label">
-              <el-option v-for="model in provider.models" :key="model.id" :label="model.label" :value="JSON.stringify([provider.id, model.id])">
+              <el-option v-for="model in provider.models" :key="model.value" :label="model.label" :value="model.value">
                 <el-space :size="8">
-                  <modelIcon :model="model.id" :size="16" />
+                  <modelIcon :model="model.modelId" :size="16" />
                   <span>{{ model.label }}</span>
                 </el-space>
               </el-option>
@@ -44,7 +44,7 @@
 import { computed, ref, watch } from "vue";
 import { IconChevronDown } from "@tabler/icons-vue";
 import { modelIcon } from "@minifeel/model-icons";
-import { customProviders, modelChoices } from "@/stores/settings";
+import { modelChoices } from "@/stores/settings";
 
 const selectedModel = defineModel<string>({ default: "" });
 const reasoningEffort = defineModel<string>("reasoningEffort", { default: "" });
@@ -56,12 +56,16 @@ const reasoningOptions = [
   { label: "中", value: "medium" },
   { label: "高", value: "high" },
 ];
-const modelGroups = computed(() => customProviders.value.toSorted((left, right) => Number(right.id === "tfRouter") - Number(left.id === "tfRouter")));
+const modelGroups = computed(() => Object.values(modelChoices.value.reduce<Record<string, { id: string; label: string; models: typeof modelChoices.value }>>((groups, model) => {
+  const group = groups[model.providerId] ??= { id: model.providerId, label: model.providerLabel, models: [] };
+  group.models.push(model);
+  return groups;
+}, {})));
 const selectedModelChoice = computed(() => modelChoices.value.find(item => item.value === selectedModel.value));
 const reasoningLabel = computed(() => reasoningOptions.find(item => item.value === reasoningEffort.value)?.label ?? "默认");
 watch(selectedModel, () => { reasoningEffort.value = ""; });
 watch(modelChoices, items => {
-  if (!selectedModel.value) selectedModel.value = items[0]?.value ?? "";
+  if (!items.some(item => item.value === selectedModel.value)) selectedModel.value = items[0]?.value ?? "";
 }, { immediate: true });
 watch(() => !props.active || props.disabled, close => { if (close) visible.value = false; });
 </script>

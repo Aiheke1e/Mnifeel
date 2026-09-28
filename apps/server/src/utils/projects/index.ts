@@ -18,11 +18,19 @@ type ProjectRow = {
 export type ProjectSummary = {
   id: string;
   name: string;
+  description: string;
+  templateId: string | null;
   updatedAt: string;
 };
 
 function projectSummary(project: ProjectRow): ProjectSummary {
-  return { id: project.id, name: project.name, updatedAt: project.updatedAt.toISOString() };
+  return {
+    id: project.id,
+    name: project.name,
+    description: project.description,
+    templateId: project.templateId,
+    updatedAt: project.updatedAt.toISOString(),
+  };
 }
 
 function getWorkspacesRoot() {

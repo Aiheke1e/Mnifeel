@@ -175,7 +175,7 @@ async function openProject(project: Project) {
   opening.value = true;
   try {
     await workspaceStore.openProject(project.id);
-    await router.push("/app/workspace");
+    await router.push(`/admin/projects/${project.id}/advanced`);
   } catch (err) {
     ElMessage.error(axios.isAxiosError<{ message?: string }>(err)
       ? err.response?.data.message || "无法打开项目，请重试"
@@ -216,7 +216,7 @@ async function createProject(fromPrompt = true) {
     if (fromPrompt && prompt.value.trim()) {
       workspaceStore.pendingAgentMessage = { projectId: created.id, prompt: prompt.value, model: selectedModel.value, reasoningEffort: reasoningEffort.value };
     }
-    await router.push("/app/workspace");
+    await router.push(`/admin/projects/${created.id}/advanced`);
   } catch (err) {
     ElMessage.error(axios.isAxiosError<{ message?: string }>(err)
       ? err.response?.data.message || "创建项目失败，请重试"

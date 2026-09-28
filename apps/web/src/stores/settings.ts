@@ -6,13 +6,45 @@ import { canvasShortcutFields, defaultCanvasShortcuts, getShortcutBindings, isSh
 import "element-plus/es/components/message/style/css";
 
 export const settings = ref<Record<string, unknown>>({});
+type PlatformModel = {
+  providerId: string;
+  providerLabel: string;
+  modelId: string;
+  label: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+};
+export const platformModels = ref<PlatformModel[]>([]);
 // ACT: 页面在 loadSettings 完成后才挂载，加载标记仅保留在设置初始化与自动保存内部。
 let settingsReady = false;
+let settingsRole: "admin" | "user" | undefined;
+let remoteSettings = false;
 let saveQueue = Promise.resolve();
 let applyingSettings = false;
+const userSettingsKey = "minifeel.userSettings";
+const userSettingNames = ["ui", "general", "privacy"] as const;
+
+function readUserSettings() {
+  try {
+    const value = JSON.parse(localStorage.getItem(userSettingsKey) || "{}");
+    return selectUserSettings(value);
+  } catch {
+    return {};
+  }
+}
+
+function selectUserSettings(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(userSettingNames.flatMap(name => {
+    const item = source[name];
+    return item && typeof item === "object" && !Array.isArray(item) ? [[name, item]] : [];
+  }));
+}
 
 export const settingsStorage = {
   getItem(key: string) {
+    if (!remoteSettings) return localStorage.getItem(key);
     const stores = settings.value.stores as Record<string, unknown> | undefined;
     if (stores && Object.hasOwn(stores, key)) return JSON.stringify(stores[key]);
     // ACT: 只迁移当前来源可读取的旧缓存，保留原值；不同端口的 localStorage 不能互读。
@@ -21,6 +53,7 @@ export const settingsStorage = {
     return value;
   },
   setItem(key: string, value: string) {
+    if (!remoteSettings) return localStorage.setItem(key, value);
     settings.value.stores = { ...(settings.value.stores as Record<string, unknown> | undefined), [key]: JSON.parse(value) };
   },
 };
@@ -89,18 +122,36 @@ export const customProviders = computed<CustomProvider[]>(() => Array.isArray(se
     && item.models.every((model: CustomProviderModel) => !!model && typeof model.id === "string" && typeof model.label === "string"))
   : []);
 
-export const modelChoices = computed(() => customProviders.value.flatMap(provider => provider.models.map(model => ({
-  value: JSON.stringify([provider.id, model.id]), providerId: provider.id, modelId: model.id, label: model.label, contextWindow: model.contextWindow,
-}))));
+export const modelChoices = computed(() => platformModels.value.map(model => ({
+  value: JSON.stringify([model.providerId, model.modelId]),
+  providerId: model.providerId,
+  providerLabel: model.providerLabel,
+  modelId: model.modelId,
+  label: model.label,
+  contextWindow: model.contextWindow,
+})));
 
-export async function loadSettings() {
-  if (settingsReady) return;
-  const { data } = await axios.get("/api/settings/get", { headers: { "Cache-Control": "no-cache", "x-minifeel-workspace": "1" } });
-  if (settingsReady) return;
-  if (data.code !== 200 || !data.data || typeof data.data !== "object" || Array.isArray(data.data)) {
-    throw new Error("读取设置失败");
+export async function loadSettings(role: "admin" | "user") {
+  if (settingsReady && settingsRole === role) return;
+  settingsRole = role;
+  remoteSettings = role === "admin";
+  settingsReady = false;
+  const modelsRequest = axios.get<{ code: number; data: PlatformModel[] }>("/api/ai/models", { headers: { "Cache-Control": "no-cache" } });
+  if (remoteSettings) {
+    const [{ data }, modelsResponse] = await Promise.all([
+      axios.get("/api/settings/get", { headers: { "Cache-Control": "no-cache", "x-minifeel-workspace": "1" } }),
+      modelsRequest,
+    ]);
+    if (settingsRole !== role) return;
+    if (data.code !== 200 || !data.data || typeof data.data !== "object" || Array.isArray(data.data)) throw new Error("读取设置失败");
+    settings.value = data.data;
+    platformModels.value = modelsResponse.data.data;
+  } else {
+    const modelsResponse = await modelsRequest;
+    if (settingsRole !== role) return;
+    settings.value = readUserSettings();
+    platformModels.value = modelsResponse.data.data;
   }
-  settings.value = data.data;
   // 等初始化引发的监听执行完，再允许自动保存。
   await nextTick();
   settingsReady = true;
@@ -111,6 +162,16 @@ export function saveSettings(update?: (current: Record<string, unknown>) => Reco
   const saving = saveQueue.then(async () => {
     const patch = update?.(settings.value);
     if (update && !patch) return false;
+    if (!remoteSettings) {
+      const next = selectUserSettings({ ...settings.value, ...patch });
+      localStorage.setItem(userSettingsKey, JSON.stringify(next));
+      if (patch) {
+        applyingSettings = true;
+        try { settings.value = next; }
+        finally { applyingSettings = false; }
+      }
+      return true;
+    }
     const { data } = await axios.put("/api/settings/save", { settings: { ...settings.value, ...patch } }, { headers: { "x-minifeel-workspace": "1" } });
     if (data.code !== 200) throw new Error("保存设置失败");
     if (patch && Object.hasOwn(patch, "customProviders")) invalidateNodeModels("language");

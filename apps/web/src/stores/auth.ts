@@ -69,6 +69,11 @@ export const useAuthStore = defineStore("auth", () => {
     await api.put("/auth/passwordReset", { countryCode, phone, code, password });
   }
 
+  async function setPassword(password: string) {
+    await api.put("/auth/passwordSet", { password });
+    if (user.value) user.value = { ...user.value, hasPassword: true };
+  }
+
   async function logout() {
     await api.post("/auth/logout");
     clear();
@@ -85,6 +90,7 @@ export const useAuthStore = defineStore("auth", () => {
     loginWithPassword,
     loginWithGoogle,
     resetPassword,
+    setPassword,
     logout,
   };
 });

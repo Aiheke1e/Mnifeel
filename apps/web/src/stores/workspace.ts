@@ -5,6 +5,8 @@ import api from "@/lib/api";
 export type Project = {
   id: string;
   name: string;
+  description: string;
+  templateId: string | null;
   updatedAt: string;
 };
 
@@ -22,8 +24,8 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     project.value = data.data.find(item => item.id === project.value?.id) ?? null;
   }
 
-  async function createProject(name: string, signal?: AbortSignal) {
-    const { data } = await api.post<ApiResponse<Project>>("/projects/create", { name }, { signal });
+  async function createProject(name: string, description = "", templateId?: string, signal?: AbortSignal) {
+    const { data } = await api.post<ApiResponse<Project>>("/projects/create", { name, description, templateId }, { signal });
     signal?.throwIfAborted();
     pendingAgentMessage.value = null;
     project.value = data.data;
@@ -54,9 +56,4 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   }
 
   return { project, projectList, pendingAgentMessage, loadProjects, createProject, openProject, renameProject, removeProject };
-}, {
-  persist: {
-    key: "minifeel.projectList",
-    pick: ["project", "projectList"],
-  },
 });

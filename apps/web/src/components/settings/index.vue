@@ -4,8 +4,8 @@
       <aside class="sidebar" aria-label="设置分类">
         <template v-for="item in settingsPanels" :key="item.id">
           <h3 v-if="item.groupLabel" class="settingsGroupLabel">{{ item.groupLabel }}</h3>
-          <button class="settingsItem" type="button" :aria-label="item.id === 'about' && hasDesktopUpdate ? `${item.label}，有新版本可用` : item.label" :aria-pressed="activePanel.id === item.id" @click="activePanel = item">
-            <el-badge class="panelIcon" isDot :hidden="item.id !== 'about' || !hasDesktopUpdate">
+          <button class="settingsItem" type="button" :aria-label="item.label" :aria-pressed="activePanel.id === item.id" @click="activePanel = item">
+            <el-badge class="panelIcon" isDot :hidden="true">
               <component :is="item.icon" :size="18" aria-hidden="true" />
             </el-badge>
             <span>{{ item.label }}</span>
@@ -29,8 +29,8 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, shallowRef } from "vue";
-import { hasDesktopUpdate } from "@/stores/desktopUpdate";
+import { computed, defineAsyncComponent, shallowRef, watch } from "vue";
+import { useAuthStore } from "@/stores/auth";
 import {
   IconPalette,
   IconSettings,
@@ -44,7 +44,7 @@ import {
   IconSubtitlesAi,
 } from "@tabler/icons-vue";
 
-const settingsPanels = [
+const allSettingsPanels = [
   { id: "ui", label: "界面设置", icon: IconPalette, component: defineAsyncComponent(() => import("./panels/ui.vue")) },
   { id: "general", label: "常规配置", icon: IconSettings, component: defineAsyncComponent(() => import("./panels/general/index.vue")) },
   {
@@ -68,8 +68,15 @@ const settingsPanels = [
   { id: "developer", label: "开发者选项", icon: IconCode, component: defineAsyncComponent(() => import("./panels/developer/index.vue")) },
   { id: "about", label: "关于", icon: IconInfoCircle, component: defineAsyncComponent(() => import("./panels/about.vue")) },
 ];
-const activePanel = shallowRef(settingsPanels[0]!);
+const authStore = useAuthStore();
+const userPanelIds = new Set(["ui", "general", "privacy"]);
+const settingsPanels = computed(() => authStore.user?.role === "admin" ? allSettingsPanels : allSettingsPanels.filter(item => userPanelIds.has(item.id)));
+const activePanel = shallowRef(allSettingsPanels[0]!);
 const visible = defineModel<boolean>({ default: false });
+
+watch(settingsPanels, panels => {
+  if (!panels.some(item => item.id === activePanel.value.id)) activePanel.value = panels[0]!;
+}, { immediate: true });
 </script>
 
 <style lang="scss" scoped>
