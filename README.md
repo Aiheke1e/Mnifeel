@@ -14,24 +14,6 @@
   </a>
 </p>
 
-## 自托管 Web 开发
-
-当前 `dev` 分支按两项服务运行：Minifeel 应用服务负责 Vue 页面、Bun/Express API 和生成任务，PostgreSQL 保存账号、权限、项目索引、模型配置、积分及任务记录。项目文件和生成素材仍保存在应用服务的 `data/` 目录。
-
-本地开发使用 Bun 1.3.14 和 PostgreSQL 17。先复制 [environment.example](./environment.example) 中的变量到本机环境或未提交的 `.env`，替换数据库密码、管理员密码和 `MINIFEEL_SECRET_KEY`，再依次执行：
-
-```bash
-bun install
-bun run db:migrate
-bun run dev
-```
-
-`bun run dev` 同时启动 Vite 和 Bun Server；也可以分别运行 `bun run dev:web` 与 `bun run dev:server`。依赖安装、数据库迁移和数据库服务启动均保持独立，不会隐式绑定到开发或构建命令。
-
-生产环境只需部署 Minifeel 应用服务和 PostgreSQL。应用构建后由 Express 提供 Web 静态资源，数据库与 `data/` 目录需要单独持久化和备份。
-
-真实模型密钥只能在管理员后台配置，不能写入仓库或环境示例。任何曾出现在聊天、日志或截图中的密钥都应先在供应商平台撤销并重新生成，再用于本地联调。
-
 <p align="center">
   <strong>简体中文</strong> |
   <a href="./docs/README.zhtw.md">繁體中文</a> |
