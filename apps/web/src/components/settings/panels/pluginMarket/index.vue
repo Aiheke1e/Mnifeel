@@ -69,7 +69,7 @@
             placeholder="填写 TF-Router API Key"
             aria-label="TF-Router API Key"
             :disabled="savingKey" />
-          <el-button type="primary" nativeType="submit" :loading="savingKey" :disabled="!draftKey.trim()">保存并继续</el-button>
+          <el-button type="primary" nativeType="submit" :loading="savingKey" :disabled="!draftKey.trim()">验证并继续</el-button>
         </form>
         <el-text v-if="keyError" type="danger" size="small" role="alert">{{ keyError }}</el-text>
         <el-link href="https://api.minifeel.net/" target="_blank" rel="noopener noreferrer" type="primary">前往 TF-Router 获取 API Key</el-link>
@@ -296,10 +296,7 @@ import parse from "semver/functions/parse";
 import { computed, defineAsyncComponent, markRaw, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { IconBox, IconBook, IconTool, IconExternalLink, IconSparkles2, IconUpload, IconShare, IconStar, IconStarFilled, IconLink, IconSettings, IconCopy } from "@tabler/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import tf, { getTfApiKey, isTfRouterProvider } from "@/lib/tf";
-import { saveSettings } from "@/stores/settings";
-import tfRouter from "@minifeel/providers/language/tfRouter";
-import { invalidateNodeModels } from "@minifeel/nodes-scaffold/nodeAi";
+import tf, { getTfApiKey, setTfApiKey } from "@/lib/tf";
 import saveFile from "@/lib/saveFile";
 import { writeClipboardText } from "@/lib/clipboard";
 import pluginConfigDialog from "./pluginConfigDialog.vue";
@@ -593,34 +590,11 @@ async function saveMarketKey() {
   try {
     await tf.getPlugIn({ page: 1, limit: 1, type: "all" }, { apiKey: key, signal: controller.signal });
     if (controller.signal.aborted) return;
-    await saveSettings((current) => {
-      if (controller.signal.aborted) return;
-      const providers = current.customProviders ?? [];
-      if (!Array.isArray(providers)) throw new Error("文本模型配置格式无效");
-      const index = providers.findIndex((item) => typeof item?.id === "string" && isTfRouterProvider(item));
-      if (index < 0 && providers.some((item) => typeof item?.id === "string" && item.id.toLowerCase() === tfRouter.id.toLowerCase())) {
-        throw new Error("存在同名的非官方 TF-router 供应商，请先在文本模型中修改其 ID");
-      }
-      const { id, label, version, apiUrl, protocol, models } = tfRouter;
-      const configs = current.mediaProviderConfigs as Record<string, Record<string, unknown>> | undefined;
-      if (configs !== undefined && (!configs || typeof configs !== "object" || Array.isArray(configs))) throw new Error("媒体供应商配置格式无效");
-      const mediaConfig = configs?.tfRouter;
-      if (mediaConfig !== undefined && (!mediaConfig || typeof mediaConfig !== "object" || Array.isArray(mediaConfig)))
-        throw new Error("TF-router 媒体配置格式无效");
-      return {
-        customProviders:
-          index < 0
-            ? [...providers, { id, label, version, apiUrl, protocol, models, apiKey: key }]
-            : providers.map((item, position) => (position === index ? { ...item, apiKey: key } : item)),
-        mediaProviderConfigs: { ...configs, tfRouter: { ...mediaConfig, apiKey: key } },
-      };
-    });
-    if (controller.signal.aborted) return;
-    invalidateNodeModels("media");
+    setTfApiKey(key);
     draftKey.value = "";
     if (apiKey.value === previousKey) marketRefreshKey.value++;
   } catch (error) {
-    if (!controller.signal.aborted) keyError.value = errorMessage(error, "验证或保存失败，请重试");
+    if (!controller.signal.aborted) keyError.value = errorMessage(error, "验证失败，请重试");
   } finally {
     savingKey.value = false;
   }

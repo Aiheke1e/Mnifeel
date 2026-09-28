@@ -59,8 +59,7 @@ const inputSchema = z.object({
 
 export default Router().post("/", validateFields(inputSchema.shape), async (req, res) => {
   const input = inputSchema.parse(req.body);
-  await u.providers.getRunnableModel(input.modelId, "text");
-  const configured = u.ai.getConfiguredModel(input.providerId, input.modelId);
+  const configured = await u.ai.getConfiguredModel(input.providerId, input.modelId);
   const controller = new AbortController();
   const close = () => controller.abort();
   res.once("close", close);

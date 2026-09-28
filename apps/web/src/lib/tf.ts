@@ -1,5 +1,5 @@
 import axios from "axios";
-import { customProviders, settings } from "@/stores/settings";
+import { ref } from "vue";
 
 type TfRequestOptions = { apiKey?: string; signal?: AbortSignal };
 
@@ -54,13 +54,14 @@ export function isTfRouterProvider(provider: { id: string; apiUrl: string }) {
 }
 
 const client = axios.create({ baseURL: "https://api.minifeel.net" });
+const transientApiKey = ref("");
 
 export function getTfApiKey() {
-  const provider = customProviders.value.find(isTfRouterProvider);
-  const mediaConfigs = settings.value.mediaProviderConfigs as Record<string, { apiKey?: unknown }> | undefined;
-  return [provider?.apiKey, mediaConfigs?.tfRouter?.apiKey]
-    .map(key => typeof key === "string" ? key.trim().replace(/^Bearer(?:\s+|$)/i, "").trim() : "")
-    .find(Boolean) ?? "";
+  return transientApiKey.value;
+}
+
+export function setTfApiKey(key: string) {
+  transientApiKey.value = key.trim().replace(/^Bearer(?:\s+|$)/i, "").trim();
 }
 
 function requestOptions({ apiKey, signal }: TfRequestOptions = {}) {

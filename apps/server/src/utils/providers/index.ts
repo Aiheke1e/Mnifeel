@@ -7,6 +7,9 @@ import type { MediaType, ProviderType } from "@/utils/database/types";
 import { decryptSecret, encryptSecret } from "@/utils/secrets";
 import { redactErrorMessage, redactSecrets } from "@/utils/providers/redact";
 import type { ProviderAdapter, ProviderModelDefinition, ProviderRuntimeConfig } from "@/utils/providers/types";
+import deepSeek from "@/utils/providers/deepSeek";
+import agnes from "@/utils/providers/agnes";
+import bananaPro from "@/utils/providers/bananaPro";
 
 export * from "@/utils/providers/redact";
 export type * from "@/utils/providers/types";
@@ -44,7 +47,11 @@ type ModelRow = {
   updatedAt: Date;
 };
 
-const providerAdapters = new Map<ProviderType, ProviderAdapter>();
+const providerAdapters = new Map<ProviderType, ProviderAdapter>([
+  ["deepSeek", deepSeek],
+  ["agnes", agnes],
+  ["bananaPro", bananaPro],
+]);
 const providerModelSchema = z.object({
   upstreamModelId: z.string().trim().min(1).max(300),
   displayName: z.string().trim().min(1).max(160),
@@ -60,8 +67,10 @@ function normalizeBaseUrl(value: string) {
   let url: URL;
   try { url = new URL(value.trim()); }
   catch { return invalid("供应商基础地址无效"); }
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-    invalid("供应商基础地址必须是不含凭据、查询参数和片段的 HTTP(S) 地址");
+  const localHttp = process.env.NODE_ENV === "dev" && process.env.MINIFEEL_ALLOW_INSECURE_PROVIDER_URLS === "true"
+    && url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if ((url.protocol !== "https:" && !localHttp) || url.username || url.password || url.search || url.hash) {
+    invalid("供应商基础地址必须是无凭据、查询参数和片段的 HTTPS 地址");
   }
   return url.href.replace(/\/+$/, "");
 }
@@ -330,6 +339,17 @@ export async function listPublicModels(mediaTypes?: MediaType[]) {
     isDefault: model.isDefault,
     pricing: model.pricing,
   }));
+}
+
+export async function findRunnableTextModel(providerType: string, upstreamModelId: string) {
+  const rows = await getDatabase()<Pick<ModelRow, "upstreamModelId" | "displayName" | "capabilities">[]>`
+    select m."upstreamModelId", m."displayName", m."capabilities"
+    from "modelConfigs" m join "providerConfigs" p on p."id" = m."providerId"
+    where m."mediaType" = 'text' and m."enabled" and p."enabled" and p."connectionStatus" = 'passed'
+      and p."type" = ${providerType} and m."upstreamModelId" = ${upstreamModelId}
+    limit 1
+  `;
+  return rows[0];
 }
 
 export async function getRunnableModel(modelId: string, mediaType?: MediaType) {

@@ -1,9 +1,8 @@
 import { mkdir, readFile, realpath, stat, unlink } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { mediaProviders, type Provider } from "@minifeel/providers";
 import type { GeneratedMedia, MediaGenerationRequest, MediaModel, MediaReference } from "@minifeel/tools-scaffold/runtime";
-import conf from "@/utils/conf";
-import { getMediaProvider, listMediaProviders, loadMediaProviderSource } from "@/utils/media/provider";
+import { getRunnableModel, listPublicModels } from "@/utils/providers";
+import type { ProviderMediaAsset, ProviderMediaInput, ProviderVideoTask } from "@/utils/providers/types";
 import { lockWorkspaceFiles, resolveWorkspacePath, writeWorkspaceFile } from "@/utils/workspace/files";
 
 const maxMediaSize = 100 * 1024 * 1024;
@@ -19,29 +18,30 @@ function invalid(message: string): never {
   throw Object.assign(new Error(message), { status: 400 });
 }
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
 function imageOptions(value: unknown, pattern: RegExp) {
   return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string" && item.length <= 64 && item === item.trim() && pattern.test(item)))] : undefined;
 }
 
 export async function listMediaModels(): Promise<MediaModel[]> {
-  const installedProviders = await listMediaProviders();
-  return installedProviders.flatMap(provider => provider.models.flatMap(model => {
-    if (model.type !== "image" && model.type !== "video" && model.type !== "audio") return [];
-    const builtIn = (mediaProviders as readonly Provider[]).find(item => item.id === provider.id)?.models.find(item => item.id === model.id);
+  const models = await listPublicModels(["image", "video"]);
+  return models.flatMap(model => {
+    if (model.mediaType !== "image" && model.mediaType !== "video") return [];
+    const capabilities = model.capabilities ?? {};
     return [{
-      providerId: provider.id, providerLabel: provider.label, modelId: model.id, label: model.label, type: model.type,
-      mode: model.mode, durationResolutionMap: model.durationResolutionMap, audio: model.audio,
-      ...(model.type === "audio" ? { voices: model.voices } : {}),
-      ...(model.type === "image" ? {
-        imageSizes: imageOptions(Array.isArray(model.imageSizes) ? model.imageSizes : builtIn?.imageSizes, /^[^\u0000-\u001f\u007f]+$/),
-        imageRatios: imageOptions(Array.isArray(model.imageRatios) ? model.imageRatios : builtIn?.imageRatios, /^[1-9]\d{0,3}:[1-9]\d{0,3}$/),
+      providerId: "managed",
+      providerLabel: "平台模型",
+      modelId: model.id,
+      label: model.displayName,
+      type: model.mediaType,
+      mode: capabilities.modes,
+      durationResolutionMap: Array.isArray(capabilities.durationResolutionMap) ? capabilities.durationResolutionMap as MediaModel["durationResolutionMap"] : undefined,
+      audio: typeof capabilities.audio === "boolean" || capabilities.audio === "optional" ? capabilities.audio : undefined,
+      ...(model.mediaType === "image" ? {
+        imageSizes: imageOptions(capabilities.sizes, /^[^\u0000-\u001f\u007f]+$/),
+        imageRatios: imageOptions(capabilities.ratios, /^[1-9]\d{0,3}:[1-9]\d{0,3}$/),
       } : {}),
-    } as MediaModel];
-  }));
+    }];
+  });
 }
 
 function detectMimeType(bytes: Uint8Array, fallback: string) {
@@ -66,7 +66,7 @@ function detectMimeType(bytes: Uint8Array, fallback: string) {
   return ({ "image/jpg": "image/jpeg", "audio/mp3": "audio/mpeg", "audio/x-wav": "audio/wav", "audio/wave": "audio/wav", "audio/x-flac": "audio/flac" } as Record<string, string>)[mimeType] ?? mimeType;
 }
 
-export async function readReference(cwd: string, reference: MediaReference, mediaType: string, signal?: AbortSignal): Promise<Extract<MediaInput, { type: "base64" }>> {
+export async function readReference(cwd: string, reference: MediaReference, mediaType: string, signal?: AbortSignal): Promise<ProviderMediaInput> {
   signal?.throwIfAborted();
   const { path } = await resolveWorkspacePath(cwd, reference.path);
   const info = await stat(path);
@@ -75,12 +75,23 @@ export async function readReference(cwd: string, reference: MediaReference, medi
   if (!bytes.length || bytes.length > maxMediaSize) invalid("参考媒体为空或超过 100 MB");
   const mimeType = detectMimeType(bytes, reference.mimeType);
   if (!mimeType.startsWith(`${mediaType}/`)) invalid(`参考媒体类型须为 ${mediaType}`);
-  return { type: "base64", data: bytes.toString("base64"), mimeType };
+  return { data: bytes.toString("base64"), mimeType };
 }
 
 async function downloadAsset(url: string, signal?: AbortSignal) {
-  if (!/^https?:\/\//i.test(url)) invalid("生成结果必须使用 HTTP 或 HTTPS 地址");
-  const response = await fetch(url, { signal });
+  let current = new URL(url);
+  if (!["http:", "https:"].includes(current.protocol)) invalid("生成结果必须使用 HTTP 或 HTTPS 地址");
+  let response: Response | undefined;
+  for (let redirects = 0; redirects <= 3; redirects++) {
+    response = await fetch(current, { signal, redirect: "manual" });
+    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    const location = response.headers.get("location");
+    await response.body?.cancel();
+    if (!location || redirects === 3) invalid("生成结果重定向次数超过限制");
+    current = new URL(location, current);
+    if (!["http:", "https:"].includes(current.protocol)) invalid("生成结果重定向到无效地址");
+  }
+  if (!response) invalid("生成结果为空");
   if (!response.ok) throw new Error(`下载生成结果失败（HTTP ${response.status}）`);
   if (Number(response.headers.get("content-length")) > maxMediaSize) {
     await response.body?.cancel();
@@ -103,23 +114,20 @@ async function downloadAsset(url: string, signal?: AbortSignal) {
   return { bytes: Buffer.concat(chunks, size), mimeType: response.headers.get("content-type") ?? "" };
 }
 
-async function assetBytes(asset: MediaAsset, mediaType: "image" | "video" | "audio", signal?: AbortSignal) {
-  if (!asset || asset.mediaType !== mediaType) invalid("供应商返回的媒体类型不正确");
+async function assetBytes(asset: ProviderMediaAsset, mediaType: "image" | "video", signal?: AbortSignal) {
   let bytes: Uint8Array;
   let mimeType = asset.mimeType ?? "";
   if (asset.type === "url") {
     const result = await downloadAsset(asset.url, signal);
     bytes = result.bytes;
     mimeType = result.mimeType || mimeType;
-  } else if (asset.type === "base64") {
+  } else {
     const data = /^data:([^;,]+);base64,([\s\S]+)$/.exec(asset.data);
     const content = (data?.[2] ?? asset.data).replace(/\s/g, "");
     if (content.length > Math.ceil(maxMediaSize / 3) * 4 || !/^[a-zA-Z0-9+/]*={0,2}$/.test(content) || content.length % 4 === 1) invalid("生成结果的 base64 内容无效或超过 100 MB");
     bytes = Buffer.from(content, "base64");
     mimeType = data?.[1] ?? mimeType;
-  } else if (asset.type === "binary" && ArrayBuffer.isView(asset.data) && asset.data.BYTES_PER_ELEMENT === 1) {
-    bytes = asset.data;
-  } else { return invalid("供应商返回了无效的媒体结果"); }
+  }
   if (!bytes.byteLength || bytes.byteLength > maxMediaSize) invalid("生成文件为空或超过 100 MB");
   mimeType = detectMimeType(bytes, mimeType);
   if (!mimeType.startsWith(`${mediaType}/`) || !mediaExtensions[mimeType]) invalid("生成结果不是支持的图片、视频或音频格式");
@@ -134,36 +142,41 @@ export async function generateMedia(
 ): Promise<GeneratedMedia[]> {
   signal?.throwIfAborted();
   if (!request.prompt.trim()) invalid("请输入生成提示词");
+  if (mediaType === "audio") invalid("当前没有启用音频生成模型");
   const directory = await realpath(cwd);
   const outputDirectory = request.outputDirectory ?? "assets/generated";
   await resolveWorkspacePath(directory, outputDirectory, true);
-  const providerInfo = await getMediaProvider(request.providerId);
-  const model = providerInfo.models.find(model => model.id === request.modelId && model.type === mediaType);
-  if (!model) invalid("所选媒体模型不存在或类型不匹配，请重新选择");
-  const configurations = record(conf.get("settings", {}).mediaProviderConfigs);
-  const provider = await loadMediaProviderSource(providerInfo.source, record(configurations[providerInfo.id]), signal, undefined, directory);
-  const generate = mediaType === "image" ? provider.generateImage : mediaType === "video" ? provider.generateVideo : provider.generateAudio;
-  if (typeof generate !== "function") invalid(`此供应商不支持${{ image: "图片", video: "视频", audio: "音频" }[mediaType]}生成`);
-  const rules = Array.isArray(provider.rules) ? provider.rules : [];
-  if (rules.some(rule => rule.field === "apiKey") && (typeof provider.config.apiKey !== "string" || !provider.config.apiKey.trim())) invalid("请先在媒体模型设置中配置供应商 API Key");
   const references = async (items: MediaReference[] | undefined, type: string) => items ? Promise.all(items.map(item => readReference(directory, item, type, signal))) : undefined;
   const images = await references(request.images, "image");
   signal?.throwIfAborted();
-  const assets = mediaType === "audio"
-    ? await provider.generateAudio!({
-      model: request.modelId, text: request.prompt, audios: await references(request.audios, "audio"),
-      voice: request.voice, speed: request.speed, volume: request.volume, format: request.format, sampleRate: request.sampleRate,
-    })
-    : mediaType === "image"
-    ? await provider.generateImage!({ model: request.modelId, prompt: request.prompt, images, ratio: request.ratio, size: request.size })
-    : await provider.generateVideo!({
-      model: request.modelId, prompt: request.prompt, images,
-      videos: await references(request.videos, "video"), audios: await references(request.audios, "audio"),
+  const configured = await getRunnableModel(request.modelId, mediaType);
+  let assets: ProviderMediaAsset[];
+  if (mediaType === "image") {
+    if (!configured.adapter.runImage) invalid("此供应商不支持图片生成");
+    assets = await configured.adapter.runImage(configured.provider, configured.model, {
+      prompt: request.prompt, images, ratio: request.ratio, size: request.size,
+    }, signal);
+  } else {
+    if (!configured.adapter.createVideo || !configured.adapter.getVideo) invalid("此供应商不支持视频生成");
+    const operationSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(30 * 60_000)]) : AbortSignal.timeout(30 * 60_000);
+    const task = await configured.adapter.createVideo(configured.provider, configured.model, {
+      prompt: request.prompt, images,
+      videos: await references(request.videos, "video"),
+      audios: await references(request.audios, "audio"),
       firstFrame: request.firstFrame ? await readReference(directory, request.firstFrame, "image", signal) : undefined,
       lastFrame: request.lastFrame ? await readReference(directory, request.lastFrame, "image", signal) : undefined,
       ratio: request.ratio, resolution: request.resolution, duration: request.duration,
-      generateAudio: request.generateAudio, mode: request.mode,
-    });
+    }, operationSignal);
+    try {
+      const asset = await waitForVideo(configured.adapter.getVideo.bind(configured.adapter), configured.provider, task, operationSignal);
+      assets = [asset];
+    } catch (error) {
+      if (operationSignal.aborted && configured.adapter.cancelVideo) {
+        await configured.adapter.cancelVideo(configured.provider, task).catch(() => {});
+      }
+      throw error;
+    }
+  }
   if (!Array.isArray(assets) || !assets.length) invalid("供应商未返回生成结果");
   const written: string[] = [];
   const result: GeneratedMedia[] = [];
@@ -190,5 +203,34 @@ export async function generateMedia(
     // ACT: 只回滚本次创建的文件，保留目录中已有的节点资源。
     await Promise.all(written.map(path => unlink(path).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; })));
     throw err;
+  }
+}
+
+async function waitForVideo(
+  getVideo: NonNullable<Awaited<ReturnType<typeof getRunnableModel>>["adapter"]["getVideo"]>,
+  provider: Awaited<ReturnType<typeof getRunnableModel>>["provider"],
+  task: ProviderVideoTask,
+  signal: AbortSignal,
+) {
+  while (true) {
+    signal.throwIfAborted();
+    const result = await getVideo(provider, task, signal);
+    if (result.status === "succeeded") {
+      if (!result.asset) throw new Error("视频任务完成但没有返回文件");
+      return result.asset;
+    }
+    if (result.status === "failed") throw new Error(result.error || "视频生成失败");
+    await new Promise<void>((resolve, reject) => {
+      const done = () => {
+        signal.removeEventListener("abort", abort);
+        resolve();
+      };
+      const abort = () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      };
+      const timer = setTimeout(done, 3000);
+      signal.addEventListener("abort", abort, { once: true });
+    });
   }
 }

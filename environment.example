@@ -7,6 +7,9 @@ MINIFEEL_DATA_DIR=./data
 # 32 字节随机密钥的 Base64 文本，用于加密供应商 API Key。
 MINIFEEL_SECRET_KEY=
 
+# 仅供开发环境连接本机模拟供应商；生产环境始终要求 HTTPS。
+MINIFEEL_ALLOW_INSECURE_PROVIDER_URLS=false
+
 # 仅在数据库尚无管理员时使用，初始化完成后不会覆盖现有管理员。
 MINIFEEL_ADMIN_PHONE=+8613800000000
 MINIFEEL_ADMIN_PASSWORD=changeBeforeFirstRun

@@ -3,7 +3,6 @@ import { lstat, mkdir, readFile, readdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createContext, SourceTextModule } from "node:vm";
 import type { AudioConvertOptions, Provider, ProviderTools } from "@minifeel/providers";
-import tfRouter from "@minifeel/providers/media/tfRouter";
 import { parse, parseExpression } from "@babel/parser";
 import { z } from "zod";
 import conf from "@/utils/conf";
@@ -113,8 +112,7 @@ function parseProvider(source: string) {
 function metadata(fileName: string, source: string) {
   const { id, label, version, readme, modelsUrl, models } = parseProvider(source);
   if (fileName !== `${id}.ts`) invalid("供应商 ID 与文件名不一致");
-  // ACT: 旧 TF-Router 文件不会随应用覆盖，缺少列表地址时使用内置定义。
-  return { fileName, id, label, version, readme, modelsUrl: modelsUrl ?? (id === tfRouter.id ? tfRouter.modelsUrl : undefined), models,
+  return { fileName, id, label, version, readme, modelsUrl, models,
     revision: createHash("sha256").update(source).digest("hex"), loadError: "" };
 }
 
@@ -183,7 +181,7 @@ export async function addMediaProvider(source: string) {
   return result;
 }
 
-export async function saveMediaProvider(fileName: string, models: z.infer<typeof mediaModelsSchema>, revision: string, expectedApiKey?: string) {
+export async function saveMediaProvider(fileName: string, models: z.infer<typeof mediaModelsSchema>, revision: string) {
   if (!mediaProviderFileSchema.safeParse(fileName).success) invalid("供应商文件名无效");
   const checked = mediaModelsSchema.safeParse(models);
   if (!checked.success) invalid(checked.error.issues.map(issue => issue.message).join("；"));
@@ -202,15 +200,9 @@ export async function saveMediaProvider(fileName: string, models: z.infer<typeof
     // ACT: 只替换 models 源码区间，保留供应商函数及其余用户编辑。
     const source = current.source.slice(0, start) + replacement + current.source.slice(end);
     const result = metadata(fileName, source);
-    if (expectedApiKey !== undefined && getMediaProviderApiKey(result.id) !== expectedApiKey) invalid("供应商配置已变更，请重试", 409);
     await writeWorkspaceFile(join(path, fileName), source);
     return result;
   } finally { release(); }
-}
-
-export function getMediaProviderApiKey(id: string) {
-  const value: unknown = conf.get(`settings.mediaProviderConfigs.${id}.apiKey`);
-  return typeof value === "string" ? value.trim().replace(/^Bearer(?:\s+|$)/i, "").trim() : "";
 }
 
 export async function refreshMediaProviderModels(fileName: string, revision?: string) {
@@ -218,9 +210,8 @@ export async function refreshMediaProviderModels(fileName: string, revision?: st
   const provider = await getMediaProvider(fileName.slice(0, -3));
   if (revision !== undefined && revision !== provider.revision) invalid("供应商文件已被修改，请刷新页面后再获取", 409);
   if (!provider.modelsUrl) invalid("供应商未配置 modelsUrl");
-  const apiKey = getMediaProviderApiKey(provider.id);
   const response = await fetch(provider.modelsUrl, {
-    headers: { Accept: "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+    headers: { Accept: "application/json" },
     signal: AbortSignal.timeout(30000), redirect: "error",
   });
   if (!response.ok) throw new Error(`获取媒体模型列表失败（HTTP ${response.status}）`);
@@ -229,8 +220,7 @@ export async function refreshMediaProviderModels(fileName: string, revision?: st
   const requestedType = z.enum(["text", "image", "video", "audio"]).safeParse(new URL(provider.modelsUrl).searchParams.get("type"));
   const models = result.data.map(model => {
     const id = model.id.trim();
-    const previous = provider.models.find(item => item.id === id)
-      ?? (provider.id === tfRouter.id ? tfRouter.models.find(item => item.id === id) : undefined);
+    const previous = provider.models.find(item => item.id === id);
     const type = model.type ?? (requestedType.success ? requestedType.data : previous?.type);
     if (!type) invalid(`模型 ${id} 缺少 type，请在返回数据或 modelsUrl 的 type 参数中指定`);
     // ACT: 只有 ID 的列表沿用同名模型参数，新模型不猜测生成能力。
@@ -238,7 +228,7 @@ export async function refreshMediaProviderModels(fileName: string, revision?: st
       ?? (typeof model.display_name === "string" ? model.display_name : typeof model.displayName === "string" ? model.displayName : id), type };
   });
   const types = new Set(models.map(model => model.type));
-  return saveMediaProvider(fileName, [...provider.models.filter(model => !types.has(model.type)), ...models], provider.revision, apiKey);
+  return saveMediaProvider(fileName, [...provider.models.filter(model => !types.has(model.type)), ...models], provider.revision);
 }
 
 export async function deleteMediaProvider(fileName: string, revision: string) {
@@ -251,7 +241,6 @@ export async function deleteMediaProvider(fileName: string, revision: string) {
     const current = await readProvider(path, fileName);
     if (current.revision !== revision) invalid("供应商文件已被修改，请刷新页面后再删除", 409);
     await unlink(file);
-    conf.delete(`settings.mediaProviderConfigs.${current.id}`);
   } finally { release(); }
 }
 

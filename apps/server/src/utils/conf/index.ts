@@ -1,6 +1,5 @@
 import conf from "conf";
 import { resolve } from "node:path";
-import tfRouter from "@minifeel/providers/language/tfRouter";
 import type { RemoteTeam } from "@/utils/teams";
 import type { A2aSettings } from "@/agent/a2a/settings";
 
@@ -25,11 +24,5 @@ export function removeLegacySettings(settings: Record<string, unknown>) {
 
 const settings = config.get("settings", {});
 if (removeLegacySettings(settings)) config.set("settings", settings);
-
-// ACT: 仅初始化尚未配置的文本供应商；已有列表（包括用户清空的列表）保持原样。
-if (!config.has("settings.customProviders")) {
-  const { id, label, version, apiUrl, protocol, models } = tfRouter;
-  config.set("settings.customProviders", [{ id, label, version, apiUrl, protocol, models, apiKey: "" }]);
-}
 
 export default config;

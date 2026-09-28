@@ -14,7 +14,6 @@ export default Router().post("/", validateFields({
     res.status(400).json(error("参数错误", parsed.error.issues, 400));
     return;
   }
-  await u.providers.getRunnableModel(parsed.data.modelId, mediaType);
   const cwd = await u.projects.resolveProjectWorkspace(getAuth(res).user.id, projectId);
   const controller = new AbortController();
   const close = () => controller.abort();

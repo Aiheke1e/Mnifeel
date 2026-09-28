@@ -3,5 +3,5 @@ import { success } from "@/lib/responseFormat";
 import u from "@/utils";
 
 export default Router().get("/", async (_req, res) => {
-  res.set("Cache-Control", "no-store").json(success(await u.providers.listPublicModels(["text"])));
+  res.set("Cache-Control", "no-store").json(success(await u.ai.listAiModels()));
 });

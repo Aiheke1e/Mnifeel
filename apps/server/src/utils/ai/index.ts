@@ -4,9 +4,9 @@ import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messag
 import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { Context, Model } from "@earendil-works/pi-ai";
 import { z } from "zod";
-import conf from "@/utils/conf";
 import { readReference } from "@/utils/media/generation";
 import modelContextLimits from "@/utils/ai/modelContextLimits";
+import { getRunnableModel, listPublicModels } from "@/utils/providers";
 
 export { fetchProviderModels } from "@/utils/ai/models";
 
@@ -42,33 +42,47 @@ export function getModelLimits(providerId: string, model: z.infer<typeof provide
   };
 }
 
-export function getConfiguredModel(providerId: string, modelId: string) {
-  const providers = conf.get("settings", {}).customProviders;
-  const parsed = providerSchema.safeParse(Array.isArray(providers) ? providers.find(item => item?.id === providerId) : undefined);
-  if (!parsed.success) throw Object.assign(new Error("请先在设置中配置模型供应商"), { status: 400 });
-  const provider = parsed.data;
-  const model = provider.models.find(item => item.id === modelId);
-  if (!model) throw Object.assign(new Error("所选模型不存在，请重新选择"), { status: 400 });
+export async function getConfiguredModel(providerId: string, modelId: string) {
+  const configured = await getRunnableModel(modelId, "text");
+  if (configured.provider.type !== "deepSeek" || (providerId && providerId !== configured.provider.type && providerId !== configured.provider.id)) {
+    throw Object.assign(new Error("所选文本模型与供应商不匹配"), { status: 400 });
+  }
+  const capabilities = configured.model.capabilities ?? {};
+  const sourceModel = {
+    id: configured.model.upstreamModelId,
+    label: configured.model.displayName,
+    contextWindow: typeof capabilities.contextWindow === "number" ? capabilities.contextWindow : undefined,
+    maxOutputTokens: typeof capabilities.maxOutputTokens === "number" ? capabilities.maxOutputTokens : undefined,
+  };
+  const provider = providerSchema.parse({
+    apiUrl: configured.provider.baseUrl,
+    apiKey: configured.provider.apiKey,
+    protocol: "openai-completions",
+    models: [sourceModel],
+  });
   const baseUrl = new URL(provider.apiUrl);
   if (baseUrl.pathname === "/") baseUrl.pathname = "/v1";
-  const limits = getModelLimits(providerId, model);
-  return { provider, model: { ...model, contextWindow: limits.contextWindow, maxOutputTokens: limits.maxTokens }, baseUrl: baseUrl.href.replace(/\/+$/, "") };
+  const limits = getModelLimits(configured.provider.type, sourceModel);
+  return {
+    providerId: configured.provider.type,
+    provider,
+    model: { ...sourceModel, contextWindow: limits.contextWindow, maxOutputTokens: limits.maxTokens },
+    baseUrl: baseUrl.href.replace(/\/+$/, ""),
+  };
 }
 
-export function listAiModels() {
-  const providers = conf.get("settings", {}).customProviders;
-  if (!Array.isArray(providers)) return [];
-  return providers.flatMap(item => {
-    const parsed = providerSchema.extend({ id: z.string().min(1), label: z.string() }).safeParse(item);
-    if (!parsed.success) return [];
-    const provider = parsed.data;
-    return provider.models.filter(model => model.id.trim()).map(model => {
-      const limits = getModelLimits(provider.id, model);
-      return {
-        providerId: provider.id, providerLabel: provider.label, protocol: provider.protocol, modelId: model.id, label: model.label,
-        contextWindow: limits.contextWindow, maxOutputTokens: limits.maxTokens,
-      };
-    });
+export async function listAiModels() {
+  return (await listPublicModels(["text"])).map(model => {
+    const capabilities = model.capabilities ?? {};
+    return {
+      providerId: "deepSeek",
+      providerLabel: "平台模型",
+      modelId: model.id,
+      label: model.displayName,
+      protocol: "openai-completions" as const,
+      contextWindow: typeof capabilities.contextWindow === "number" ? capabilities.contextWindow : undefined,
+      maxOutputTokens: typeof capabilities.maxOutputTokens === "number" ? capabilities.maxOutputTokens : undefined,
+    };
   });
 }
 
@@ -120,7 +134,7 @@ export function referenceContent(protocol: string, prompt: string, references: A
 }
 
 export function streamAi(
-  configured: ReturnType<typeof getConfiguredModel>,
+  configured: Awaited<ReturnType<typeof getConfiguredModel>>,
   context: Context,
   signal: AbortSignal,
   references: Awaited<ReturnType<typeof readAiReferences>> = [],
