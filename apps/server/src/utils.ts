@@ -21,6 +21,8 @@ import * as teams from "@/utils/teams";
 import * as a2aSettings from "@/agent/a2a/settings";
 import * as personalization from "@/utils/personalization";
 import * as database from "@/utils/database";
+import * as auth from "@/utils/auth";
+import * as audit from "@/utils/audit";
 
 export default {
   assets,
@@ -47,4 +49,6 @@ export default {
   a2aSettings,
   personalization,
   database,
+  auth,
+  audit,
 };

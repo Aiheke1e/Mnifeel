@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import type { Request, Response, NextFunction } from "express";
 import buildRoute from "@/core";
 import { error } from "@/lib/responseFormat";
+import { requireAdmin, requireAuth, resolveAuth } from "@/lib/middleware";
 import desktopRequest from "@/lib/desktop";
 import initializePlugins from "@/utils/plugins/initialize";
 
@@ -37,6 +38,8 @@ export async function createApp({
   ]);
   await checkDatabase();
   await migrateDatabase();
+  const { initializeAdmin } = await import("@/utils/auth");
+  await initializeAdmin();
   if (dataDirectory && toolsRoot)
     await initializePlugins(resolve(dataDirectory, "tools"), toolsRoot, /^[a-z][a-zA-Z0-9]*\.tool\.js$/, pluginRevision);
   if (dataDirectory && nodesRoot) await initializePlugins(resolve(dataDirectory, "nodes"), nodesRoot, /^[a-z][a-zA-Z0-9]*\.umd\.js$/, pluginRevision);
@@ -57,6 +60,21 @@ export async function createApp({
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ extended: true, limit: "100mb" }));
   app.use("/api/desktop", desktopRequest);
+  app.use("/api", resolveAuth);
+  app.use("/api", (request, response, next) => {
+    const publicRoutes = new Set([
+      "GET /hello",
+      "GET /auth/options",
+      "POST /auth/requestCode",
+      "POST /auth/phone",
+      "POST /auth/password",
+      "POST /auth/google",
+      "PUT /auth/passwordReset",
+    ]);
+    if (publicRoutes.has(`${request.method} ${request.path}`)) return next();
+    requireAuth(request, response, next);
+  });
+  app.use("/api/admin", requireAdmin);
 
   const { default: initializeProviderModels } = await import("@/utils/ai/initialize");
   await initializeProviderModels();
@@ -68,9 +86,9 @@ export async function createApp({
     import("@/utils/mcp/control"),
     import("@/utils/mcp/resources"),
   ]);
-  app.use("/mcp", createMcpRouter({ getTools: getMcpTools, authorize: authorizeMcp, resources: skillResources }));
+  app.use("/mcp", resolveAuth, requireAuth, createMcpRouter({ getTools: getMcpTools, authorize: authorizeMcp, resources: skillResources }));
   const { createA2aRouter } = await import("@/agent/a2a");
-  app.use("/a2a", createA2aRouter());
+  app.use("/a2a", resolveAuth, requireAuth, createA2aRouter());
   app.use(express.static(webRoot));
 
   // 错误处理
