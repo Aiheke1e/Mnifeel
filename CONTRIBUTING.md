@@ -2,7 +2,7 @@
 
 欢迎参与 Minifeel。无论是反馈问题、改进文档、开发插件，还是修复代码，都可以帮助创作者更顺畅地完成作品。
 
-参与讨论和协作前，请阅读 [社区行为准则](./CODE_OF_CONDUCT.md)。项目介绍和使用方法见 [README](./README.md)，完整开发说明见 [开发与扩展指南](./docs/development.md)，代码修改以 [开发规范](./AGENTS.md) 为准。
+参与讨论和协作前，请阅读 [社区行为准则](./CODE_OF_CONDUCT.md)。项目介绍和使用方法见 [README](./README.md)，完整开发说明见 [开发与扩展指南](./docs/development.md)，代码修改以 [开发规范](./AGENTS.md) 为准，提交说明以 [Git 提交备注规范](./docs/commit-convention.md) 为准。
 
 ## 从哪里开始
 
@@ -192,7 +192,7 @@ Intel Mac 则先安装兼容 SDK，并运行一次桌面开发或构建命令生
 
 ## 提交 Pull Request
 
-从当前代码创建自己的工作分支，保持提交内容围绕本次修改。推送前检查 diff，确认没有混入本机数据和无关文件。
+从当前代码创建自己的工作分支，保持提交内容围绕本次修改。推送前检查 diff，确认没有混入本机数据和无关文件。Commit Message 请遵循 [Git 提交备注规范](./docs/commit-convention.md)。
 
 PR 标题直接说明解决的问题，正文建议包含：
 
