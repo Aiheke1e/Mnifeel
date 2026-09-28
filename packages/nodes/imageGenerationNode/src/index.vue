@@ -222,9 +222,9 @@ async function startGeneration() {
   // ACT: 工具立即返回，任务由节点持有，停止或卸载时取消。
   generation = generationState.run(() => workspace
     .list()
-    .then(({ directory }) => {
+    .then(({ projectId }) => {
       controller.signal.throwIfAborted();
-      return ai.generateImage({ ...input, directory }, controller.signal);
+      return ai.generateImage({ ...input, projectId }, controller.signal);
     })
     .then(([result]) => {
       controller.signal.throwIfAborted();

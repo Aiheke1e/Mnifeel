@@ -27,11 +27,12 @@
 import { computed, nextTick, ref, shallowRef } from "vue";
 import axios from "axios";
 import saveFile from "@/lib/saveFile";
+import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { ElMessage, ElMessageBox, type DropdownInstance } from "element-plus";
 import { IconChevronRight, IconFolder, IconFolderPlus } from "@tabler/icons-vue";
 
 type AssetEntry = { name: string; path: string; type: "file" | "directory"; children?: AssetEntry[] };
-const props = defineProps<{ entries: AssetEntry[] }>();
+const props = defineProps<{ entries: AssetEntry[]; projectId: string; rootPath: string }>();
 const emit = defineEmits<{ changed: [path?: string, target?: string] }>();
 const menu = ref<DropdownInstance>();
 const menuAnchor = shallowRef({ getBoundingClientRect: () => new DOMRect() });
@@ -46,7 +47,7 @@ const moveFolders = computed(() => {
       ...flatten(item.children ?? []),
     ]);
   }
-  return [{ label: "素材库根目录", path: "." }, ...flatten(props.entries)];
+  return [{ label: "素材库根目录", path: props.rootPath }, ...flatten(props.entries)];
 });
 
 function destinationDisabled(path: string) {
@@ -78,7 +79,7 @@ function showError(error: unknown) {
 async function relocate(entry: AssetEntry, target: string) {
   busy.value = true;
   try {
-    await axios.post("/api/assets/rename", { path: entry.path, target });
+    await useWorkspaceFiles(props.projectId).rename(entry.path, target);
     emit("changed", entry.path, target);
   } finally {
     busy.value = false;
@@ -89,7 +90,7 @@ async function moveTo(directory: string) {
   const entry = activeEntry.value!;
   closeMenu();
   try {
-    await relocate(entry, directory === "." ? entry.name : directory + "/" + entry.name);
+  await relocate(entry, directory === props.rootPath ? `${props.rootPath}/${entry.name}` : directory + "/" + entry.name);
   } catch (error) {
     showError(error);
   }
@@ -108,8 +109,9 @@ async function createMoveFolder() {
       cancelButtonText: "取消",
     });
     const name = value.trim();
-    await axios.post("/api/assets/mkdir", { path: name });
-    await relocate(entry, name + "/" + entry.name);
+    const target = `${props.rootPath}/${name}`;
+    await useWorkspaceFiles(props.projectId).mkdir(target);
+    await relocate(entry, `${target}/${entry.name}`);
   } catch (error) {
     showError(error);
     emit("changed");
@@ -126,7 +128,7 @@ async function handleCommand(command: string) {
   closeMenu();
   try {
     if (command === "download") {
-      await saveFile(() => axios.get<Blob>("/api/assets/read", { params: { path: entry.path, download: true }, responseType: "blob" }).then(({ data }) => data), entry.name);
+      await saveFile(() => useWorkspaceFiles(props.projectId).read(entry.path).then(data => new Blob([data])), entry.name);
     }
     if (command === "rename") {
       const { value } = await ElMessageBox.prompt("名称", "重命名", {
@@ -137,13 +139,13 @@ async function handleCommand(command: string) {
         confirmButtonText: "保存",
         cancelButtonText: "取消",
       });
-      await relocate(entry, parent === "." ? value.trim() : parent + "/" + value.trim());
+      await relocate(entry, parent === props.rootPath ? `${props.rootPath}/${value.trim()}` : parent + "/" + value.trim());
     }
     if (command === "delete") {
       await ElMessageBox.confirm("确定删除“" + entry.name + "”？", "删除素材", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" });
       busy.value = true;
       try {
-        await axios.delete("/api/assets/remove", { data: { path: entry.path } });
+        await useWorkspaceFiles(props.projectId).remove(entry.path);
         emit("changed", entry.path);
       } finally {
         busy.value = false;

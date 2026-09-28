@@ -1,7 +1,7 @@
 <template>
   <main class="workspacePage" :style="{ '--agentWidth': `${agentVisible ? agentWidth : 0}px` }">
     <canvasPanel
-      :key="workspaceStore.project?.directory"
+      :key="workspaceStore.project?.id"
       ref="canvasPanelRef"
       class="canvasPanel"
       :class="{ backgroundPanel: activePanel !== 'canvas' }"
@@ -12,7 +12,7 @@
     <keep-alive :max="1">
       <documentPanel
         v-if="activePanel === 'document'"
-        :key="workspaceStore.project?.directory"
+        :key="workspaceStore.project?.id"
         ref="documentPanelRef"
         :readNode="readDocumentNode"
         :saveNode="saveDocumentNode" />
@@ -75,7 +75,7 @@ const controlLifetime = new AbortController();
 onScopeDispose(() => controlLifetime.abort(new Error("工作区已关闭")));
 registerWorkspaceControl({
   getState: () => ({
-    directory: workspaceStore.project?.directory ?? null,
+    projectId: workspaceStore.project?.id ?? null,
     canvasId: canvasPanelRef.value?.canvasId || null,
     panel: activePanel.value,
     tools: canvasPanelRef.value?.canvasReady ? canvasPanelRef.value.getCanvasContext()?.tools ?? [] : [],
@@ -83,12 +83,12 @@ registerWorkspaceControl({
   }),
   flushSave,
   async call(request, signal) {
-    const directory = workspaceStore.project?.directory;
-    if (!directory) throw new Error("请先打开工作区");
+    const projectId = workspaceStore.project?.id;
+    if (!projectId) throw new Error("请先打开工作区");
     const callSignal = AbortSignal.any([signal, controlLifetime.signal]);
     const checkDirectory = () => {
       callSignal.throwIfAborted();
-      if (directory !== workspaceStore.project?.directory) throw new Error("工作区已切换，本次调用已停止");
+      if (projectId !== workspaceStore.project?.id) throw new Error("工作区已切换，本次调用已停止");
     };
     checkDirectory();
     if (request.name === "switchPanel") {
@@ -167,14 +167,14 @@ async function switchPanel(value: string | number | boolean) {
   }
 }
 
-function readDocumentNode(directory: string, canvasPath: string, nodeId: string) {
+function readDocumentNode(projectId: string, canvasPath: string, nodeId: string) {
   if (!canvasPanelRef.value) throw new Error("画布尚未就绪");
-  return canvasPanelRef.value.readDocumentNode(directory, canvasPath, nodeId);
+  return canvasPanelRef.value.readDocumentNode(projectId, canvasPath, nodeId);
 }
 
-function saveDocumentNode(directory: string, canvasPath: string, nodeId: string, handleId: string, text: string) {
+function saveDocumentNode(projectId: string, canvasPath: string, nodeId: string, handleId: string, text: string) {
   if (!canvasPanelRef.value) throw new Error("画布尚未就绪");
-  return canvasPanelRef.value.saveDocumentNode(directory, canvasPath, nodeId, handleId, text);
+  return canvasPanelRef.value.saveDocumentNode(projectId, canvasPath, nodeId, handleId, text);
 }
 </script>
 

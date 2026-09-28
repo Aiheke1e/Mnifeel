@@ -23,6 +23,7 @@ import * as personalization from "@/utils/personalization";
 import * as database from "@/utils/database";
 import * as auth from "@/utils/auth";
 import * as audit from "@/utils/audit";
+import * as projects from "@/utils/projects";
 
 export default {
   assets,
@@ -51,4 +52,5 @@ export default {
   database,
   auth,
   audit,
+  projects,
 };

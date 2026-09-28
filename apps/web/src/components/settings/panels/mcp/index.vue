@@ -21,8 +21,8 @@
         </div>
         <ul v-if="status.enabled && status.connections.length" class="connectionList">
           <li v-for="connection in status.connections" :key="connection.id">
-            <span>{{ connection.state.directory || "首页" }}</span>
-            <small v-if="connection.state.directory">{{ connection.state.panel === "document" ? "文档" : "画布" }}</small>
+            <span>{{ connection.state.projectId || "首页" }}</span>
+            <small v-if="connection.state.projectId">{{ connection.state.panel === "document" ? "文档" : "画布" }}</small>
           </li>
         </ul>
       </template>
@@ -80,7 +80,7 @@ import messageMarkdown from "@/components/messageMarkdown.vue";
 
 type McpStatus = {
   enabled: boolean;
-  connections: { id: string; state: { directory?: string; panel?: string; canvasId?: string } }[];
+  connections: { id: string; state: { projectId?: string; panel?: string; canvasId?: string } }[];
   endpoint: string | null;
   stdio: { command: string; args: string[] } | null;
   preferredPort: number;

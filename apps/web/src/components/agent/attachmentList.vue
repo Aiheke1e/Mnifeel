@@ -1,6 +1,6 @@
 <template>
   <div class="attachmentList">
-    <attachmentPreview v-for="(attachment, index) in attachments" :key="attachment.path || index" :attachment="attachment" :directory="directory" :removable="removable" @remove="emit('remove', index)" />
+    <attachmentPreview v-for="(attachment, index) in attachments" :key="attachment.path || index" :attachment="attachment" :projectId="projectId" :removable="removable" @remove="emit('remove', index)" />
   </div>
 </template>
 
@@ -8,7 +8,7 @@
 import attachmentPreview from "./attachmentPreview.vue";
 import type { AgentAttachment } from "./types";
 
-defineProps<{ attachments: AgentAttachment[]; directory?: string; removable?: boolean }>();
+defineProps<{ attachments: AgentAttachment[]; projectId?: string; removable?: boolean }>();
 const emit = defineEmits<{ remove: [index: number] }>();
 </script>
 

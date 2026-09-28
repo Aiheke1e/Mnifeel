@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import type { Context, Message } from "@earendil-works/pi-ai";
-import { validateFields } from "@/lib/middleware";
+import { getAuth, validateFields } from "@/lib/middleware";
 import u from "@/utils";
 
 const textPart = z.object({ type: z.literal("text"), text: z.string(), textSignature: z.string().optional() });
@@ -53,7 +53,7 @@ const contextSchema: z.ZodType<Context> = z.object({
 const inputSchema = z.object({
   providerId: z.string().min(1), modelId: z.string().min(1),
   context: contextSchema,
-  directory: z.string().min(1).max(4096).optional(),
+  projectId: z.uuid().optional(),
   references: z.array(u.ai.aiReferenceSchema).max(32).optional(),
 });
 
@@ -68,7 +68,7 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
   req.socket.once("close", close);
   try {
     const directory = input.references?.some(item => item.dataType !== "STRING")
-      ? await u.workspace.resolveWorkspace(req, input.directory ?? "") : undefined;
+      ? await u.projects.resolveProjectWorkspace(getAuth(res).user.id, input.projectId ?? "") : undefined;
     const references = await u.ai.readAiReferences(directory, input.references ?? [], controller.signal);
     const stream = u.ai.streamAi(configured, input.context, controller.signal, references);
     res.set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });

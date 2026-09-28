@@ -3,17 +3,17 @@
     <header class="treeHeader">
       <span class="treeTitle"><icon-folder :size="16" aria-hidden="true" />工作区文件</span>
       <span class="treeActions">
-        <el-button text circle size="small" :disabled="!directory || creating" aria-label="新建 Markdown 文件" title="新建 Markdown 文件" @click="createMarkdownFile">
+        <el-button text circle size="small" :disabled="!projectId || creating" aria-label="新建 Markdown 文件" title="新建 Markdown 文件" @click="createMarkdownFile">
           <icon-file-plus :size="15" aria-hidden="true" />
         </el-button>
-        <el-button text circle size="small" :disabled="!directory" aria-label="刷新文件树" title="刷新文件树" @click="refreshTree">
+        <el-button text circle size="small" :disabled="!projectId" aria-label="刷新文件树" title="刷新文件树" @click="refreshTree">
           <icon-refresh :size="15" aria-hidden="true" />
         </el-button>
       </span>
     </header>
     <el-alert v-if="loadError" class="loadError" :title="loadError" type="error" :closable="false" showIcon />
     <div class="treeContent">
-      <el-tree v-if="directory" :key="treeVersion" lazy highlightCurrent :load="loadChildren" :props="treeProps" nodeKey="key" emptyText="暂无文件" @node-click="selectNode">
+      <el-tree v-if="projectId" :key="treeVersion" lazy highlightCurrent :load="loadChildren" :props="treeProps" nodeKey="key" emptyText="暂无文件" @node-click="selectNode">
         <template #default="{ node, data }">
           <span class="fileItem" :title="data.name">
             <icon-layout-dashboard v-if="data.type === 'canvas'" :size="16" aria-hidden="true" />
@@ -50,7 +50,7 @@ type FileTreeItem = {
   nodeId?: string;
 };
 
-const props = defineProps<{ directory?: string }>();
+const props = defineProps<{ projectId?: string }>();
 const emit = defineEmits<{ selectNode: [selection: TreeSelection] }>();
 const markdownNamePattern = /\.(md|markdown)$/i;
 const treeVersion = ref(0);
@@ -102,8 +102,8 @@ function refreshTree() {
 const creating = ref(false);
 
 async function createMarkdownFile() {
-  const currentDirectory = props.directory;
-  if (!currentDirectory || creating.value) return;
+  const currentProjectId = props.projectId;
+  if (!currentProjectId || creating.value) return;
   let value: string;
   try {
     ({ value } = await ElMessageBox.prompt("在工作区根目录新建 Markdown 文件", "新建文件", {
@@ -121,8 +121,8 @@ async function createMarkdownFile() {
   const fileName = markdownNamePattern.test(name) ? name : `${name}.md`;
   creating.value = true;
   try {
-    await useWorkspaceFiles(currentDirectory).write(fileName, "", true);
-    if (currentDirectory === props.directory) refreshTree();
+    await useWorkspaceFiles(currentProjectId).write(fileName, "", true);
+    if (currentProjectId === props.projectId) refreshTree();
   } catch (error) {
     const message = axios.isAxiosError<{ message?: string }>(error) ? error.response?.data?.message : undefined;
     ElMessage.error(message || (error instanceof Error ? error.message : "创建文件失败"));
@@ -131,21 +131,21 @@ async function createMarkdownFile() {
   }
 }
 
-watch(() => props.directory, refreshTree, { flush: "sync" });
+watch(() => props.projectId, refreshTree, { flush: "sync" });
 onBeforeUnmount(() => { treeVersion.value++; });
 
 const loadChildren: LoadFunction = async (node, resolve, reject) => {
-  const directory = props.directory;
+  const projectId = props.projectId;
   const version = treeVersion.value;
   const path = node.level === 0 ? "" : node.data.path;
-  if (!directory) return reject();
+  if (!projectId) return reject();
   loadError.value = "";
   try {
-    const files = useWorkspaceFiles(directory);
+    const files = useWorkspaceFiles(projectId);
     if (node.level > 0 && node.data.type === "canvas") {
       const canvas = await files.readJson(path);
       if (!isRecord(canvas) || canvas.minifeelCanvas !== true || !Array.isArray(canvas.nodes)) throw new Error("不是有效的画布文件");
-      if (version !== treeVersion.value || directory !== props.directory) return reject();
+      if (version !== treeVersion.value || projectId !== props.projectId) return reject();
       return resolve(canvasItems(canvas, path));
     }
     const { entries } = await files.list(path);
@@ -158,14 +158,14 @@ const loadChildren: LoadFunction = async (node, resolve, reject) => {
       if (!canvas) return item;
       return { ...item, key: JSON.stringify(["canvas", entry.path]), type: "canvas", isLeaf: undefined };
     }));
-    if (version !== treeVersion.value || directory !== props.directory) return reject();
+    if (version !== treeVersion.value || projectId !== props.projectId) return reject();
     const existingItems = items.filter(item => item !== null);
     existingItems.sort((left, right) => Number(left.type !== "directory") - Number(right.type !== "directory")
       || fileExtension(left).localeCompare(fileExtension(right), "zh-CN")
       || left.name.localeCompare(right.name, "zh-CN", { numeric: true }));
     resolve(existingItems);
   } catch (error) {
-    if (version === treeVersion.value && directory === props.directory) {
+    if (version === treeVersion.value && projectId === props.projectId) {
       const message = axios.isAxiosError<{ message?: string }>(error) ? error.response?.data?.message : undefined;
       loadError.value = `读取${path || "工作区"}失败：${message || (error instanceof Error ? error.message : "请重试")}。可重新展开目录或刷新重试。`;
     }

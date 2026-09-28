@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import type { BrowserFfmpegRequest } from "@minifeel/ffmpeg";
-import { validateFields } from "@/lib/middleware";
+import { getAuth, validateFields } from "@/lib/middleware";
 import { success } from "@/lib/responseFormat";
 import u from "@/utils";
 
@@ -11,7 +11,7 @@ const callSchema = z.object({
 }).strict();
 const inputSchema = z.object({
   requestId: z.uuid(),
-  directory: z.string().min(1).max(4096),
+  projectId: z.uuid(),
   options: z.object({
     source: z.string().min(1).max(4096).optional(),
     cwd: z.string().min(1).max(4096).optional(),
@@ -29,7 +29,7 @@ const requests = new Map<string, AbortController>();
 export default Router().post("/", validateFields(inputSchema.shape), async (req, res) => {
   u.mcpControl.assertAppRequest(req);
   const input = inputSchema.parse(req.body) as BrowserFfmpegRequest;
-  const cwd = await u.workspace.resolveWorkspace(req, input.directory);
+  const cwd = await u.projects.resolveProjectWorkspace(getAuth(res).user.id, input.projectId);
   const requestKey = `${cwd}\0${input.requestId}`;
   if (input.operation.method === "cancel") {
     requests.get(requestKey)?.abort();

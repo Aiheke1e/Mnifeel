@@ -6,7 +6,7 @@
       <el-button class="toolbarButton" text :icon="IconX" title="关闭素材库" aria-label="关闭素材库" @click="visible = false" />
     </div>
     <el-scrollbar class="libraryScroll" maxHeight="min(440px, calc(100dvh - 198px))">
-      <el-tree ref="assetTree" class="assetTree" :data="displayEntries" nodeKey="path" :props="{ label: 'name' }" :currentNodeKey="folder === '.' ? undefined : folder" :filterNodeMethod="filterEntry" defaultExpandAll highlightCurrent emptyText="" @nodeClick="selectFolder">
+      <el-tree ref="assetTree" class="assetTree" :data="displayEntries" nodeKey="path" :props="{ label: 'name' }" :currentNodeKey="folder === rootPath ? undefined : folder" :filterNodeMethod="filterEntry" defaultExpandAll highlightCurrent emptyText="" @nodeClick="selectFolder">
         <template #default="{ data }">
           <div class="assetEntry" :title="data.name" :draggable="data.type === 'file'" @dragstart.stop="startAssetDrag($event, data)" @dblclick.stop="openPreview(data)" @contextmenu="openItemMenu($event, data)">
             <icon-folder-filled v-if="data.type === 'directory'" class="folderIcon" :size="30" />
@@ -36,7 +36,7 @@
     </div>
   </el-card>
 
-  <assetMenu v-if="visible" ref="assetMenuRef" :entries="entries" @changed="refreshAssets" />
+  <assetMenu v-if="visible && projectId" ref="assetMenuRef" :entries="entries" :projectId="projectId" :rootPath="rootPath" @changed="refreshAssets" />
 
   <el-image-viewer v-if="previewAsset?.kind === 'image'" :urlList="[previewAsset.url]" teleported @close="previewAsset = undefined" />
 
@@ -97,18 +97,19 @@ import assetMenu from "./assetMenu.vue";
 type AssetEntry = { name: string; path: string; type: "file" | "directory"; children?: AssetEntry[]; draft?: boolean };
 type AssetOutput = { label: string; output: NodeOutput };
 
-const props = defineProps<{ directory?: string }>();
+const props = defineProps<{ projectId?: string }>();
+const rootPath = "assets/library";
 const visible = defineModel<boolean>({ default: false });
 const saveVisible = ref(false);
 const saving = ref(false);
 const entries = ref<AssetEntry[]>([]);
-const folder = ref(".");
+const folder = ref(rootPath);
 const assetName = ref("");
 const assetNameInput = ref<InputInstance>();
-const saveDirectory = ref(".");
+const saveDirectory = ref(rootPath);
 const saveFolderName = ref<string>();
 const saveFolderInput = ref<InputInstance>();
-const saveLocationLabel = computed(() => saveDirectory.value === "." ? "素材库" : `素材库 / ${saveDirectory.value.split("/").join(" / ")}`);
+const saveLocationLabel = computed(() => saveDirectory.value === rootPath ? "素材库" : `素材库 / ${saveDirectory.value.slice(rootPath.length + 1).split("/").join(" / ")}`);
 const searchQuery = ref("");
 const assetTree = ref<InstanceType<typeof ElTree>>();
 const folderInput = ref<InputInstance>();
@@ -122,7 +123,7 @@ let loadRequest = 0;
 onBeforeUnmount(() => { loadRequest++; });
 
 function assetUrl(path: string) {
-  return `/api/assets/read?path=${encodeURIComponent(path)}`;
+  return props.projectId ? `/api/workspaces/files/read?projectId=${encodeURIComponent(props.projectId)}&path=${encodeURIComponent(path)}` : "";
 }
 
 function mediaKind(entry: AssetEntry) {
@@ -148,7 +149,7 @@ function openItemMenu(event: MouseEvent, entry: AssetEntry) {
 
 async function refreshAssets(path?: string, target?: string) {
   if (path && (folder.value === path || folder.value.startsWith(path + "/"))) {
-    folder.value = target ? target + folder.value.slice(path.length) : ".";
+    folder.value = target ? target + folder.value.slice(path.length) : rootPath;
   }
   try { await loadEntries(); } catch (error) { showError(error); }
 }
@@ -158,7 +159,7 @@ const displayEntries = computed(() => {
     if (newFolderParent.value === parent) children.push({ name: "新建文件夹", path: `${parent}/:newFolder`, type: "directory", draft: true });
     return children;
   }
-  return newFolderParent.value === undefined ? entries.value : withDraft(entries.value, ".");
+  return newFolderParent.value === undefined ? entries.value : withDraft(entries.value, rootPath);
 });
 
 function filterEntry(query: string, entry: TreeNodeData) {
@@ -203,7 +204,7 @@ async function saveFolder() {
 
 const outputs = ref<AssetOutput[]>([]);
 const selectedOutput = ref(0);
-let sourceDirectory: string | undefined;
+let sourceProjectId: string | undefined;
 const folders = computed(() => directoryEntries(entries.value));
 const extension = computed(() => {
   const output = outputs.value[selectedOutput.value]?.output;
@@ -219,9 +220,25 @@ function directoryEntries(items: AssetEntry[]): AssetEntry[] {
 async function loadEntries() {
   const request = ++loadRequest;
   try {
-    const { data } = await axios.get<{ data: { entries: AssetEntry[] } }>("/api/assets/list");
+    if (!props.projectId) {
+      entries.value = [];
+      return;
+    }
+    const files = useWorkspaceFiles(props.projectId);
+    for (const path of ["assets", rootPath]) {
+      await files.mkdir(path).catch((error: { response?: { data?: { data?: { code?: string } } } }) => {
+        if (error.response?.data?.data?.code !== "EEXIST") throw error;
+      });
+    }
+    async function readEntries(path: string): Promise<AssetEntry[]> {
+      return Promise.all((await files.list(path)).entries.map(async entry => ({
+        ...entry,
+        ...(entry.type === "directory" ? { children: await readEntries(entry.path) } : {}),
+      })));
+    }
+    const loaded = await readEntries(rootPath);
     if (request !== loadRequest) return;
-    entries.value = data.data.entries;
+    entries.value = loaded;
     await nextTick();
     if (request === loadRequest) assetTree.value?.filter(searchQuery.value);
   } catch (error) {
@@ -233,7 +250,7 @@ function showError(error: unknown) {
   ElMessage.error(axios.isAxiosError<{ message: string }>(error) ? error.response?.data.message || error.message : (error as Error).message);
 }
 
-watch(visible, opened => {
+watch([visible, () => props.projectId], ([opened]) => {
   if (opened) loadEntries().catch(showError);
   else {
     cancelFolder();
@@ -271,8 +288,9 @@ async function createFolder() {
 
 async function createAssetFolder(parent: string, name: string) {
   if (/[\\/]/.test(name)) throw new Error("文件夹名称不能包含斜杠");
-  const path = parent === "." ? name : `${parent}/${name}`;
-  await axios.post("/api/assets/mkdir", { path });
+  if (!props.projectId) throw new Error("请先打开项目");
+  const path = `${parent}/${name}`;
+  await useWorkspaceFiles(props.projectId).mkdir(path);
   return path;
 }
 
@@ -282,7 +300,7 @@ async function openSave(label: string, items: AssetOutput[]) {
   assetName.value = label.endsWith(extension.value) ? label : `${label}${extension.value}`;
   saveDirectory.value = folder.value;
   saveFolderName.value = undefined;
-  sourceDirectory = props.directory;
+  sourceProjectId = props.projectId;
   saveVisible.value = true;
   try {
     await loadEntries();
@@ -295,13 +313,15 @@ async function saveAsset() {
   const output = outputs.value[selectedOutput.value]?.output;
   const name = assetName.value.trim();
   if (!output || !name || /[\\/]/.test(name) || saving.value || saveFolderName.value !== undefined) return;
-  const path = saveDirectory.value === "." ? name : `${saveDirectory.value}/${name}`;
+  const path = `${saveDirectory.value}/${name}`;
   saving.value = true;
   try {
+    if (!sourceProjectId) throw new Error("项目已切换，请重新打开保存窗口");
+    const files = useWorkspaceFiles(sourceProjectId);
     const content = typeof output.value === "object"
-      ? await useWorkspaceFiles(() => sourceDirectory).read(output.value.url)
+      ? await files.read(output.value.url)
       : new Blob([String(output.value)]);
-    await axios.put("/api/assets/save", content, { params: { path }, headers: { "Content-Type": "application/octet-stream" } });
+    await files.write(path, content, true);
     saveVisible.value = false;
     ElMessage.success("已保存到素材库");
     await loadEntries();

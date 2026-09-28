@@ -35,10 +35,10 @@
             <el-input v-model="prompt" type="textarea" :rows="4" resize="none" :disabled="creating || opening" :placeholder="promptPlaceholder" aria-label="创作描述" />
             <template #footer>
               <div class="composerFooter">
-                <workspacePicker v-model="workspaceDirectory" :disabled="creating || opening" />
+                <span />
                 <el-space class="sendActions" :size="12">
                   <modelPopover v-model="selectedModel" v-model:reasoningEffort="reasoningEffort" class="modelSelect" :disabled="creating || opening" />
-                  <el-button class="sendButton" type="primary" circle :icon="IconArrowUp" :loading="creating" :disabled="creating || opening || !workspaceDirectory" aria-label="发送" @click="createProject()" />
+                  <el-button class="sendButton" type="primary" circle :icon="IconArrowUp" :loading="creating" :disabled="creating || opening" aria-label="发送" @click="createProject()" />
                 </el-space>
               </div>
             </template>
@@ -49,7 +49,6 @@
         <div class="sectionHeader">
           <h2 id="projectListTitle">项目列表</h2>
           <el-space wrap>
-            <el-button :icon="iconFolderOpen" :disabled="creating || opening" @click="openProject()">导入项目</el-button>
             <el-button :icon="IconFolderPlus" :disabled="creating || opening" @click="createProject(false)">添加项目</el-button>
             <el-button circle :icon="sortDescending ? IconSortDescending : IconSortAscending" :aria-label="sortDescending ? '按时间降序' : '按时间升序'" @click="sortDescending = !sortDescending" />
             <el-radio-group v-model="viewMode" aria-label="项目视图">
@@ -59,25 +58,24 @@
           </el-space>
         </div>
         <div class="projectItems" :class="{ listView: viewMode === 'list' }">
-          <el-card v-for="project in sortedProjects" :key="project.directory" class="projectCard" shadow="hover" :bodyStyle="{ padding: '0' }">
+          <el-card v-for="project in sortedProjects" :key="project.id" class="projectCard" shadow="hover" :bodyStyle="{ padding: '0' }">
             <button class="projectEntry" type="button" :disabled="creating || opening" :aria-label="`打开项目 ${project.name}`" @click="openProject(project)">
               <icon-folder class="projectIcon" :size="28" aria-hidden="true" />
               <span class="projectInfo">
                 <span class="projectName" :title="project.name">{{ project.name }}</span>
-                <span class="projectPath" :title="project.directory">{{ project.directory }}</span>
-                <span class="projectTime">最近打开 {{ new Date(project.lastOpenedAt).toLocaleString('zh-CN', { hour12: false }) }}</span>
+                <span class="projectPath" :title="project.id">{{ project.id }}</span>
+                <span class="projectTime">最近更新 {{ new Date(project.updatedAt).toLocaleString('zh-CN', { hour12: false }) }}</span>
               </span>
             </button>
             <div class="projectActions">
               <el-button text :icon="IconEdit" :disabled="creating || opening" :aria-label="`重命名项目 ${project.name}`" title="重命名" @click="renameProject(project)" />
-              <el-button text type="danger" :icon="IconTrash" :disabled="creating || opening" :aria-label="`移除项目 ${project.name}`" title="从列表移除，不删除文件" @click="workspaceStore.removeProject(project.directory)" />
+              <el-button text type="danger" :icon="IconTrash" :disabled="creating || opening" :aria-label="`归档项目 ${project.name}`" title="归档项目" @click="archiveProject(project)" />
             </div>
           </el-card>
         </div>
       </section>
     </el-main>
     <settings v-model="settingsVisible" />
-    <workspacePicker ref="relocationPicker" hideTrigger />
   </el-container>
 </template>
 
@@ -92,7 +90,7 @@ import {
   IconArrowUp, IconLayoutGrid,
   IconList, IconSortDescending,
   IconSortAscending, IconFolder, IconEdit,
-  IconTrash, IconFolderPlus, IconFolderOpen as iconFolderOpen, IconLogout,
+  IconTrash, IconFolderPlus, IconLogout,
 } from "@tabler/icons-vue";
 import modelPopover from "@/components/modelPopover.vue";
 import logoUrl from "@minifeel/assets/logo.svg";
@@ -102,18 +100,15 @@ import { useAuthStore } from "@/stores/auth";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import settings from "@/components/settings/index.vue";
 import bg from "./bg.vue";
-import workspacePicker from "./workspacePicker.vue";
 
 const settingsVisible = ref(false);
 const router = useRouter();
 const authStore = useAuthStore();
 const creating = ref(false);
 const opening = ref(false);
-const relocationPicker = ref<InstanceType<typeof workspacePicker>>();
 const prompt = ref("");
 const workspaceStore = useWorkspaceStore();
-const { project, projectList } = storeToRefs(workspaceStore);
-const workspaceDirectory = ref(project.value?.directory ?? "");
+const { projectList } = storeToRefs(workspaceStore);
 const placeholderPhrases = [
   "描述你想创作的内容，让灵感从这里开始…",
   "把一个故事灵感，变成一段精彩的短片…",
@@ -129,6 +124,9 @@ const placeholderPhrases = [
 const promptPlaceholder = ref(placeholderPhrases[0]!);
 
 onMounted(() => {
+  void workspaceStore.loadProjects().catch(error => ElMessage.error(axios.isAxiosError(error)
+    ? error.response?.data?.message || "读取项目失败"
+    : error instanceof Error ? error.message : "读取项目失败"));
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   let phraseIndex = 0;
   watch(() => !!prompt.value, (hasInput, _previous, onCleanup) => {
@@ -164,7 +162,7 @@ const reasoningEffort = ref("");
 const sortDescending = ref(true);
 const viewMode = ref("grid");
 const sortedProjects = computed(() => [...projectList.value].sort((left, right) =>
-  sortDescending.value ? right.lastOpenedAt - left.lastOpenedAt : left.lastOpenedAt - right.lastOpenedAt
+  sortDescending.value ? Date.parse(right.updatedAt) - Date.parse(left.updatedAt) : Date.parse(left.updatedAt) - Date.parse(right.updatedAt)
 ));
 
 async function logout() {
@@ -172,24 +170,12 @@ async function logout() {
   await router.replace("/login");
 }
 
-async function openProject(project?: Project) {
+async function openProject(project: Project) {
   if (creating.value || opening.value) return;
   opening.value = true;
   try {
-    const directory = project?.directory ?? await relocationPicker.value?.chooseDirectory();
-    if (!directory) return;
-    try { await workspaceStore.openProject(directory); }
-    catch (err) {
-      if (!project || !axios.isAxiosError(err) || err.response?.status !== 404) throw err;
-      const reselect = await ElMessageBox.confirm(`项目“${project.name}”的文件夹不存在，是否重新选择文件夹？`, "工作目录不存在", {
-        confirmButtonText: "重新选择", cancelButtonText: "取消", type: "warning",
-      }).then(() => true, () => false);
-      if (!reselect) return;
-      const directory = await relocationPicker.value?.chooseDirectory();
-      if (!directory) return;
-      await workspaceStore.openProject(directory, project.directory);
-    }
-    await router.push("/workspace");
+    await workspaceStore.openProject(project.id);
+    await router.push("/app/workspace");
   } catch (err) {
     ElMessage.error(axios.isAxiosError<{ message?: string }>(err)
       ? err.response?.data.message || "无法打开项目，请重试"
@@ -202,30 +188,35 @@ async function renameProject(project: Project) {
     inputValue: project.name, confirmButtonText: "保存", cancelButtonText: "取消",
     inputValidator: value => !!value?.trim() || "项目名称不能为空",
   }).catch(() => null);
-  if (result) workspaceStore.renameProject(project.directory, result.value);
+  if (result) await workspaceStore.renameProject(project.id, result.value);
+}
+
+async function archiveProject(project: Project) {
+  const confirmed = await ElMessageBox.confirm(`归档项目“${project.name}”？项目文件会保留在服务器。`, "归档项目", {
+    confirmButtonText: "归档", cancelButtonText: "取消", type: "warning",
+  }).then(() => true, () => false);
+  if (confirmed) await workspaceStore.removeProject(project.id);
 }
 
 async function createProject(fromPrompt = true) {
-  if (creating.value || opening.value || (fromPrompt && !workspaceDirectory.value)) return;
+  if (creating.value || opening.value) return;
   creating.value = true;
   try {
-    let path = workspaceDirectory.value;
+    let name = prompt.value.trim().slice(0, 120) || "未命名项目";
     if (!fromPrompt) {
-      const confirmed = await ElMessageBox.confirm("请选择一个空文件夹作为项目目录，画布和素材将保存在其中。", "添加项目", {
-        confirmButtonText: "选择空文件夹", cancelButtonText: "取消", type: "info",
-      }).then(() => true, () => false);
-      if (!confirmed) return;
-      path = await relocationPicker.value?.chooseDirectory() ?? "";
-      if (!path) return;
+      const result = await ElMessageBox.prompt("请输入项目名称", "添加项目", {
+        inputValue: "未命名项目", confirmButtonText: "创建", cancelButtonText: "取消",
+        inputValidator: value => !!value?.trim() || "项目名称不能为空",
+      }).catch(() => null);
+      if (!result) return;
+      name = result.value.trim();
     }
-    const { directory, empty } = await useWorkspaceFiles(path).list();
-    if (!empty) return ElMessage.warning("该文件夹不为空，请重新选择空文件夹；已有项目请使用“导入项目”或点击项目列表打开。");
-    await useWorkspaceFiles(directory).writeJson("画布1.json", { minifeelCanvas: true, nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }, true);
-    await workspaceStore.openProject(directory);
+    const created = await workspaceStore.createProject(name);
+    await useWorkspaceFiles(created.id).writeJson("画布1.json", { minifeelCanvas: true, nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }, true);
     if (fromPrompt && prompt.value.trim()) {
-      workspaceStore.pendingAgentMessage = { directory: workspaceStore.project!.directory, prompt: prompt.value, model: selectedModel.value, reasoningEffort: reasoningEffort.value };
+      workspaceStore.pendingAgentMessage = { projectId: created.id, prompt: prompt.value, model: selectedModel.value, reasoningEffort: reasoningEffort.value };
     }
-    await router.push("/workspace");
+    await router.push("/app/workspace");
   } catch (err) {
     ElMessage.error(axios.isAxiosError<{ message?: string }>(err)
       ? err.response?.data.message || "创建项目失败，请重试"

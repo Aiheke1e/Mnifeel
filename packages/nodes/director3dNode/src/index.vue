@@ -362,15 +362,15 @@ async function generate() {
       basePlan ? directorPlanSchema.parse({ name: basePlan.name, duration: basePlan.duration, tracks: basePlan.tracks, cameraFrames: basePlan.cameraFrames }) : undefined,
       JSON.parse(JSON.stringify(plans.value)),
     );
-    const directory = mediaReferences.some(item => item.dataType !== "STRING") ? (await workspaceFiles.list()).directory : undefined;
+    const projectId = mediaReferences.some(item => item.dataType !== "STRING") ? (await workspaceFiles.list()).projectId : undefined;
     if (disposed) return;
     await ai.generate({
       references: mediaReferences,
+      projectId,
       providerId: choice.providerId,
       modelId: choice.modelId,
       systemPrompt: directorPrompt,
       prompt: JSON.stringify({ instruction: requirement, references, selectedPlanId: basePlanId, document: draft.summary() }),
-      directory,
       tools: draft.tools,
     });
     if (disposed) return;

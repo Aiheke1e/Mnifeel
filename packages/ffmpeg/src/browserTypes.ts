@@ -29,7 +29,7 @@ export const queryMethods = [
 
 export type BrowserFfmpegOptions = Pick<FfmpegCommandOptions, "cwd" | "niceness" | "priority" | "stdoutLines" | "timeout"> & { source?: string };
 export type FfmpegCall = { method: string; args: unknown[]; undefinedArgs?: number[] };
-export type BrowserFfmpegRequest = { directory: string; requestId: string; options: BrowserFfmpegOptions; calls: FfmpegCall[]; operation: FfmpegCall };
+export type BrowserFfmpegRequest = { projectId: string; requestId: string; options: BrowserFfmpegOptions; calls: FfmpegCall[]; operation: FfmpegCall };
 export type FfmpegRemoteEvent = { event: string; args: unknown[] };
 
 export type BrowserFfmpegEvents = {

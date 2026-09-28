@@ -1,5 +1,5 @@
-import { dirname, isAbsolute, resolve } from "node:path";
-import { realpath, stat, mkdir, readdir, lstat, rm, rmdir, readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { stat, mkdir, readdir, lstat, rm, rmdir, readFile } from "node:fs/promises";
 import { z } from "zod";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { CanvasContext } from "@minifeel/tools-scaffold/runtime";
@@ -11,8 +11,9 @@ import { callControl, getConnection, listConnections } from "@/utils/mcp/control
 import { appOperations, runAppOperation } from "@/utils/mcp/operations";
 import { listTools } from "@/utils/plugins/tools";
 import { isWithin, lockWorkspaceFiles, protectWorkspaceRoot, renameWorkspaceFile, resolveWorkspacePath, writeWorkspaceFile } from "@/utils/workspace/files";
+import { getProjectSummary, indexProjectAsset, removeProjectAssets, renameProjectAssets, resolveProjectWorkspace, touchProject } from "@/utils/projects";
 
-const targetSchema = z.strictObject({ connectionId: z.uuid().optional(), directory: z.string().min(1).max(4096).optional(), canvasId: z.string().min(1).max(256).optional() });
+const targetSchema = z.strictObject({ connectionId: z.uuid().optional(), projectId: z.uuid().optional(), canvasId: z.string().min(1).max(256).optional() });
 const requestSchema = z.strictObject({ target: targetSchema.optional(), args: z.record(z.string(), z.unknown()) });
 let authorizationController = new AbortController();
 for (const key of ["settings.mcp.enabled", "settings.mcp.token"] as const) conf.onDidChange(key, () => {
@@ -20,25 +21,15 @@ for (const key of ["settings.mcp.enabled", "settings.mcp.token"] as const) conf.
   authorizationController = new AbortController();
 });
 
-async function resolveDirectory(directory?: string) {
-  if (!directory || !isAbsolute(directory)) throw new Error("请在 target.directory 指定绝对工作目录，或先打开项目");
-  const path = await realpath(directory);
-  if (!(await stat(path)).isDirectory()) throw new Error("工作目录不是文件夹");
-  const desktop = ["win32", "darwin"].includes(process.platform) && (process.env.NODE_ENV === "dev" || process.env.minifeelDesktop === "1");
-  if (!desktop) {
-    const root = await realpath(resolve(dirname(conf.path), "workspaces"));
-    if (!isWithin(root, path)) throw new Error("服务器部署只能使用 data/workspaces 内的工作区");
-  }
-  return path;
-}
-
 async function resolveTarget(target: z.infer<typeof targetSchema> = {}, requireDirectory = true) {
-  const requestedDirectory = target.directory ? await resolveDirectory(target.directory) : undefined;
-  const connection = getConnection(target.connectionId, requestedDirectory);
-  if (target.connectionId && requestedDirectory && connection?.state.directory !== requestedDirectory) throw new Error("目标页面的工作区已切换，请重新获取 getAppState");
+  const connection = getConnection(target.connectionId, target.projectId);
+  if (!connection) throw new Error("请先打开 Minifeel 网页");
+  if (target.connectionId && target.projectId && connection.state.projectId !== target.projectId) throw new Error("目标页面的项目已切换，请重新获取 getAppState");
   if (target.canvasId && connection?.state.canvasId !== target.canvasId) throw new Error("目标画布已切换，请重新获取 getAppState");
-  const directory = requireDirectory ? requestedDirectory ?? await resolveDirectory(connection?.state.directory ?? undefined) : undefined;
-  return { connection, directory };
+  const projectId = target.projectId ?? connection.state.projectId ?? undefined;
+  if (requireDirectory && !projectId) throw new Error("请先打开项目");
+  const directory = projectId ? await resolveProjectWorkspace(connection.userId, projectId) : undefined;
+  return { connection, projectId, directory };
 }
 
 function wrapTool(name: string, description: string, schema: object, execute: (args: Record<string, unknown>, target: z.infer<typeof targetSchema>, signal: AbortSignal) => Promise<unknown>): McpTool {
@@ -55,7 +46,7 @@ function wrapTool(name: string, description: string, schema: object, execute: (a
 }
 
 const uiSchemas = {
-  openProject: z.strictObject({ directory: z.string().min(1).max(4096) }),
+  openProject: z.strictObject({ projectId: z.uuid() }),
   switchPanel: z.strictObject({ panel: z.enum(["canvas", "document"]) }),
   getDocument: z.strictObject({}),
   openDocument: z.strictObject({ path: z.string().max(4096).optional(), canvasPath: z.string().max(4096).optional(), nodeId: z.string().max(256).optional(), handleId: z.string().max(256).optional() }),
@@ -64,7 +55,7 @@ const uiSchemas = {
   updateSettings: z.strictObject({ patch: z.record(z.string(), z.json()).refine(patch => !["mcp", "stores"].some(key => Object.hasOwn(patch, key)), "不能通过 MCP 修改连接凭证或项目列表") }),
 };
 const uiDescriptions: Record<keyof typeof uiSchemas, string> = {
-  openProject: "在目标 Minifeel 页面打开已有工作目录，并等待工作区就绪；操作前获取 getAppState 的 connectionId。",
+  openProject: "在目标 Minifeel 页面打开已有项目，并等待工作区就绪；操作前获取 getAppState 的 connectionId。",
   switchPanel: "切换工作区的 canvas 画布或 document 文档面板，先保存当前编辑。",
   getDocument: "读取当前文档内容和选择状态。writeDocument 必须携带本次读取的 text 作为 expectedText。",
   openDocument: "打开工作区中的文档文件(path)，或画布中的文本节点(canvasPath、nodeId，可选handleId)。",
@@ -79,9 +70,9 @@ export function redactSecrets(value: unknown): unknown {
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /(?:api.?key|access.?token|refresh.?token|password|secret|authorization)$|^token$/i.test(key) ? (item ? "[REDACTED]" : "") : redactSecrets(item)]));
 }
 
-function assertFileNotOpen(directory: string, path: string) {
+function assertFileNotOpen(projectId: string, directory: string, path: string) {
   for (const { state } of listConnections()) {
-    if (state.directory !== directory) continue;
+    if (state.projectId !== projectId) continue;
     const document = state.document as { selection?: { filePath?: string; canvasPath?: string } } | undefined;
     const openPaths = [state.canvasId, document?.selection?.filePath, document?.selection?.canvasPath];
     if (openPaths.some(file => file && isWithin(resolve(directory, path), resolve(directory, file)))) {
@@ -94,21 +85,19 @@ export async function getMcpTools(): Promise<McpTool[]> {
   const authorizationSignal = authorizationController.signal;
   let pluginError: string | undefined;
   const tools: McpTool[] = [{
-    name: "getAppState", description: "列出连接的 Minifeel 页面及其 connectionId、工作目录、画布、项目列表和节点能力。多个页面时必须用 target.connectionId 明确操作对象；无页面连接时只有显式 target.directory 的服务端工具可用。",
+    name: "getAppState", description: "列出连接的 Minifeel 页面及其 connectionId、项目、画布、项目列表和节点能力。多个页面时必须用 target.connectionId 明确操作对象。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     async execute() {
-      const workspaceRoot = resolve(dirname(conf.path), "workspaces");
-      await mkdir(workspaceRoot, { recursive: true });
-      return { connections: listConnections(), workspaceRoot, ...(pluginError ? { pluginError } : {}) };
+      return { connections: listConnections(), ...(pluginError ? { pluginError } : {}) };
     },
   }];
   for (const [name, schema] of Object.entries(uiSchemas)) {
     tools.push(wrapTool(name, uiDescriptions[name as keyof typeof uiSchemas], z.toJSONSchema(schema), async (input, target, signal) => {
       const args = schema.parse(input);
-      const { connection, directory } = await resolveTarget(target, !["openProject", "getSettings", "updateSettings"].includes(name));
+      const { connection, projectId } = await resolveTarget(target, !["openProject", "getSettings", "updateSettings"].includes(name));
       if (!connection) throw new Error("请先打开 Minifeel 桌面或网页");
-      if (name === "openProject") await resolveDirectory((args as { directory: string }).directory);
-      const result = await callControl(connection.id, name, args, signal, directory);
+      if (name === "openProject") await getProjectSummary(connection.userId, (args as { projectId: string }).projectId);
+      const result = await callControl(connection.id, name, args, signal, projectId);
       return name === "getSettings" || name === "updateSettings" ? redactSecrets(result) : result;
     }));
   }
@@ -121,11 +110,11 @@ export async function getMcpTools(): Promise<McpTool[]> {
   for (const definition of definitions) {
     if (tools.some(tool => tool.name === definition.name)) throw new Error(`MCP 工具名称重复：${definition.name}`);
     tools.push(wrapTool(definition.name, [definition.description, ...(definition.promptGuidelines ?? [])].join("\n"), definition.parameters, async (args, target, signal) => {
-      const { connection, directory } = await resolveTarget(target);
-      if (["write", "edit"].includes(definition.name) && typeof args.path === "string") assertFileNotOpen(directory!, args.path);
+      const { connection, projectId, directory } = await resolveTarget(target);
+      if (["write", "edit"].includes(definition.name) && typeof args.path === "string") assertFileNotOpen(projectId!, directory!, args.path);
       const canvas: CanvasContext | undefined = connection ? {
         id: connection.state.canvasId ?? "mcp", tools: connection.state.tools,
-        call: (request, callSignal) => callControl(connection.id, request.name, request.args, callSignal ?? signal, directory),
+        call: (request, callSignal) => callControl(connection.id, request.name, request.args, callSignal ?? signal, projectId),
       } : undefined;
       const current = (await createAgentTools(directory!, canvas)).find(tool => tool.name === definition.name);
       if (!current) throw new Error("工具已禁用，或所需 Minifeel 页面未连接，请重新读取工具列表");
@@ -146,7 +135,7 @@ export async function getMcpTools(): Promise<McpTool[]> {
     const workspaceTool = (await listTools()).find(tool => tool.name === "workspace");
     if (!workspaceTool?.enabled || workspaceTool.loadError) throw new Error("工作区文件工具未启用或加载失败");
     if (!["list", "readBinary"].includes(args.action) && "readOnly" in workspaceTool.config && workspaceTool.config.readOnly === true) throw new Error("当前工作区文件工具为只读模式");
-    const { directory } = await resolveTarget(target);
+    const { projectId, directory } = await resolveTarget(target);
     const source = await resolveWorkspacePath(directory!, args.path);
     signal.throwIfAborted();
     if (args.action === "list") return (await readdir(source.path, { withFileTypes: true })).filter(item => item.isFile() || item.isDirectory()).map(item => ({ name: item.name, type: item.isDirectory() ? "directory" : "file" }));
@@ -156,7 +145,7 @@ export async function getMcpTools(): Promise<McpTool[]> {
       return { path: args.path, base64: (await readFile(source.path, { signal })).toString("base64") };
     }
     protectWorkspaceRoot(directory!, source.path);
-    assertFileNotOpen(directory!, args.path);
+    assertFileNotOpen(projectId!, directory!, args.path);
     const destination = args.action === "rename" && args.target ? await resolveWorkspacePath(directory!, args.target) : undefined;
     if (args.action === "rename" && !destination) throw new Error("重命名需要提供 args.target");
     if (destination) protectWorkspaceRoot(directory!, destination.path);
@@ -167,10 +156,18 @@ export async function getMcpTools(): Promise<McpTool[]> {
         const bytes = Buffer.from(args.base64, "base64");
         if (bytes.length > 20 * 1024 * 1024) throw new Error("文件不能超过20MB");
         await writeWorkspaceFile(source.path, bytes, args.exclusive);
-      } else if (args.action === "mkdir") await mkdir(source.path);
-      else if (destination) await renameWorkspaceFile(source.path, destination.path);
-      else if ((await lstat(source.path)).isDirectory() && !args.recursive) await rmdir(source.path);
-      else await rm(source.path, { recursive: args.recursive });
+        await indexProjectAsset(projectId!, source.relativePath, source.path);
+      } else if (args.action === "mkdir") {
+        await mkdir(source.path);
+        await touchProject(projectId!);
+      } else if (destination) {
+        await renameWorkspaceFile(source.path, destination.path);
+        await renameProjectAssets(projectId!, source.relativePath, destination.relativePath);
+      } else {
+        if ((await lstat(source.path)).isDirectory() && !args.recursive) await rmdir(source.path);
+        else await rm(source.path, { recursive: args.recursive });
+        await removeProjectAssets(projectId!, source.relativePath);
+      }
     } finally { release(); }
     return { success: true };
   }));
@@ -178,8 +175,8 @@ export async function getMcpTools(): Promise<McpTool[]> {
     return appOperations.filter(item => !args.name || item.name === args.name).map(({ name, description, parameters, path }) => {
       const schema = z.toJSONSchema(parameters);
       if (path.startsWith("/api/agent/")) {
-        delete schema.properties?.directory;
-        schema.required = schema.required?.filter(key => key !== "directory");
+        delete schema.properties?.projectId;
+        schema.required = schema.required?.filter(key => key !== "projectId");
       }
       return { name, description, parameters: schema };
     });
@@ -188,7 +185,7 @@ export async function getMcpTools(): Promise<McpTool[]> {
     const operation = appOperations.find(item => item.name === args.name);
     if (!operation) throw new Error("应用操作不存在，请查询 listAppOperations");
     const parameters = { ...args.parameters as Record<string, unknown> };
-    if (operation.path.startsWith("/api/agent/")) parameters.directory = (await resolveTarget(target)).directory;
+    if (operation.path.startsWith("/api/agent/")) parameters.projectId = (await resolveTarget(target)).projectId;
     const result = await runAppOperation(operation.name, parameters, signal);
     const refreshErrors: string[] = [];
     if (operation.refresh) {
@@ -209,10 +206,10 @@ export async function getMcpTools(): Promise<McpTool[]> {
   });
   tools.push(wrapTool("runAgent", "按用户请求调用 Minifeel 内置 Agent，等待本轮完成并返回对话文件与回复；会使用配置的模型。外部 Agent 可直接操作其他工具，仅需要委托内置 Agent 时调用。支持 MCP 取消，历史保存到工作区。", z.toJSONSchema(runAgentSchema), async (input, target, signal) => {
     const args = runAgentSchema.parse(input);
-    const { directory, connection } = await resolveTarget(target);
+    const { projectId, directory, connection } = await resolveTarget(target);
     const canvas: CanvasContext | undefined = connection ? {
       id: connection.state.canvasId ?? "mcp", tools: connection.state.tools,
-      call: (request, callSignal) => callControl(connection.id, request.name, request.args, callSignal ?? signal, directory),
+      call: (request, callSignal) => callControl(connection.id, request.name, request.args, callSignal ?? signal, projectId),
     } : undefined;
     const blocks = new Map<string, string>();
     let sessionFile = args.sessionFile;

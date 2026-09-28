@@ -2,12 +2,12 @@
   <panel class="canvasMenuPanel" position="top-left">
     <el-card class="canvasMenu" shadow="never" :bodyStyle="{ padding: '5px 10px' }">
       <div class="menuContent">
-        <el-input v-model="projectNameDraft" class="workspaceNameInput" :style="{ '--workspaceName': JSON.stringify(projectNameDraft || ' ') }" size="small" :title="directory" :disabled="!workspaceStore.project" aria-label="项目名称"
+        <el-input v-model="projectNameDraft" class="workspaceNameInput" :style="{ '--workspaceName': JSON.stringify(projectNameDraft || ' ') }" size="small" :title="projectId" :disabled="!workspaceStore.project" aria-label="项目名称"
           @keydown.stop @keydown.enter="saveProjectName" @keydown.esc.prevent="projectNameDraft = workspaceName" @blur="saveProjectName" />
         <el-divider direction="vertical" />
-        <el-popover v-model:visible="canvasListVisible" trigger="click" placement="bottom-start" :width="214" :showArrow="false" :disabled="!directory">
+        <el-popover v-model:visible="canvasListVisible" trigger="click" placement="bottom-start" :width="214" :showArrow="false" :disabled="!projectId">
           <template #reference>
-            <el-button class="canvasTrigger" text :loading="busy" :disabled="busy || !directory" aria-label="切换画布" :aria-expanded="canvasListVisible">
+            <el-button class="canvasTrigger" text :loading="busy" :disabled="busy || !projectId" aria-label="切换画布" :aria-expanded="canvasListVisible">
               <span>{{ activeCanvasName }}</span><icon-chevron-down :size="14" />
             </el-button>
           </template>
@@ -49,7 +49,7 @@ import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { getCanvasAssetDirectories, isCanvasFile } from "@/pages/workspace/canvasFile";
 
 const props = defineProps<{
-  directory?: string;
+  projectId?: string;
   initialCanvasId?: string;
   activateCanvas?: (id: string, signal?: AbortSignal) => Promise<void>;
   flushSave: (action?: () => Promise<void>) => Promise<void>;
@@ -57,14 +57,14 @@ const props = defineProps<{
 const workspaceStore = useWorkspaceStore();
 const workspaceName = computed(() => workspaceStore.project?.name || "未命名工作区");
 const projectNameDraft = ref("");
-watch([() => workspaceStore.project?.directory, workspaceName], () => {
+watch([() => workspaceStore.project?.id, workspaceName], () => {
   projectNameDraft.value = workspaceName.value;
 }, { immediate: true });
 
 function saveProjectName(event: Event) {
   if (event instanceof KeyboardEvent && event.isComposing) return;
   const project = workspaceStore.project;
-  if (project) workspaceStore.renameProject(project.directory, projectNameDraft.value);
+  if (project) workspaceStore.renameProject(project.id, projectNameDraft.value);
   projectNameDraft.value = workspaceName.value;
 }
 
@@ -87,7 +87,7 @@ const canvasName = ref("");
 const renameError = ref("");
 const { toObject, setNodes, setEdges, setViewport } = useVueFlow();
 
-watch(() => props.directory, async (directory, _previous, onCleanup) => {
+watch(() => props.projectId, async (projectId, _previous, onCleanup) => {
   let cancelled = false;
   onCleanup(() => { cancelled = true; });
   busy.value = true;
@@ -99,27 +99,27 @@ watch(() => props.directory, async (directory, _previous, onCleanup) => {
     newCanvasId.value = null;
     editingId.value = null;
     renameError.value = "";
-    if (!directory) return;
+    if (!projectId) return;
     if (props.initialCanvasId) {
-      await applyCanvas(props.initialCanvasId, directory);
+      await applyCanvas(props.initialCanvasId, projectId);
       return;
     }
-    let loaded = await listCanvases(directory);
+    let loaded = await listCanvases(projectId);
     if (cancelled) return;
     if (!loaded.length) {
       try {
-        loaded = [await createCanvasFile(directory, "画布1")];
+        loaded = [await createCanvasFile(projectId, "画布1")];
       } catch (err) {
         if (!axios.isAxiosError<{ data?: { code?: string } }>(err) || err.response?.status !== 409 || err.response.data.data?.code !== "EEXIST") throw err;
         // 同时打开工作区时，读取另一请求刚创建的默认画布，不覆盖同名文件。
-        const refreshed = await listCanvases(directory);
+        const refreshed = await listCanvases(projectId);
         // 画布1.json 若被其他 JSON 占用，则使用下一个空闲名称，保留原文件。
-        loaded = refreshed.length ? refreshed : [await createCanvasFile(directory)];
+        loaded = refreshed.length ? refreshed : [await createCanvasFile(projectId)];
       }
     }
     if (cancelled) return;
     canvases.value = loaded;
-    if (canvases.value[0]) await applyCanvas(canvases.value[0].id, directory);
+    if (canvases.value[0]) await applyCanvas(canvases.value[0].id, projectId);
   } catch (err) {
     if (!cancelled) {
       loadError.value = errorMessage(err, "读取画布失败");
@@ -138,32 +138,32 @@ function getCanvases() {
   return canvases.value.map(({ id, name }) => ({ id, name }));
 }
 
-function getCanvasDirectory(signal?: AbortSignal) {
+function getCanvasProjectId(signal?: AbortSignal) {
   signal?.throwIfAborted();
-  if (!props.directory) throw new Error("请先选择工作目录");
+  if (!props.projectId) throw new Error("请先打开项目");
   if (busy.value || editingId.value !== null) throw new Error("画布正在加载或编辑，请稍后重试");
-  return props.directory;
+  return props.projectId;
 }
 
-function checkCanvasDirectory(directory: string, signal?: AbortSignal) {
+function checkCanvasProjectId(projectId: string, signal?: AbortSignal) {
   signal?.throwIfAborted();
-  if (props.directory !== directory) throw new Error("工作目录已切换，本次画布操作已停止");
+  if (props.projectId !== projectId) throw new Error("项目已切换，本次画布操作已停止");
 }
 
-async function applyCanvas(canvasId: string, directory: string, signal?: AbortSignal) {
-  checkCanvasDirectory(directory, signal);
+async function applyCanvas(canvasId: string, projectId: string, signal?: AbortSignal) {
+  checkCanvasProjectId(projectId, signal);
   const nextCanvas = canvases.value.find(canvas => canvas.id === canvasId);
   const currentCanvas = canvases.value.find(canvas => canvas.id === activeCanvasId.value);
   if (!nextCanvas) throw new Error("画布不存在，请重新获取画布列表");
   if (nextCanvas === currentCanvas) return;
   if (currentCanvas && props.activateCanvas) {
     await props.activateCanvas(canvasId, signal);
-    checkCanvasDirectory(directory, signal);
+    checkCanvasProjectId(projectId, signal);
     return;
   }
   if (!nextCanvas.flow) {
-    const data = await useWorkspaceFiles(directory).readJson<Partial<NonNullable<Canvas["flow"]>> & { minifeelCanvas?: boolean } | null>(nextCanvas.id);
-    checkCanvasDirectory(directory, signal);
+    const data = await useWorkspaceFiles(projectId).readJson<Partial<NonNullable<Canvas["flow"]>> & { minifeelCanvas?: boolean } | null>(nextCanvas.id);
+    checkCanvasProjectId(projectId, signal);
     if (data?.minifeelCanvas !== true || !Array.isArray(data.nodes) || !Array.isArray(data.edges) || !data.viewport
       || ![data.viewport.x, data.viewport.y, data.viewport.zoom].every(Number.isFinite) || data.viewport.zoom <= 0) throw new Error("画布文件格式无效");
     // 旧画布可能保存了临时导出进度，重新打开时任务已不存在。
@@ -171,7 +171,7 @@ async function applyCanvas(canvasId: string, directory: string, signal?: AbortSi
     nextCanvas.flow = { nodes: data.nodes, edges: data.edges, viewport: data.viewport };
   }
   await props.flushSave();
-  checkCanvasDirectory(directory, signal);
+  checkCanvasProjectId(projectId, signal);
   if (currentCanvas) currentCanvas.flow = toObject();
   // 应用画布数据时暂时清空文件名，避免初始化触发自动保存。
   activeCanvasId.value = "";
@@ -180,37 +180,37 @@ async function applyCanvas(canvasId: string, directory: string, signal?: AbortSi
   setEdges(nextCanvas.flow.edges.map(({ interactionWidth, ...edge }) => edge));
   await setViewport(nextCanvas.flow.viewport);
   await nextTick();
-  checkCanvasDirectory(directory);
+  checkCanvasProjectId(projectId);
   boundCanvas.value = nextCanvas;
   activeCanvasId.value = nextCanvas.id;
   signal?.throwIfAborted();
 }
 
 async function switchCanvas(canvasId: string, signal?: AbortSignal) {
-  const directory = getCanvasDirectory(signal);
+  const projectId = getCanvasProjectId(signal);
   canvasListVisible.value = false;
   busy.value = true;
   try {
     if (props.activateCanvas) await props.activateCanvas(canvasId, signal);
-    else await applyCanvas(canvasId, directory, signal);
-    checkCanvasDirectory(directory, signal);
+    else await applyCanvas(canvasId, projectId, signal);
+    checkCanvasProjectId(projectId, signal);
   } finally {
-    if (props.directory === directory) busy.value = false;
+    if (props.projectId === projectId) busy.value = false;
   }
 }
 
 async function handleSwitchCanvas(canvasId: string) {
-  const directory = props.directory;
+  const projectId = props.projectId;
   try {
     await switchCanvas(canvasId);
   } catch (err) {
-    if (props.directory === directory) ElMessage.error(errorMessage(err, "切换画布失败"));
+    if (props.projectId === projectId) ElMessage.error(errorMessage(err, "切换画布失败"));
   }
 }
 
 async function removeCanvas(canvas: Canvas) {
-  if (busy.value || editingId.value !== null || !props.directory || canvases.value.length <= 1) return;
-  const directory = props.directory;
+  if (busy.value || editingId.value !== null || !props.projectId || canvases.value.length <= 1) return;
+  const projectId = props.projectId;
   const id = canvas.id;
   busy.value = true;
   canvasListVisible.value = false;
@@ -219,16 +219,16 @@ async function removeCanvas(canvas: Canvas) {
       type: "warning", confirmButtonText: "删除", cancelButtonText: "取消", closeOnClickModal: false,
     }).then(() => true, () => false);
     if (!confirmed) return;
-    checkCanvasDirectory(directory);
+    checkCanvasProjectId(projectId);
     const nextCanvas = canvases.value.find(item => item.id !== id);
     if (!nextCanvas) throw new Error("至少保留一个画布");
-    if (activeCanvasId.value === id) await applyCanvas(nextCanvas.id, directory);
+    if (activeCanvasId.value === id) await applyCanvas(nextCanvas.id, projectId);
     await props.flushSave(async () => {
-      checkCanvasDirectory(directory);
+      checkCanvasProjectId(projectId);
       if (canvas.id !== id || !canvases.value.includes(canvas)) throw new Error("画布已变更，请重新选择");
       if (canvases.value.length <= 1) throw new Error("至少保留一个画布");
-      const files = useWorkspaceFiles(directory);
-      const storedCanvases = await Promise.all((await listCanvases(directory)).map(async canvas => {
+      const files = useWorkspaceFiles(projectId);
+      const storedCanvases = await Promise.all((await listCanvases(projectId)).map(async canvas => {
         const data = await files.readJson<{ minifeelCanvas?: boolean; nodes?: { id: string; data?: unknown }[] }>(canvas.id);
         if (data?.minifeelCanvas !== true || !Array.isArray(data.nodes) || data.nodes.some(node => !node || typeof node.id !== "string")) {
           throw new Error(`无法确认 ${canvas.id} 的素材引用，已停止删除`);
@@ -239,9 +239,9 @@ async function removeCanvas(canvas: Canvas) {
       if (!removedCanvas) throw new Error("画布不存在，请重新获取画布列表");
       if (storedCanvases.length <= 1) throw new Error("至少保留一个画布");
       const assetDirectories = getCanvasAssetDirectories(removedCanvas.nodes, storedCanvases.filter(canvas => canvas.id !== id).flatMap(canvas => canvas.nodes));
-      checkCanvasDirectory(directory);
+      checkCanvasProjectId(projectId);
       await files.remove(id);
-      checkCanvasDirectory(directory);
+      checkCanvasProjectId(projectId);
       canvases.value = canvases.value.filter(item => item !== canvas);
       // 等待宿主停止并卸载已删除画布，再恢复其他画布的自动保存。
       await nextTick();
@@ -251,20 +251,20 @@ async function removeCanvas(canvas: Canvas) {
       const failed = results.flatMap((result, index) => result.status === "rejected" ? [assetDirectories[index]] : []);
       if (failed.length) throw new Error(`画布已删除，但 ${failed.length} 个素材目录清理失败：${failed.join("、")}`);
     });
-    if (props.directory === directory) ElMessage.success("画布已删除");
+    if (props.projectId === projectId) ElMessage.success("画布已删除");
   } catch (err) {
-    if (props.directory === directory) ElMessage.error(errorMessage(err, "删除画布失败"));
+    if (props.projectId === projectId) ElMessage.error(errorMessage(err, "删除画布失败"));
   } finally {
-    if (props.directory === directory) busy.value = false;
+    if (props.projectId === projectId) busy.value = false;
   }
 }
 
-async function createCanvasFile(directory: string, name?: string, signal?: AbortSignal) {
+async function createCanvasFile(projectId: string, name?: string, signal?: AbortSignal) {
   if (name !== undefined) name = normalizeCanvasName(name);
-  const files = useWorkspaceFiles(directory);
+  const files = useWorkspaceFiles(projectId);
   const flow = { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
   for (let number = 1; ; number++) {
-    checkCanvasDirectory(directory, signal);
+    checkCanvasProjectId(projectId, signal);
     const canvasName = name ?? `画布${number}`;
     const id = `${canvasName}.json`;
     try {
@@ -276,8 +276,8 @@ async function createCanvasFile(directory: string, name?: string, signal?: Abort
   }
 }
 
-async function listCanvases(directory: string): Promise<Canvas[]> {
-  const files = useWorkspaceFiles(directory);
+async function listCanvases(projectId: string): Promise<Canvas[]> {
+  const files = useWorkspaceFiles(projectId);
   const { entries } = await files.list();
   const loaded = await Promise.all(entries.filter(entry => entry.type === "file" && /\.json$/i.test(entry.name)).map(async entry => {
     if (!(await isCanvasFile(files, entry.path))) return null;
@@ -287,36 +287,36 @@ async function listCanvases(directory: string): Promise<Canvas[]> {
 }
 
 async function addCanvas(name?: string, signal?: AbortSignal): Promise<string> {
-  const directory = getCanvasDirectory(signal);
+  const projectId = getCanvasProjectId(signal);
   busy.value = true;
   try {
-    const canvas = await createCanvasFile(directory, name, signal);
-    checkCanvasDirectory(directory);
+    const canvas = await createCanvasFile(projectId, name, signal);
+    checkCanvasProjectId(projectId);
     canvases.value = [...canvases.value, canvas];
     signal?.throwIfAborted();
-    await applyCanvas(canvas.id, directory, signal);
+    await applyCanvas(canvas.id, projectId, signal);
     canvasListVisible.value = false;
     return canvas.id;
   } finally {
-    if (props.directory === directory) busy.value = false;
+    if (props.projectId === projectId) busy.value = false;
   }
 }
 
 async function handleAddCanvas() {
-  if (busy.value || editingId.value !== null || !props.directory) return;
-  const directory = props.directory;
+  if (busy.value || editingId.value !== null || !props.projectId) return;
+  const projectId = props.projectId;
   busy.value = true;
   try {
-    const canvas = await createCanvasFile(directory);
-    checkCanvasDirectory(directory);
+    const canvas = await createCanvasFile(projectId);
+    checkCanvasProjectId(projectId);
     canvases.value = [...canvases.value, canvas];
     newCanvasId.value = canvas.id;
     busy.value = false;
     await editCanvas(canvas);
   } catch (err) {
-    if (props.directory === directory) ElMessage.error(errorMessage(err, "新增画布失败"));
+    if (props.projectId === projectId) ElMessage.error(errorMessage(err, "新增画布失败"));
   } finally {
-    if (props.directory === directory) busy.value = false;
+    if (props.projectId === projectId) busy.value = false;
   }
 }
 
@@ -348,17 +348,17 @@ function normalizeCanvasName(name: string) {
   return name;
 }
 
-async function renameCanvasFile(id: string, name: string, directory: string, signal?: AbortSignal) {
-  checkCanvasDirectory(directory, signal);
+async function renameCanvasFile(id: string, name: string, projectId: string, signal?: AbortSignal) {
+  checkCanvasProjectId(projectId, signal);
   const canvas = canvases.value.find(item => item.id === id);
   if (!canvas) throw new Error("画布不存在，请重新获取画布列表");
   name = normalizeCanvasName(name);
   if (name === canvas.name) return;
   await props.flushSave(async () => {
-    checkCanvasDirectory(directory, signal);
+    checkCanvasProjectId(projectId, signal);
     const target = `${name}.json`;
-    await useWorkspaceFiles(directory).rename(id, target);
-    checkCanvasDirectory(directory);
+    await useWorkspaceFiles(projectId).rename(id, target);
+    checkCanvasProjectId(projectId);
     // 文件已改名时先更新保存路径，再响应取消，避免自动保存重新创建旧文件。
     if (activeCanvasId.value === id) activeCanvasId.value = target;
     if (newCanvasId.value === id) newCanvasId.value = target;
@@ -367,24 +367,24 @@ async function renameCanvasFile(id: string, name: string, directory: string, sig
     canvases.value = [...canvases.value];
     signal?.throwIfAborted();
   });
-  checkCanvasDirectory(directory, signal);
+  checkCanvasProjectId(projectId, signal);
 }
 
 async function renameCanvas(canvasId: string, name: string, signal?: AbortSignal) {
-  const directory = getCanvasDirectory(signal);
+  const projectId = getCanvasProjectId(signal);
   busy.value = true;
   try {
-    await renameCanvasFile(canvasId, name, directory, signal);
+    await renameCanvasFile(canvasId, name, projectId, signal);
   } finally {
-    if (props.directory === directory) busy.value = false;
+    if (props.projectId === projectId) busy.value = false;
   }
 }
 
 async function saveCanvas(event?: Event) {
   if (event instanceof KeyboardEvent && event.isComposing) return;
   const id = editingId.value;
-  if (busy.value || !props.directory || id === null) return;
-  const directory = props.directory;
+  if (busy.value || !props.projectId || id === null) return;
+  const projectId = props.projectId;
   const canvas = canvases.value.find(item => item.id === id);
   if (!canvasName.value.trim() || canvasName.value.trim() === canvas?.name) {
     await finishEdit();
@@ -393,16 +393,16 @@ async function saveCanvas(event?: Event) {
   busy.value = true;
   renameError.value = "";
   try {
-    await renameCanvasFile(id, canvasName.value, directory);
+    await renameCanvasFile(id, canvasName.value, projectId);
     busy.value = false;
     await finishEdit();
   } catch (err) {
-    if (props.directory === directory) {
+    if (props.projectId === projectId) {
       renameError.value = errorMessage(err, "重命名画布失败");
       canvasListVisible.value = true;
     }
   } finally {
-    if (props.directory === directory) busy.value = false;
+    if (props.projectId === projectId) busy.value = false;
   }
 }
 

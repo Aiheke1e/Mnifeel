@@ -170,10 +170,10 @@ async function generateText() {
       .filter(item => item.value !== undefined && (item.dataType === "STRING" || item.dataType === "IMAGE" || item.dataType === "VIDEO"))
       .map(item => item.dataType === "STRING" ? { dataType: item.dataType, value: item.value } : { dataType: item.dataType, value: { ...item.value } });
     const input = { providerId: choice.providerId, modelId: choice.modelId, prompt: prompt.value.trim(), references };
-    const directory = references.some(item => item.dataType !== "STRING") ? (await textFiles.list()).directory : undefined;
+    const projectId = references.some(item => item.dataType !== "STRING") ? (await textFiles.list()).projectId : undefined;
     const result = await ai.generate({
       ...input,
-      directory,
+      projectId,
       onEvent(event) {
         if (event.type === "text") outputs.value.text.value = text += event.delta;
       },

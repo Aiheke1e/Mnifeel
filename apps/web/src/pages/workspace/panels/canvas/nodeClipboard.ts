@@ -5,7 +5,7 @@ import { writeClipboardText } from "@/lib/clipboard";
 export const nodeClipboardCommand = /^minifeel:paste-node:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 type ClipboardNode = { type: string; data: Record<string, unknown> };
-type ClipboardEntry = { command: string; directory: string; node: ClipboardNode };
+type ClipboardEntry = { command: string; projectId: string; node: ClipboardNode };
 
 async function openClipboardDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -32,16 +32,16 @@ async function accessClipboard(entry?: ClipboardEntry) {
   }
 }
 
-export async function copyNodeToClipboard(node: Pick<Node, "type" | "data">, directory: string) {
+export async function copyNodeToClipboard(node: Pick<Node, "type" | "data">, projectId: string) {
   if (!node.type) throw new Error("节点类型无效");
-  if (!directory) throw new Error("请先打开项目");
+  if (!projectId) throw new Error("请先打开项目");
   const command = `minifeel:paste-node:${crypto.randomUUID()}`;
   const snapshot: ClipboardNode = { type: node.type, data: JSON.parse(JSON.stringify(node.data ?? {})) };
-  await accessClipboard({ command, directory, node: snapshot });
+  await accessClipboard({ command, projectId, node: snapshot });
   await writeClipboardText(command);
 }
 
-export async function readClipboardNode(command: string, directory: string) {
+export async function readClipboardNode(command: string, projectId: string) {
   if (!nodeClipboardCommand.test(command)) return;
   const entry = await accessClipboard();
   if (!entry || entry.command !== command) throw new Error("节点剪贴数据已失效，请重新复制");
@@ -51,8 +51,8 @@ export async function readClipboardNode(command: string, directory: string) {
   }
   const hasWorkspaceFile = Object.values(node.data.outputs ?? {}).some(output => isNodeOutput(output)
     && typeof output.value === "object" && !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(output.value.url));
-  if (hasWorkspaceFile && entry.directory !== directory) {
-    throw new Error(entry.directory ? "此节点引用工作区文件，不能跨项目粘贴" : "节点剪贴数据缺少工作目录，请重新复制");
+  if (hasWorkspaceFile && entry.projectId !== projectId) {
+    throw new Error(entry.projectId ? "此节点引用工作区文件，不能跨项目粘贴" : "节点剪贴数据缺少工作目录，请重新复制");
   }
   return node;
 }

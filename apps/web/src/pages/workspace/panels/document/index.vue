@@ -1,6 +1,6 @@
 <template>
   <section class="documentPanel" aria-label="文档编辑" @keydown.ctrl.f.prevent="searchVisible = true" @keydown.meta.f.prevent="searchVisible = true">
-    <fileTree :directory="workspaceStore.project?.directory" @selectNode="openNode" />
+    <fileTree :projectId="workspaceStore.project?.id" @selectNode="openNode" />
     <div v-loading="opening" class="editorSurface">
       <div v-if="selectedNode" class="documentHeader">
         <span class="documentName" :title="`${selectedPath} / ${selectedNode.label}`">{{ selectedNode.label }}</span>
@@ -280,8 +280,8 @@ import {
 
 type TextOutput = { id: string; label: string; text: string };
 const props = defineProps<{
-  readNode: (directory: string, canvasPath: string, nodeId: string) => Promise<{ label: string; outputs: TextOutput[] }>;
-  saveNode: (directory: string, canvasPath: string, nodeId: string, handleId: string, text: string) => Promise<void>;
+  readNode: (projectId: string, canvasPath: string, nodeId: string) => Promise<{ label: string; outputs: TextOutput[] }>;
+  saveNode: (projectId: string, canvasPath: string, nodeId: string, handleId: string, text: string) => Promise<void>;
 }>();
 const workspaceStore = useWorkspaceStore();
 const selectedNode = ref<TreeSelection>();
@@ -296,15 +296,15 @@ const selectedPath = computed(() => {
   return "filePath" in selection ? selection.filePath : selection.canvasPath;
 });
 let openRequest = 0;
-let draft: { directory: string; selection: TreeSelection; handleId: string; text: string } | undefined;
+let draft: { projectId: string; selection: TreeSelection; handleId: string; text: string } | undefined;
 let saving = Promise.resolve();
 const saveDocument = debounce((change: NonNullable<typeof draft>) => {
   // ACT: 同一面板顺序落盘；每次保存固定目录、文件或画布节点，不随当前选择漂移。
   saving = saving
     .catch(() => {})
     .then(() => ("filePath" in change.selection
-      ? useWorkspaceFiles(change.directory).write(change.selection.filePath, change.text)
-      : props.saveNode(change.directory, change.selection.canvasPath, change.selection.nodeId, change.handleId, change.text)))
+      ? useWorkspaceFiles(change.projectId).write(change.selection.filePath, change.text)
+      : props.saveNode(change.projectId, change.selection.canvasPath, change.selection.nodeId, change.handleId, change.text)))
     .then(() => {
       if (draft === change) {
         dirty.value = false;
@@ -325,12 +325,12 @@ const editorOptions: Partial<EditorOptions> = {
   content: "",
   contentType: "markdown",
   onUpdate({ editor }) {
-    const directory = workspaceStore.project?.directory;
-    if (!directory || !selectedNode.value || opening.value) return;
+    const projectId = workspaceStore.project?.id;
+    if (!projectId || !selectedNode.value || opening.value) return;
     const text = serializeMarkdown(editor);
     const output = nodeOutputs.value.find((output) => output.id === outputId.value);
     if (output) output.text = text;
-    draft = { directory, selection: selectedNode.value, handleId: outputId.value, text };
+    draft = { projectId, selection: selectedNode.value, handleId: outputId.value, text };
     dirty.value = true;
     saveError.value = "";
     saveDocument(draft);
@@ -369,8 +369,8 @@ function showOutput(id: string) {
 
 async function openNode(selection: TreeSelection, reportError = true, signal?: AbortSignal) {
   signal?.throwIfAborted();
-  const directory = workspaceStore.project?.directory;
-  if (!directory) return;
+  const projectId = workspaceStore.project?.id;
+  if (!projectId) return;
   const request = ++openRequest;
   opening.value = true;
   editor.value?.setEditable(false, false);
@@ -378,17 +378,17 @@ async function openNode(selection: TreeSelection, reportError = true, signal?: A
     await flushSave();
     signal?.throwIfAborted();
     if ("filePath" in selection) {
-      const text = await useWorkspaceFiles(directory).readText(selection.filePath);
+      const text = await useWorkspaceFiles(projectId).readText(selection.filePath);
       signal?.throwIfAborted();
-      if (request !== openRequest || directory !== workspaceStore.project?.directory) return;
+      if (request !== openRequest || projectId !== workspaceStore.project?.id) return;
       selectedNode.value = selection;
       nodeOutputs.value = [{ id: "text", label: selection.label, text }];
       showOutput("text");
       return;
     }
-    const document = await props.readNode(directory, selection.canvasPath, selection.nodeId);
+    const document = await props.readNode(projectId, selection.canvasPath, selection.nodeId);
     signal?.throwIfAborted();
-    if (request !== openRequest || directory !== workspaceStore.project?.directory) return;
+    if (request !== openRequest || projectId !== workspaceStore.project?.id) return;
     if (!document.outputs.length) throw new Error("节点没有文本输出");
     selectedNode.value = { ...selection, label: document.label };
     nodeOutputs.value = document.outputs;

@@ -1,5 +1,5 @@
 <template>
-  <component v-if="renderer" :is="renderer" :tool="tool" :directory="directory" @copy="emit('copy', $event)" />
+  <component v-if="renderer" :is="renderer" :tool="tool" :projectId="projectId" @copy="emit('copy', $event)" />
   <el-text v-if="rendererError" type="danger">工具界面加载失败，请停止后重试：{{ rendererError }}</el-text>
   <chat-reasoning v-model:collapsed="collapsed" class="messageReasoning toolCall" expandIconPlacement="left">
     <template #header>
@@ -32,7 +32,7 @@ import chatReasoning from "@tdesign-vue-next/chat/es/chat-reasoning";
 import type { AgentToolCall } from "@minifeel/server/agent/types";
 import messageMarkdown from "@/components/messageMarkdown.vue";
 
-const { tool, directory } = defineProps<{ tool: AgentToolCall; directory?: string }>();
+const { tool, projectId } = defineProps<{ tool: AgentToolCall; projectId?: string }>();
 const emit = defineEmits<{ copy: [content: string] }>();
 const renderer = shallowRef<Component>();
 const rendererError = ref("");

@@ -142,13 +142,13 @@ function setSessionFile(item: OpenConversation, file: string) {
 
 async function newConversation() {
   if (loading.value || historyLoading.value) return;
-  const directory = workspaceStore.project?.directory;
-  if (!directory) return ElMessage.warning("请先打开项目");
+  const projectId = workspaceStore.project?.id;
+  if (!projectId) return ElMessage.warning("请先打开项目");
   const currentRequest = ++requestId;
   loading.value = true;
   try {
     const { data } = await axios.post<{ code: number; data: AgentConversation; message?: string }>("/api/agent/create", {
-      directory,
+      projectId,
     }, { headers: { "x-minifeel-workspace": "1" } });
     if (data.code !== 200) throw new Error(data.message || "新建对话失败");
     if (currentRequest !== requestId) return;
@@ -165,23 +165,23 @@ async function newConversation() {
   }
 }
 
-async function readConversation(directory: string, file: string) {
+async function readConversation(projectId: string, file: string) {
   const { data } = await axios.get<{ code: number; data: AgentConversation; message?: string }>("/api/agent/get", {
-    params: { directory, sessionFile: file }, headers: { "x-minifeel-workspace": "1" },
+    params: { projectId, sessionFile: file }, headers: { "x-minifeel-workspace": "1" },
   });
   if (data.code !== 200) throw new Error(data.message || "读取对话失败");
   return data.data;
 }
 
 async function loadHistory(openLatest = false) {
-  const directory = workspaceStore.project?.directory;
-  if (!directory || loading.value || historyLoading.value) return;
+  const projectId = workspaceStore.project?.id;
+  if (!projectId || loading.value || historyLoading.value) return;
   const currentRequest = ++requestId;
   historyLoading.value = true;
   loading.value = openLatest;
   try {
     const { data } = await axios.get<{ code: number; data: AgentHistory[]; message?: string }>("/api/agent/list", {
-      params: { directory }, headers: { "x-minifeel-workspace": "1" },
+      params: { projectId }, headers: { "x-minifeel-workspace": "1" },
     });
     if (data.code !== 200) throw new Error(data.message || "读取历史对话失败");
     if (currentRequest !== requestId) return;
@@ -189,7 +189,7 @@ async function loadHistory(openLatest = false) {
     // 首条回复结束前会话可能尚未落盘，仍允许从历史菜单切回。
     for (const item of conversations.value) if (item.file) setSessionFile(item, item.file);
     if (openLatest) {
-      const session = !workspaceStore.pendingAgentMessage && data.data[0] ? await readConversation(directory, data.data[0].file) : null;
+      const session = !workspaceStore.pendingAgentMessage && data.data[0] ? await readConversation(projectId, data.data[0].file) : null;
       if (currentRequest !== requestId) return;
       showConversation(session);
       initialized.value = true;
@@ -205,8 +205,8 @@ async function loadHistory(openLatest = false) {
 }
 
 async function selectConversation(file: string) {
-  const directory = workspaceStore.project?.directory;
-  if (!directory || loading.value || historyLoading.value || file === sessionFile.value) return;
+  const projectId = workspaceStore.project?.id;
+  if (!projectId || loading.value || historyLoading.value || file === sessionFile.value) return;
   const existing = conversations.value.find(item => item.file === file);
   if (existing) {
     conversationKey.value = existing.key;
@@ -215,7 +215,7 @@ async function selectConversation(file: string) {
   const currentRequest = ++requestId;
   loading.value = true;
   try {
-    const session = await readConversation(directory, file);
+    const session = await readConversation(projectId, file);
     if (currentRequest !== requestId) return;
     showConversation(session);
     initialized.value = true;
@@ -227,17 +227,17 @@ async function selectConversation(file: string) {
 }
 
 async function renameConversation(file: string, value: string) {
-  const directory = workspaceStore.project?.directory;
+  const projectId = workspaceStore.project?.id;
   const item = history.value.find(item => item.file === file);
   const nextName = value.trim();
-  if (!directory || loading.value || historyLoading.value || (!item && file !== sessionFile.value)) return;
+  if (!projectId || loading.value || historyLoading.value || (!item && file !== sessionFile.value)) return;
   if (!nextName || nextName.length > 80) return ElMessage.warning("请输入 1–80 个字符的对话名称");
   if (nextName === (file === sessionFile.value ? name.value : item?.name)) return;
   const currentRequest = ++requestId;
   loading.value = true;
   try {
     const { data } = await axios.patch<{ code: number; data: { name: string }; message?: string }>("/api/agent/rename", {
-      directory, sessionFile: file, name: nextName,
+      projectId, sessionFile: file, name: nextName,
     }, { headers: { "x-minifeel-workspace": "1" } });
     if (data.code !== 200) throw new Error(data.message || "重命名对话失败");
     if (currentRequest !== requestId) return;
@@ -254,13 +254,13 @@ async function renameConversation(file: string, value: string) {
 }
 
 async function removeConversation(file: string) {
-  const directory = workspaceStore.project?.directory;
-  if (!directory || loading.value || historyLoading.value || history.value.length <= 1 || !history.value.some(item => item.file === file)) return;
+  const projectId = workspaceStore.project?.id;
+  if (!projectId || loading.value || historyLoading.value || history.value.length <= 1 || !history.value.some(item => item.file === file)) return;
   if (!/^[\w-]+\.jsonl$/.test(file)) return ElMessage.error("对话文件名无效");
   const currentRequest = ++requestId;
   loading.value = true;
   try {
-    await useWorkspaceFiles(directory).remove(`.agent/sessions/${file}`);
+    await useWorkspaceFiles(projectId).remove(`.agent/sessions/${file}`);
     if (currentRequest !== requestId) return;
     history.value = history.value.filter(item => item.file !== file);
     if (file === sessionFile.value) {
@@ -277,7 +277,7 @@ async function removeConversation(file: string) {
   }
 }
 
-watch(() => workspaceStore.project?.directory, directory => {
+watch(() => workspaceStore.project?.id, projectId => {
   requestId++;
   history.value = [];
   conversations.value = [];
@@ -287,7 +287,7 @@ watch(() => workspaceStore.project?.directory, directory => {
   loading.value = false;
   historyLoading.value = false;
   showConversation(null);
-  if (visible.value && directory) void loadHistory(true);
+  if (visible.value && projectId) void loadHistory(true);
 }, { immediate: true });
 watch(visible, active => {
   if (active && !initialized.value) void loadHistory(true);

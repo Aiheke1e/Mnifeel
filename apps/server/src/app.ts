@@ -75,6 +75,7 @@ export async function createApp({
     requireAuth(request, response, next);
   });
   app.use("/api/admin", requireAdmin);
+  app.use(["/api/assets", "/api/workspaces/list", "/api/workspaces/selectDirectory"], requireAdmin);
 
   const { default: initializeProviderModels } = await import("@/utils/ai/initialize");
   await initializeProviderModels();

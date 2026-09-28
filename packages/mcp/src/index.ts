@@ -45,7 +45,7 @@ export function createMcpRouter(options: McpOptions) {
     const resources = options.resources;
     const server = new McpServer({ name: "minifeel", version: "0.0.0" }, {
       capabilities: { tools: { listChanged: false }, ...(resources ? { resources: { subscribe: false, listChanged: false } } : {}) },
-      instructions: "先调用 getAppState 获取连接和工作区；从 tools/list 读取当前工具参数。业务工具使用 {target: {connectionId, directory}, args: {...}}。画布与节点必须使用实时工具，禁止直接修改画布 JSON。"
+      instructions: "先调用 getAppState 获取连接和项目；从 tools/list 读取当前工具参数。业务工具使用 {target: {connectionId, projectId}, args: {...}}。画布与节点必须使用实时工具，禁止直接修改画布 JSON。"
         + (resources ? "通过 resources/list 发现全局技能和附属资料，再以返回的 URI 调用 resources/read 读取最新内容。" : ""),
     });
     if (resources) {

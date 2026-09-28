@@ -252,7 +252,7 @@ async function startGeneration() {
   if (choice.mode?.length && !matchingModes.value.length) throw new Error("当前模型没有适合这些参考素材的生成模式，请更换模型或调整引用");
   const workspace = files.getWorkspaceFiles();
   const controller = new AbortController();
-  const input: Omit<NodeVideoRequest, "directory"> = {
+  const input: Omit<NodeVideoRequest, "projectId"> = {
     providerId: choice.providerId,
     modelId: choice.modelId,
     prompt: generationPrompt.value,
@@ -272,9 +272,9 @@ async function startGeneration() {
   // ACT: 工具立即返回，任务由节点持有，停止或卸载时取消。
   generation = generationState.run(() => workspace
     .list()
-    .then(({ directory }) => {
+    .then(({ projectId }) => {
       controller.signal.throwIfAborted();
-      return ai.generateVideo({ ...input, directory }, controller.signal);
+      return ai.generateVideo({ ...input, projectId }, controller.signal);
     })
     .then(([result]) => {
       controller.signal.throwIfAborted();

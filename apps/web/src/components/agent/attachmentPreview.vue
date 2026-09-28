@@ -35,13 +35,13 @@ import { IconPhoto, IconVideo, IconX } from "@tabler/icons-vue";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import type { AgentAttachment } from "./types";
 
-const props = defineProps<{ attachment: AgentAttachment; directory?: string; removable?: boolean }>();
+const props = defineProps<{ attachment: AgentAttachment; projectId?: string; removable?: boolean }>();
 const emit = defineEmits<{ remove: [] }>();
 const imageRef = ref<ImageInstance>();
 const videoPreviewVisible = ref(false);
 const thumbnailUrl = ref("");
 
-watch(() => [props.directory, props.attachment.file, props.attachment.path, props.attachment.mimeType] as const, async ([directory, file, path, mimeType], _previous, onCleanup) => {
+watch(() => [props.projectId, props.attachment.file, props.attachment.path, props.attachment.mimeType] as const, async ([projectId, file, path, mimeType], _previous, onCleanup) => {
   videoPreviewVisible.value = false;
   thumbnailUrl.value = "";
   let cancelled = false;
@@ -52,8 +52,8 @@ watch(() => [props.directory, props.attachment.file, props.attachment.path, prop
       const url = URL.createObjectURL(file);
       release = () => URL.revokeObjectURL(url);
       thumbnailUrl.value = url;
-    } else if (directory) {
-      const preview = useWorkspaceFiles(directory).acquireUrl(path, mimeType);
+    } else if (projectId) {
+      const preview = useWorkspaceFiles(projectId).acquireUrl(path, mimeType);
       release = preview.release;
       const url = await preview.url;
       if (!cancelled) thumbnailUrl.value = url;

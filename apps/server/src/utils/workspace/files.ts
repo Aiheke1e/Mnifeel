@@ -1,8 +1,7 @@
 import { constants } from "node:fs";
 import { copyFile, link, lstat, rename, unlink, writeFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import type { Request } from "express";
-import { resolveWorkspace } from "@/utils/workspace";
+import { resolveProjectWorkspace } from "@/utils/projects";
 
 export async function writeWorkspaceFile(path: string, content: string | Uint8Array, exclusive = false) {
   const temporary = `${path}.${crypto.randomUUID()}.tmp`;
@@ -38,9 +37,9 @@ export function isWithin(root: string, path: string) {
   return offset !== ".." && !offset.startsWith(`..${sep}`) && !isAbsolute(offset);
 }
 
-export async function resolveWorkspaceFile(req: Request, directory: string, path: string) {
-  const root = await resolveWorkspace(req, directory);
-  return resolveWorkspacePath(root, path);
+export async function resolveProjectWorkspaceFile(userId: string, projectId: string, path: string) {
+  const root = await resolveProjectWorkspace(userId, projectId);
+  return { projectId, ...await resolveWorkspacePath(root, path) };
 }
 
 export async function resolveWorkspacePath(root: string, path: string, allowMissingParents = false) {
@@ -57,7 +56,7 @@ export async function resolveWorkspacePath(root: string, path: string, allowMiss
   }
   const actual = info ? await realpath(target) : resolve(await realpath(parent), relative(parent, target));
   if (!isWithin(root, actual)) throw Object.assign(new Error("只能操作当前工作区内的文件"), { status: 403 });
-  return { directory: root, path: actual };
+  return { directory: root, path: actual, relativePath: relative(root, actual).split(sep).join("/") };
 }
 
 // ACT: 桌面和独立 Server 均为单进程；锁防止并发文件操作互相覆盖。

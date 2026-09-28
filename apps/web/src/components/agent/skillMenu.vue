@@ -21,7 +21,7 @@ import axios from "axios";
 import { IconBook } from "@tabler/icons-vue";
 import { ClickOutside as vClickOutside } from "element-plus";
 
-const props = defineProps<{ directory?: string; active: boolean; disabled: boolean; query?: string; editor?: HTMLElement }>();
+const props = defineProps<{ projectId?: string; active: boolean; disabled: boolean; query?: string; editor?: HTMLElement }>();
 const emit = defineEmits<{ select: [name: string]; dismiss: [] }>();
 const listId = useId();
 const buttonVisible = ref(false);
@@ -81,7 +81,7 @@ watch(visible, async (open, _previous, onCleanup) => {
   loadError.value = "";
   try {
     const { data } = await axios.get("/api/agent/skills", {
-      params: { directory: props.directory }, signal: controller.signal,
+      params: { projectId: props.projectId }, signal: controller.signal,
       headers: { "x-minifeel-workspace": "1" },
     });
     if (data.code !== 200) throw new Error(data.message || "加载技能失败");

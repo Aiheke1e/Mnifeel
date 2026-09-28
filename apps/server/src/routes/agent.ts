@@ -2,11 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import type { CanvasInfo } from "@minifeel/tools-scaffold/runtime";
 import type { AgentEvent } from "@/agent/runtime/types";
-import { validateFields } from "@/lib/middleware";
+import { getAuth, validateFields } from "@/lib/middleware";
 import u from "@/utils";
 
 const inputSchema = z.object({
-  prompt: z.string().trim(), directory: z.string().min(1),
+  prompt: z.string().trim(), projectId: z.uuid(),
   attachments: u.agent.agentAttachmentsSchema.optional(),
   providerId: z.string().min(1), modelId: z.string().min(1),
   thinkingLevel: z.enum(["off", "low", "medium", "high"]).optional(),
@@ -25,8 +25,8 @@ const inputSchema = z.object({
 });
 
 export default Router().post("/", validateFields(inputSchema.shape), async (req, res) => {
-  const { directory, canvas, ...options } = req.body as z.infer<typeof inputSchema>;
-  const cwd = await u.workspace.resolveWorkspace(req, directory);
+  const { projectId, canvas, ...options } = req.body as z.infer<typeof inputSchema>;
+  const cwd = await u.projects.resolveProjectWorkspace(getAuth(res).user.id, projectId);
   res.set({ "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
   res.flushHeaders();
   const send = (event: AgentEvent) => {

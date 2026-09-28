@@ -1,48 +1,59 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import axios from "axios";
+import api from "@/lib/api";
 
 export type Project = {
-  directory: string;
+  id: string;
   name: string;
-  lastOpenedAt: number;
+  updatedAt: string;
 };
+
+type ApiResponse<T> = { code: number; data: T; message: string };
 
 export const useWorkspaceStore = defineStore("workspace", () => {
   const project = ref<Project | null>(null);
   const projectList = ref<Project[]>([]);
-  const pendingAgentMessage = ref<{ directory: string; prompt: string; model: string; reasoningEffort: string } | null>(null);
+  const pendingAgentMessage = ref<{ projectId: string; prompt: string; model: string; reasoningEffort: string } | null>(null);
 
-  async function openProject(path: string, previousDirectory = path, signal?: AbortSignal) {
-    const { data } = await axios.get<{ code: number; data?: { directory: string }; message?: string }>("/api/workspaces/check", {
-      params: { directory: path }, headers: { "x-minifeel-workspace": "1" }, signal,
-    });
+  async function loadProjects(signal?: AbortSignal) {
+    const { data } = await api.get<ApiResponse<Project[]>>("/projects/list", { signal });
     signal?.throwIfAborted();
-    if (data.code !== 200 || !data.data?.directory) throw new Error(data.message || "工作目录校验失败");
-    const checkedDirectory = data.data.directory;
+    projectList.value = data.data;
+    project.value = data.data.find(item => item.id === project.value?.id) ?? null;
+  }
+
+  async function createProject(name: string, signal?: AbortSignal) {
+    const { data } = await api.post<ApiResponse<Project>>("/projects/create", { name }, { signal });
+    signal?.throwIfAborted();
     pendingAgentMessage.value = null;
-    const existing = projectList.value.find(project => project.directory === previousDirectory)
-      ?? projectList.value.find(project => project.directory === checkedDirectory);
-    project.value = { directory: checkedDirectory, name: existing?.name || checkedDirectory.split(/[\\/]/).filter(Boolean).at(-1) || checkedDirectory, lastOpenedAt: Date.now() };
-    projectList.value = [
-      project.value,
-      ...projectList.value.filter(item => item.directory !== previousDirectory && item.directory !== checkedDirectory),
-    ];
+    project.value = data.data;
+    projectList.value = [data.data, ...projectList.value.filter(item => item.id !== data.data.id)];
+    return data.data;
   }
 
-  function renameProject(path: string, name: string) {
-    const target = projectList.value.find(item => item.directory === path);
-    if (!target || !name.trim()) return;
-    target.name = name.trim();
-    if (project.value?.directory === path) project.value = target;
+  async function openProject(projectId: string, signal?: AbortSignal) {
+    const { data } = await api.get<ApiResponse<Project>>("/workspaces/check", { params: { projectId }, signal });
+    signal?.throwIfAborted();
+    pendingAgentMessage.value = null;
+    project.value = data.data;
+    projectList.value = [data.data, ...projectList.value.filter(item => item.id !== data.data.id)];
   }
 
-  function removeProject(path: string) {
-    projectList.value = projectList.value.filter(item => item.directory !== path);
-    if (project.value?.directory === path) project.value = null;
+  async function renameProject(projectId: string, name: string) {
+    name = name.trim();
+    if (!name) return;
+    const { data } = await api.put<ApiResponse<Project>>("/projects/update", { projectId, name });
+    projectList.value = projectList.value.map(item => item.id === projectId ? data.data : item);
+    if (project.value?.id === projectId) project.value = data.data;
   }
 
-  return { project, projectList, pendingAgentMessage, openProject, renameProject, removeProject };
+  async function removeProject(projectId: string) {
+    await api.post("/projects/archive", { projectId });
+    projectList.value = projectList.value.filter(item => item.id !== projectId);
+    if (project.value?.id === projectId) project.value = null;
+  }
+
+  return { project, projectList, pendingAgentMessage, loadProjects, createProject, openProject, renameProject, removeProject };
 }, {
   persist: {
     key: "minifeel.projectList",

@@ -5,9 +5,9 @@ import { invalidateNodeModels } from "@minifeel/nodes-scaffold/nodeAi";
 import { saveSettings, settings } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
 
-type ControlCall = { type: "call"; callId: string; name: string; args: Record<string, unknown>; directory?: string };
+type ControlCall = { type: "call"; callId: string; name: string; args: Record<string, unknown>; projectId?: string };
 type WorkspaceControl = {
-  getState(): { directory: string | null; canvasId: string | null; panel: string; tools: NodeToolInfo[]; document?: unknown };
+  getState(): { projectId: string | null; canvasId: string | null; panel: string; tools: NodeToolInfo[]; document?: unknown };
   call(request: ControlCall, signal: AbortSignal): Promise<unknown>;
   flushSave(): Promise<void>;
 };
@@ -46,11 +46,11 @@ export function useMcpControl() {
   const readSettings = () => JSON.parse(JSON.stringify(settings.value, (key, value) =>
     /(?:api.?key|token|password|secret)$/i.test(key) && value ? "[REDACTED]" : value));
   const getState = () => ({
-    directory: null, canvasId: null, panel: router.currentRoute.value.path.slice(1), tools: [] as NodeToolInfo[],
+    projectId: null, canvasId: null, panel: router.currentRoute.value.path.slice(1), tools: [] as NodeToolInfo[],
     ...workspaceControl.value?.getState(),
     projectList: workspaceStore.projectList,
   });
-  watch(() => workspaceStore.project?.directory, () => {
+  watch(() => workspaceStore.project?.id, () => {
     for (const controller of calls.values()) controller.abort(new Error("工作区已切换，本次调用已停止"));
   }, { flush: "sync" });
 
@@ -121,25 +121,25 @@ export function useMcpControl() {
             window.dispatchEvent(new CustomEvent("minifeel:plugin-installed", { detail: { type, name: typeof name === "string" ? name : "" } }));
             result = { refreshed: true };
           } else if (request.name === "openProject") {
-            const directory = request.args.directory;
-            if (typeof directory !== "string" || !directory.trim()) throw new Error("缺少工作目录");
+            const projectId = request.args.projectId;
+            if (typeof projectId !== "string" || !projectId.trim()) throw new Error("缺少项目 ID");
             await workspaceControl.value?.flushSave();
             callSignal.throwIfAborted();
             // ACT: 切换项目会取消旧画布调用；当前打开项目命令属于应用层。
             calls.delete(request.callId);
-            await workspaceStore.openProject(directory, directory, callSignal);
-            const openedDirectory = workspaceStore.project?.directory;
+            await workspaceStore.openProject(projectId, callSignal);
+            const openedProjectId = workspaceStore.project?.id;
             calls.set(request.callId, controller);
             callSignal.throwIfAborted();
-            await router.push("/workspace");
+            await router.push("/app/workspace");
             await waitForControlValue(() => workspaceControl.value, callSignal);
             callSignal.throwIfAborted();
-            if (router.currentRoute.value.path !== "/workspace" || workspaceStore.project?.directory !== openedDirectory) throw new Error("工作区打开已取消");
+            if (router.currentRoute.value.path !== "/app/workspace" || workspaceStore.project?.id !== openedProjectId) throw new Error("项目打开已取消");
             result = getState();
           } else {
             const control = workspaceControl.value;
             if (!control) throw new Error("请先打开工作区");
-            if (request.directory && request.directory !== control.getState().directory) throw new Error("工作区已切换，请重新读取应用状态");
+            if (request.projectId && request.projectId !== control.getState().projectId) throw new Error("工作区已切换，请重新读取应用状态");
             result = await control.call(request, callSignal);
           }
         } catch (reason) {

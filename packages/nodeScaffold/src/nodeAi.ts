@@ -18,7 +18,7 @@ export type NodeMediaModel = Omit<MediaModel, "mode"> & {
   mode?: (string | string[])[];
 };
 export type NodeImageRequest = {
-  directory: string;
+  projectId: string;
   providerId: string;
   modelId: string;
   prompt: string;
@@ -28,14 +28,14 @@ export type NodeImageRequest = {
   size?: string;
 };
 export type NodeImageResult = { path: string; mimeType: string; mediaType: "image" };
-export type NodeVideoRequest = Omit<MediaGenerationRequest, "size"> & { directory: string; outputDirectory: string };
+export type NodeVideoRequest = Omit<MediaGenerationRequest, "size"> & { projectId: string; outputDirectory: string };
 export type NodeVideoResult = { path: string; mimeType: string; mediaType: "video" };
 export type NodeAiRequest = {
   providerId: string;
   modelId: string;
   prompt: string;
   systemPrompt?: string;
-  directory?: string;
+  projectId?: string;
   references?: Extract<NodeOutput, { dataType: "STRING" | "IMAGE" | "VIDEO" }>[];
   tools?: NodeAiTool[];
   onEvent?: (event: NodeAiEvent) => void;
@@ -105,13 +105,13 @@ async function readModels<T>(url: string, signal: AbortSignal): Promise<T[]> {
 }
 
 async function requestModel(input: NodeAiRequest, context: Context, model: Model<NodeAiModel["protocol"]>, signal: AbortSignal) {
-  const { providerId, modelId, references, directory, onEvent } = input;
+  const { providerId, modelId, references, projectId, onEvent } = input;
   const stream = createAssistantMessageEventStream();
   try {
     signal.throwIfAborted();
     const response = await fetch("/api/ai/generate", {
       method: "POST", headers: { "Content-Type": "application/json", "x-minifeel-workspace": "1" },
-      body: JSON.stringify({ providerId, modelId, context, directory, references }), signal,
+      body: JSON.stringify({ providerId, modelId, context, projectId, references }), signal,
     });
     if (!response.ok) await readResult(response);
     if (!response.body || !response.headers.get("content-type")?.includes("text/event-stream")) throw new Error("AI 未返回 SSE 数据流");

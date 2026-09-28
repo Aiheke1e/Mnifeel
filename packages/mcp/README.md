@@ -103,19 +103,19 @@ URI 结构为 `minifeel://skills/<技能名称编码>/<技能内文件路径分�
 
 ```json
 {
-  "target": { "connectionId": "连接 ID", "directory": "工作区绝对路径", "canvasId": "当前画布 ID" },
+  "target": { "connectionId": "连接 ID", "projectId": "项目 ID", "canvasId": "当前画布 ID" },
   "args": { "工具原有参数": "值" }
 }
 ```
 
-`target` 及其字段可选，操作画布时建议明确传入 `connectionId`、`directory` 和 `canvasId`，避免用户手动切换画布后旧命令作用于新画布。切换项目或画布成功后重新读取状态，更新目标 ID。
+`target` 及其字段可选，操作画布时建议明确传入 `connectionId`、`projectId` 和 `canvasId`，避免用户手动切换画布后旧命令作用于新画布。切换项目或画布成功后重新读取状态，更新目标 ID。
 
 画布工具与内置 Agent 共用已有实现。节点能力通过 `getCanvas` 或 `addNode` 的结果发现，再通过 `nodeTools` 调用。插件禁用、目标不匹配、连接断开时返回明确错误。
 
 | 能力 | 调用方式 |
 | --- | --- |
 | 应用管理 | `listAppOperations` 使用 `{ "args": {} }` 查询当前 31 项管理操作，或 `{ "args": { "name": "操作名" } }` 查询单项描述和 schema；随后 `appOperation` 使用 `{ "args": { "name": "操作名", "parameters": {} } }` 执行。覆盖插件、技能、媒体供应商、素材库和 Agent 历史；以实际返回的操作列表和 schema 为准。 |
-| 会话管理 | 通过 `appOperation` 调用对应操作，工作目录由 `target.directory` 或指定页面的工作区注入，不在 `parameters` 中另填目录。 |
+| 会话管理 | 通过 `appOperation` 调用对应操作，项目 ID 由 `target.projectId` 或指定页面的工作区注入，不在 `parameters` 中另填。 |
 | 委托内置 Agent | 按用户请求调用 `runAgent`，`args` 提供 `providerId`、`modelId`、`prompt`，可选 `sessionFile` 继续已有对话；等待本轮完成后返回回复及对话文件。调用会使用配置的模型。 |
 | 文件和媒体传输 | `workspaceFiles` 的 `action` 支持 `list`、`mkdir`、`rename`、`remove`、`readBinary`、`writeBinary`。二进制通过 Base64 传输，解码后不超过 20 MiB；写入默认 `exclusive: true`，不覆盖已有文件。文本读写复用已启用的文件工具。 |
 | 文档编辑 | 先 `getDocument` 取得 `text`，再 `writeDocument` 传入新 `text` 和原文 `expectedText`；原文不匹配时拒绝写入。已打开的画布和文档拒绝通过原始文件操作修改，应使用对应界面工具。 |

@@ -4,10 +4,10 @@ import { z } from "zod";
 import conf from "@/utils/conf";
 
 export const controlStateSchema = z.object({
-  directory: z.string().max(4096).nullable(),
+  projectId: z.uuid().nullable(),
   canvasId: z.string().max(256).nullable(),
   panel: z.string().max(32),
-  projectList: z.array(z.object({ directory: z.string().max(4096), name: z.string().max(256), lastOpenedAt: z.number() })).max(1000),
+  projectList: z.array(z.object({ id: z.uuid(), name: z.string().max(120), updatedAt: z.iso.datetime() })).max(1000),
   tools: z.array(z.object({
     nodeId: z.string().max(256), name: z.templateLiteral(["node:", z.string()]), nodeLabel: z.string().max(200).optional(),
     description: z.string().max(4000), parameters: z.record(z.string(), z.json()),
@@ -16,7 +16,7 @@ export const controlStateSchema = z.object({
 
 type ControlState = z.infer<typeof controlStateSchema>;
 type ControlResult = { result?: unknown; error?: string };
-type Connection = { id: string; state: ControlState; revision: number; response: Response; pending?: { id: string; finish(result: ControlResult): void } };
+type Connection = { id: string; userId: string; state: ControlState; revision: number; response: Response; pending?: { id: string; finish(result: ControlResult): void } };
 // ACT: 控制连接只属于当前单进程，重连重新注册，不持久化运行中的命令。
 const connections = new Map<string, Connection>();
 
@@ -69,20 +69,20 @@ export function listConnections() {
   return [...connections.values()].map(({ id, state }) => ({ id, state }));
 }
 
-export function getConnection(id?: string, directory?: string) {
+export function getConnection(id?: string, projectId?: string) {
   if (id) {
     const connection = connections.get(id);
     if (!connection) throw new Error("Minifeel 页面已断开，请重新调用 getAppState");
     return connection;
   }
-  const matches = [...connections.values()].filter(item => !directory || item.state.directory === directory);
+  const matches = [...connections.values()].filter(item => !projectId || item.state.projectId === projectId);
   if (matches.length > 1) throw new Error("存在多个 Minifeel 页面，请用 target.connectionId 指定操作目标");
   return matches[0];
 }
 
-export function connectControl(id: string, response: Response) {
+export function connectControl(id: string, userId: string, response: Response) {
   if (connections.has(id)) throw Object.assign(new Error("控制连接已存在"), { status: 409 });
-  const connection: Connection = { id, response, revision: 0, state: { directory: null, canvasId: null, panel: "home", projectList: [], tools: [] } };
+  const connection: Connection = { id, userId, response, revision: 0, state: { projectId: null, canvasId: null, panel: "home", projectList: [], tools: [] } };
   response.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" });
   response.flushHeaders();
   connections.set(id, connection);
@@ -100,24 +100,26 @@ export function connectControl(id: string, response: Response) {
   socket?.once("close", close);
 }
 
-export function updateControlState(id: string, revision: number, state: ControlState) {
+export function updateControlState(id: string, userId: string, revision: number, state: ControlState) {
   const connection = getConnection(id)!;
+  if (connection.userId !== userId) throw Object.assign(new Error("控制连接不属于当前用户"), { status: 403 });
   if (revision <= connection.revision) return;
   connection.revision = revision;
   connection.state = state;
 }
 
-export function finishControlCall(connectionId: string, callId: string, result: ControlResult) {
+export function finishControlCall(connectionId: string, userId: string, callId: string, result: ControlResult) {
   const connection = getConnection(connectionId)!;
+  if (connection.userId !== userId) throw Object.assign(new Error("控制连接不属于当前用户"), { status: 403 });
   if (connection.pending?.id !== callId) throw Object.assign(new Error("控制命令已取消或不存在"), { status: 404 });
   connection.pending.finish(result);
 }
 
-export function callControl(connectionId: string, name: string, args: Record<string, unknown>, signal: AbortSignal, directory?: string) {
+export function callControl(connectionId: string, name: string, args: Record<string, unknown>, signal: AbortSignal, projectId?: string) {
   signal.throwIfAborted();
   const connection = getConnection(connectionId)!;
   if (connection.pending) throw new Error("此页面正在执行另一条控制命令，请等待完成");
-  if (directory && connection.state.directory !== directory) throw new Error("工作区已切换，请重新调用 getAppState");
+  if (projectId && connection.state.projectId !== projectId) throw new Error("工作区已切换，请重新调用 getAppState");
   const callId = crypto.randomUUID();
   return new Promise<unknown>((resolve, reject) => {
     const finish = ({ result, error }: ControlResult) => {
@@ -135,7 +137,7 @@ export function callControl(connectionId: string, name: string, args: Record<str
     const timer = setTimeout(abort, 120000);
     connection.pending = { id: callId, finish };
     signal.addEventListener("abort", abort, { once: true });
-    connection.response.write(`data: ${JSON.stringify({ type: "call", callId, name, args, directory })}\n\n`);
+    connection.response.write(`data: ${JSON.stringify({ type: "call", callId, name, args, projectId })}\n\n`);
   });
 }
 

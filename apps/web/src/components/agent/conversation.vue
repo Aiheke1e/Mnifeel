@@ -37,12 +37,12 @@
                       <span v-if="part.duration !== undefined" class="thinkingDuration">{{ part.duration.toFixed(1) }} 秒</span>
                     </span>
                   </template>
-                  <messageMarkdown v-if="!(part.collapsed ?? true)" :content="part.content" :streaming="!!item.streaming" :directory="directory" />
+                  <messageMarkdown v-if="!(part.collapsed ?? true)" :content="part.content" :streaming="!!item.streaming" :projectId="projectId" />
                 </chat-reasoning>
-                <toolMessage v-else-if="part.type === 'tool'" :tool="part.tool" :directory="directory" @copy="copyMessage" />
-                <messageMarkdown v-else-if="part.type === 'text' && part.content" :content="part.content" :streaming="!!item.streaming" :directory="directory" />
+                <toolMessage v-else-if="part.type === 'tool'" :tool="part.tool" :projectId="projectId" @copy="copyMessage" />
+                <messageMarkdown v-else-if="part.type === 'text' && part.content" :content="part.content" :streaming="!!item.streaming" :projectId="projectId" />
               </template>
-              <attachmentList v-if="item.attachments?.length" :attachments="item.attachments" :directory="directory" />
+              <attachmentList v-if="item.attachments?.length" :attachments="item.attachments" :projectId="projectId" />
               <el-input v-if="item.role === 'user' && editingId === item.id" v-model="editingText" type="textarea" :autosize="{ minRows: 2, maxRows: 10 }" :disabled="locked" aria-label="编辑消息" @keydown.esc.prevent="cancelEdit" />
               <div v-else-if="item.role === 'user'" class="messageText">{{ item.content }}</div>
               <div v-if="item.error" class="messageError" role="alert">{{ item.error }}</div>
@@ -87,11 +87,11 @@
         @lostpointercapture="stopSenderResize"
         @keydown.up.prevent="setSenderHeight((sender?.chatElement.rollBox.clientHeight ?? 44) + 16)"
         @keydown.down.prevent="setSenderHeight((sender?.chatElement.rollBox.clientHeight ?? 44) - 16)" />
-      <attachmentList v-if="draftAttachments.length" class="draftAttachments" :attachments="draftAttachments" :directory="directory" removable @remove="draftAttachments.splice($event, 1)" />
+      <attachmentList v-if="draftAttachments.length" class="draftAttachments" :attachments="draftAttachments" :projectId="projectId" removable @remove="draftAttachments.splice($event, 1)" />
       <div ref="senderElement" class="senderEditor" @keydown.capture="skillMenuRef?.handleKeydown($event)"></div>
       <div class="senderActions">
         <modelPopover v-model="selectedModel" v-model:reasoningEffort="reasoningEffort" :active="active" :disabled="disabled" />
-        <skillMenu ref="skillMenuRef" :directory="directory" :active="active" :disabled="locked || editingId !== undefined || !directory" :query="skillQuery" :editor="senderElement" @select="selectSkill" @dismiss="skillQuery = undefined" />
+        <skillMenu ref="skillMenuRef" :projectId="projectId" :active="active" :disabled="locked || editingId !== undefined || !projectId" :query="skillQuery" :editor="senderElement" @select="selectSkill" @dismiss="skillQuery = undefined" />
         <el-popover
           v-model:visible="contextMenuVisible"
           trigger="click"
@@ -168,7 +168,7 @@ import "x-sender/lib/XSender.css";
 const props = defineProps<{ active: boolean; initialSession: AgentConversation | null; sessionFile?: string; disabled: boolean }>();
 const emit = defineEmits<{ session: [file: string]; sent: [prompt: string]; event: [event: AgentEvent] }>();
 const workspaceStore = useWorkspaceStore();
-const directory = workspaceStore.project?.directory;
+const projectId = workspaceStore.project?.id;
 const draftAttachments = ref<AgentAttachment[]>([]);
 const createCanvasContext = inject<(() => CanvasContext | undefined) | undefined>("canvas", undefined);
 const messages = ref<AgentMessage[]>((props.initialSession?.messages ?? []).map(message => ({ ...message })));
@@ -283,10 +283,10 @@ async function deleteMessage(item: AgentMessage) {
   deletingId.value = item.id;
   try {
     if (item.entryId || item.replyTo) {
-      if (!directory || !props.sessionFile) throw new Error("请重新打开对话后再删除");
+      if (!projectId || !props.sessionFile) throw new Error("请重新打开对话后再删除");
       const { data } = await axios.delete<{ code: number; data: AgentConversation; message?: string }>("/api/agent/message", {
         data: {
-          directory, sessionFile: props.sessionFile,
+          projectId, sessionFile: props.sessionFile,
           ...(item.replyTo ? { replyTo: item.replyTo } : { entryIds: [item.entryId!] }),
         },
         headers: { "x-minifeel-workspace": "1" },
@@ -332,9 +332,9 @@ function stopMessage() {
   controller?.abort();
 }
 
-async function uploadAttachments(attachments: AgentAttachment[], directory: string, signal: AbortSignal) {
+async function uploadAttachments(attachments: AgentAttachment[], projectId: string, signal: AbortSignal) {
   if (!attachments.some(item => item.file)) return;
-  const files = useWorkspaceFiles(directory);
+  const files = useWorkspaceFiles(projectId);
   for (const path of ["assets", "assets/chat"]) {
     await files.mkdir(path).catch(error => {
       if (error?.response?.data?.data?.code !== "EEXIST") throw error;
@@ -366,7 +366,7 @@ async function sendCanvasResult(event: Extract<AgentEvent, { type: "canvasCall" 
   const response = await fetch("/api/agent/canvasResult", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-minifeel-workspace": "1" },
-    body: JSON.stringify({ directory, callId: event.callId, ...payload }),
+    body: JSON.stringify({ projectId, callId: event.callId, ...payload }),
     keepalive: cancelled,
     signal: cancelled ? AbortSignal.timeout(5000) : signal,
   });
@@ -386,7 +386,7 @@ async function sendMessage(source?: AgentMessage) {
   const resendFrom = source ? source.entryId ?? messages.value.slice(resendIndex + 1).find(item => item.role === "user" && item.entryId)?.entryId : undefined;
   if (locked.value || !instance || (!prompt && !attachments.length)) return;
   const model = selectedModelChoice.value;
-  if (!directory) return ElMessage.warning("请先打开项目");
+  if (!projectId) return ElMessage.warning("请先打开项目");
   if (!model) return ElMessage.warning("请先选择模型");
 
   const requestController = new AbortController();
@@ -413,11 +413,11 @@ async function sendMessage(source?: AgentMessage) {
   try {
     if (!source) await instance.reset();
     requestController.signal.throwIfAborted();
-    await uploadAttachments(attachments, directory, requestController.signal);
+    await uploadAttachments(attachments, projectId, requestController.signal);
     const response = await fetch("/api/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-minifeel-workspace": "1" },
-      body: JSON.stringify({ prompt, attachments: attachments.map(({ name, path, mimeType }) => ({ name, path, mimeType })), directory, providerId: model.providerId, modelId: model.modelId, thinkingLevel: reasoningEffort.value || undefined, sessionFile: props.sessionFile, resendFrom, canvas: canvasContext ? { id: canvasContext.id, tools: canvasContext.tools } : undefined }),
+      body: JSON.stringify({ prompt, attachments: attachments.map(({ name, path, mimeType }) => ({ name, path, mimeType })), projectId, providerId: model.providerId, modelId: model.modelId, thinkingLevel: reasoningEffort.value || undefined, sessionFile: props.sessionFile, resendFrom, canvas: canvasContext ? { id: canvasContext.id, tools: canvasContext.tools } : undefined }),
       signal: requestController.signal,
     });
     for await (const event of readAgentEvents(response, requestController.signal)) {
@@ -489,7 +489,7 @@ async function sendMessage(source?: AgentMessage) {
     for (const callId of pendingQuestions.values()) {
       void fetch("/api/agent/answer", {
         method: "POST", headers: { "Content-Type": "application/json", "x-minifeel-workspace": "1" },
-        body: JSON.stringify({ directory, callId, cancelled: true }), keepalive: true,
+        body: JSON.stringify({ projectId, callId, cancelled: true }), keepalive: true,
       }).catch(() => {});
     }
     if (ownsStream && !forwarded) stream.finish();
@@ -554,7 +554,7 @@ watch(senderElement, (element, _previous, onCleanup) => {
 watch(() => !props.initialSession?.parentFile && !!workspaceStore.pendingAgentMessage && props.active && !locked.value && !!senderElement.value && !!createCanvasContext?.(), async ready => {
   const message = workspaceStore.pendingAgentMessage;
   const instance = sender;
-  if (!ready || !message || !instance || message.directory !== directory) return;
+  if (!ready || !message || !instance || message.projectId !== projectId) return;
   workspaceStore.pendingAgentMessage = null;
   await fillPrompt(message.prompt);
   if (sender === instance && props.active) void sendMessage();

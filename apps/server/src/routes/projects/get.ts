@@ -1,13 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
-import u from "@/utils";
 import { getAuth, validateFields } from "@/lib/middleware";
 import { success } from "@/lib/responseFormat";
+import u from "@/utils";
 
-const router = Router();
-
-export default router.get("/", validateFields({ projectId: z.uuid() }, "query"), async (req, res) => {
+export default Router().get("/", validateFields({ projectId: z.uuid() }, "query"), async (req, res) => {
   const project = await u.projects.getProjectSummary(getAuth(res).user.id, req.query.projectId as string);
-  await u.projects.resolveProjectWorkspace(getAuth(res).user.id, project.id);
   res.set("Cache-Control", "no-store").json(success(project));
 });

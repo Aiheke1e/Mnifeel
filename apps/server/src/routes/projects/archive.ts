@@ -1,10 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
-import u from "@/utils";
 import { getAuth, validateFields } from "@/lib/middleware";
 import { success } from "@/lib/responseFormat";
+import u from "@/utils";
 
 export default Router().post("/", validateFields({ projectId: z.uuid() }), async (req, res) => {
-  const cwd = await u.projects.resolveProjectWorkspace(getAuth(res).user.id, req.body.projectId);
-  res.json(success(await u.agent.createAgentConversation(cwd)));
+  await u.projects.archiveProject(getAuth(res).user.id, req.body.projectId);
+  res.json(success());
 });

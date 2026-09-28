@@ -24,7 +24,7 @@ import "element-plus/es/components/message/style/css";
 import { IconFocus2 } from "@tabler/icons-vue";
 import type { ToolCall, CanvasContext } from "@minifeel/tools-scaffold/runtime";
 
-const props = defineProps<{ tool: ToolCall; directory?: string }>();
+const props = defineProps<{ tool: ToolCall; projectId?: string }>();
 
 type NodeSummary = { nodeId: string; label: string };
 

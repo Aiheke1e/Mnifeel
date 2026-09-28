@@ -26,7 +26,7 @@ export function isCanvasFileDrag(event: DragEvent) {
 }
 
 type CanvasFileContext = {
-  directory: string;
+  projectId: string;
   availableNodes: { type: string }[];
   signal: AbortSignal;
   flow: Pick<ReturnType<typeof useVueFlow>, "addNodes" | "screenToFlowCoordinate">;
@@ -42,8 +42,8 @@ export async function dropCanvasFiles(event: DragEvent, context: CanvasFileConte
   try {
     signal.throwIfAborted();
     if (path) {
-      const { data } = await axios.get<Blob>("/api/assets/read", { params: { path }, responseType: "blob", signal });
-      droppedFiles = [new File([data], path.split("/").pop()!, { type: data.type })];
+      const data = await useWorkspaceFiles(context.projectId).read(path);
+      droppedFiles = [new File([data], path.split("/").pop()!)];
     }
     await importCanvasFiles(droppedFiles, position, context);
   } catch (error) {
@@ -53,7 +53,7 @@ export async function dropCanvasFiles(event: DragEvent, context: CanvasFileConte
 
 export async function importCanvasFiles(droppedFiles: File[], position: { x: number; y: number }, context: CanvasFileContext) {
   const { signal, flow, availableNodes } = context;
-  const files = useWorkspaceFiles(context.directory);
+  const files = useWorkspaceFiles(context.projectId);
   for (const [index, file] of droppedFiles.entries()) {
     if (signal.aborted) break;
     const id = crypto.randomUUID();

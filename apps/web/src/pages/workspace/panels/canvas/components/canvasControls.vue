@@ -178,7 +178,7 @@ import { arrangeCanvas } from "../arrangeCanvas";
 
 const props = defineProps<{
   canvasId: string;
-  directory: string | undefined;
+  projectId: string | undefined;
   batchHistory: (action: () => Promise<void>) => Promise<void>;
 }>();
 const snapEnabled = defineModel<boolean>("snapEnabled", { required: true });
@@ -213,7 +213,7 @@ const canArrange = computed(() => {
   const nodes = getNodes.value.filter((node) => !node.parentNode);
   return (
     !!props.canvasId &&
-    !!props.directory &&
+    !!props.projectId &&
     !arranging.value &&
     nodes.length > 0 &&
     nodes.every((node) => node.dimensions.width > 0 && node.dimensions.height > 0)
@@ -222,7 +222,7 @@ const canArrange = computed(() => {
 defineExpose({ arrangeNodes });
 
 watch(
-  () => [props.canvasId, props.directory],
+  () => [props.canvasId, props.projectId],
   () => {
     arrangeController?.abort();
     layoutSnapshot.value = undefined;

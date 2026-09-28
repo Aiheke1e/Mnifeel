@@ -3,7 +3,7 @@
     <markdown
       v-for="(chunk, index) in chunks"
       :key="index + '-' + !!definitions"
-      v-memo="[chunk, streaming && index === chunks.length - 1, codeOptions, directory]"
+      v-memo="[chunk, streaming && index === chunks.length - 1, codeOptions, projectId]"
       class="markdownChunk"
       :content="chunk"
       :mode="streaming && index === chunks.length - 1 ? 'streaming' : 'static'"
@@ -29,9 +29,9 @@ import "vue-stream-markdown/theme.css";
 import markdownOverlays from "./markdownOverlays";
 import markdownImage from "./markdownImage.vue";
 
-const { content, streaming = false, codeOptions, directory } = defineProps<{ content: string; streaming?: boolean; codeOptions?: CodeOptions; directory?: string }>();
-const renderImage = (image: ImageNodeRendererProps) => h(markdownImage, { image, directory: directory! });
-const nodeRenderers = computed(() => directory ? { image: renderImage } : {});
+const { content, streaming = false, codeOptions, projectId } = defineProps<{ content: string; streaming?: boolean; codeOptions?: CodeOptions; projectId?: string }>();
+const renderImage = (image: ImageNodeRendererProps) => h(markdownImage, { image, projectId: projectId! });
+const nodeRenderers = computed(() => projectId ? { image: renderImage } : {});
 const shikiOptions: ShikiOptions = { theme: ["github-light", "github-dark"] };
 const cdnOptions = { shiki: false } as const;
 const keepChunk = (value: string) => [value];

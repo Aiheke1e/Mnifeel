@@ -4,7 +4,7 @@ import { mediaModelsSchema, mediaProviderFileSchema } from "@/utils/media/provid
 import { getMcpRuntime } from "@/utils/mcp/runtime";
 
 const maxBytes = 20 * 1024 * 1024;
-const directory = z.string().min(1).max(4096);
+const projectId = z.uuid();
 const path = z.string().min(1).max(4096);
 const pluginName = z.string().regex(/^[a-z][a-zA-Z0-9]*$/);
 const skillName = z.string().min(1).max(1024);
@@ -127,16 +127,16 @@ export const appOperations: {
     name: "saveAsset", description: "以 base64 上传不超过 20 MB 的文件到全局素材库；不覆盖已有文件，父文件夹须存在。", method: "PUT", path: "/api/assets/save", parameters: z.strictObject({ path, base64 }),
   },
   {
-    name: "listAgentSessions", description: "列出目标工作区的内置 Agent 历史对话。directory 由 target.directory 注入。", method: "GET", path: "/api/agent/list", parameters: z.strictObject({ directory }),
+    name: "listAgentSessions", description: "列出目标项目的内置 Agent 历史对话。projectId 由 target.projectId 注入。", method: "GET", path: "/api/agent/list", parameters: z.strictObject({ projectId }),
   },
   {
-    name: "createAgentSession", description: "在目标工作区创建新的内置 Agent 对话，不启动生成。directory 由 target.directory 注入。", method: "POST", path: "/api/agent/create", parameters: z.strictObject({ directory }),
+    name: "createAgentSession", description: "在目标项目创建新的内置 Agent 对话，不启动生成。projectId 由 target.projectId 注入。", method: "POST", path: "/api/agent/create", parameters: z.strictObject({ projectId }),
   },
   {
-    name: "getAgentSession", description: "读取内置 Agent 对话历史，sessionFile 来自 listAgentSessions。directory 由 target.directory 注入。", method: "GET", path: "/api/agent/get", parameters: z.strictObject({ directory, sessionFile }),
+    name: "getAgentSession", description: "读取内置 Agent 对话历史，sessionFile 来自 listAgentSessions。projectId 由 target.projectId 注入。", method: "GET", path: "/api/agent/get", parameters: z.strictObject({ projectId, sessionFile }),
   },
   {
-    name: "renameAgentSession", description: "修改内置 Agent 对话名称；directory 由 target.directory 注入。", method: "PATCH", path: "/api/agent/rename", parameters: z.strictObject({ directory, sessionFile, name: z.string().trim().min(1).max(80) }),
+    name: "renameAgentSession", description: "修改内置 Agent 对话名称；projectId 由 target.projectId 注入。", method: "PATCH", path: "/api/agent/rename", parameters: z.strictObject({ projectId, sessionFile, name: z.string().trim().min(1).max(80) }),
   },
 ];
 
