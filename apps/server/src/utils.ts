@@ -24,6 +24,8 @@ import * as database from "@/utils/database";
 import * as auth from "@/utils/auth";
 import * as audit from "@/utils/audit";
 import * as projects from "@/utils/projects";
+import * as providers from "@/utils/providers";
+import * as secrets from "@/utils/secrets";
 
 export default {
   assets,
@@ -53,4 +55,6 @@ export default {
   auth,
   audit,
   projects,
+  providers,
+  secrets,
 };

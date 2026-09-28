@@ -8,6 +8,7 @@ import { error } from "@/lib/responseFormat";
 import { requireAdmin, requireAuth, resolveAuth } from "@/lib/middleware";
 import desktopRequest from "@/lib/desktop";
 import initializePlugins from "@/utils/plugins/initialize";
+import { redactError, redactErrorMessage } from "@/utils/providers/redact";
 
 const autoInstallProviders = ["tfRouter.ts"];
 
@@ -32,10 +33,12 @@ export async function createApp({
 }) {
   // conf 由下方的路由动态加载，必须先确定整个进程共用的数据目录。
   if (dataDirectory) process.env.MINIFEEL_DATA_DIR = resolve(dataDirectory);
-  const [{ checkDatabase }, { default: migrateDatabase }] = await Promise.all([
+  const [{ checkDatabase }, { default: migrateDatabase }, { validateSecretKey }] = await Promise.all([
     import("@/utils/database"),
     import("@/utils/database/migrate"),
+    import("@/utils/secrets"),
   ]);
+  validateSecretKey();
   await checkDatabase();
   await migrateDatabase();
   const { initializeAdmin } = await import("@/utils/auth");
@@ -75,10 +78,9 @@ export async function createApp({
     requireAuth(request, response, next);
   });
   app.use("/api/admin", requireAdmin);
+  app.use("/api/providers", requireAdmin);
   app.use(["/api/assets", "/api/workspaces/list", "/api/workspaces/selectDirectory"], requireAdmin);
 
-  const { default: initializeProviderModels } = await import("@/utils/ai/initialize");
-  await initializeProviderModels();
   const router = await import("@/router");
   router.default(app);
   const [{ createMcpRouter }, { getMcpTools }, { authorizeMcp }, { skillResources }] = await Promise.all([
@@ -95,7 +97,7 @@ export async function createApp({
   // 错误处理
   app.use((err: Error & { status?: number }, request: Request, response: Response, next: NextFunction) => {
     if (response.headersSent) return next(err);
-    console.error(err);
+    console.error(redactError(err));
     const code = (err as NodeJS.ErrnoException).code;
     const status = err.status || ({ ENOENT: 404, ENOTDIR: 404, EEXIST: 409, ENOTEMPTY: 409, EACCES: 403, EPERM: 403 }[code ?? ""] ?? 500);
     const message =
@@ -107,7 +109,7 @@ export async function createApp({
         EACCES: "没有权限访问这个文件或文件夹。请检查权限，或换一个位置重试。",
         EPERM: "系统不允许这次操作。文件可能正在被其他程序使用，请关闭后重试。",
         EISDIR: "你选中的是文件夹，但这里需要的是文件。请重新选择具体文件。",
-      }[code ?? ""] ?? err.message;
+      }[code ?? ""] ?? redactErrorMessage(err, "请求失败");
     response.status(status).json(error(message, code ? { code } : null, status));
   });
 

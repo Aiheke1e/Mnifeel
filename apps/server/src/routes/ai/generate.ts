@@ -59,6 +59,7 @@ const inputSchema = z.object({
 
 export default Router().post("/", validateFields(inputSchema.shape), async (req, res) => {
   const input = inputSchema.parse(req.body);
+  await u.providers.getRunnableModel(input.modelId, "text");
   const configured = u.ai.getConfiguredModel(input.providerId, input.modelId);
   const controller = new AbortController();
   const close = () => controller.abort();
@@ -84,7 +85,7 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
       if (message.stopReason === "error" || message.stopReason === "aborted") throw new Error(message.errorMessage || "模型请求失败");
       send({ type: "done", message });
     } catch (error) {
-      send({ type: "error", message: error instanceof Error ? error.message : "模型请求失败" });
+      send({ type: "error", message: u.providers.redactErrorMessage(error, "模型请求失败") });
     } finally {
       res.end();
     }

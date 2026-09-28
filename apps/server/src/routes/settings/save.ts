@@ -15,6 +15,8 @@ export default router.put("/", validateFields({ settings: z.record(z.string(), z
   mcp: z.object({ enabled: z.boolean().optional(), token: z.string().optional(), port: z.number().int().min(1).max(65535).optional() }).optional(),
 })).refine(value => value.desktopUpdateSource !== "custom" || !!value.desktopUpdateCustomUrl, {
   path: ["desktopUpdateCustomUrl"], message: "选择自定义更新源前，请先填写有效地址",
+}).refine(value => !Object.hasOwn(value, "customProviders") && !Object.hasOwn(value, "mediaProviderConfigs"), {
+  message: "模型供应商只能由管理员后台配置",
 }) }), async (req, res) => {
   u.mcpControl.assertAppRequest(req);
   const { settings } = req.body;
