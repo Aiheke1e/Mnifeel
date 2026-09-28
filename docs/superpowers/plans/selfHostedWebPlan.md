@@ -34,7 +34,7 @@
 
 | 任务 | 状态 | 实际改动 | 验证结果 | 剩余事项 |
 | --- | --- | --- | --- | --- |
-| 1. 本地工具与运行配置 | 未开始 | — | — | — |
+| 1. 本地工具与运行配置 | 已完成 | 安装 Bun 1.3.14 与 PostgreSQL 17；创建本地 `minifeel` 数据库；添加环境示例、迁移脚本入口和自托管开发说明 | 锁定依赖安装无变化；`select 1`、差异检查和密钥扫描通过 | 根类型检查受现有桌面 `.hutch` 类型缺失影响，随 Task 12 删除桌面入口解决 |
 | 2. PostgreSQL 与数据库迁移 | 未开始 | — | — | — |
 | 3. 本地账号、会话与权限 | 未开始 | — | — | — |
 | 4. 登录页与前端会话路由 | 未开始 | — | — | — |
@@ -50,7 +50,7 @@
 
 ---
 
-## 任务 1：本地工具与运行配置
+## Task 1：本地工具与运行配置
 
 **结果：** 开发机使用仓库指定的 Bun 版本，并选定一个本地 PostgreSQL 运行方式；仓库提供不含密钥的环境变量说明和可重复执行的开发命令。
 
@@ -64,25 +64,25 @@
 
 **步骤：**
 
-- [ ] 安装 Bun 1.3.14，并确认 `bun --version` 与根 `packageManager` 一致。
-- [ ] 检查 Windows 是否能正常启用 Docker；能启用时只安装 Docker Desktop 并使用单个 PostgreSQL 容器，不能启用时只安装 PostgreSQL 本地服务，不同时维护两套数据库。
-- [ ] 在 `environment.example` 记录 `DATABASE_URL`、`MINIFEEL_DATA_DIR`、`MINIFEEL_SECRET_KEY`、`MINIFEEL_ADMIN_PHONE`、`MINIFEEL_ADMIN_PASSWORD`、`MINIFEEL_AUTH_MOCK_CODE`、`MINIFEEL_AUTH_MOCK_GOOGLE`、`MINIFEEL_SESSION_DAYS` 和 `PORT`，全部使用说明值或空值。
-- [ ] 在根脚本增加独立的数据库迁移和 Web 本地启动入口；依赖安装与数据库启动保持显式命令，不绑定到 `dev` 或 `build`。
-- [ ] 更新 README 的本地启动顺序、两服务生产结构和密钥轮换说明；明确旧对话中暴露的密钥不得继续使用。
-- [ ] 将真实 `.env`、本地数据库卷和 `data/` 保持在 Git 忽略范围。
+- [x] 安装 Bun 1.3.14，并确认 `bun --version` 与根 `packageManager` 一致。
+- [x] 检查 Windows 是否能正常启用 Docker；能启用时只安装 Docker Desktop 并使用单个 PostgreSQL 容器，不能启用时只安装 PostgreSQL 本地服务，不同时维护两套数据库。
+- [x] 在 `environment.example` 记录 `DATABASE_URL`、`MINIFEEL_DATA_DIR`、`MINIFEEL_SECRET_KEY`、`MINIFEEL_ADMIN_PHONE`、`MINIFEEL_ADMIN_PASSWORD`、`MINIFEEL_AUTH_MOCK_CODE`、`MINIFEEL_AUTH_MOCK_GOOGLE`、`MINIFEEL_SESSION_DAYS` 和 `PORT`，全部使用说明值或空值。
+- [x] 在根脚本增加独立的数据库迁移和 Web 本地启动入口；依赖安装与数据库启动保持显式命令，不绑定到 `dev` 或 `build`。
+- [x] 更新 README 的本地启动顺序、两服务生产结构和密钥轮换说明；明确旧对话中暴露的密钥不得继续使用。
+- [x] 将真实 `.env`、本地数据库卷和 `data/` 保持在 Git 忽略范围。
 
 **验证：**
 
-- [ ] 执行 `bun --version`，输出 `1.3.14`。
-- [ ] 执行 `bun install`，确认锁文件只包含计划引入的依赖变化。
-- [ ] 启动选定的 PostgreSQL，使用 `psql` 或容器内 `psql` 执行 `select 1`。
-- [ ] 执行 `git diff --check`，确认环境示例中没有真实密钥。
+- [x] 执行 `bun --version`，输出 `1.3.14`。
+- [x] 执行 `bun install`，确认锁文件只包含计划引入的依赖变化。
+- [x] 启动选定的 PostgreSQL，使用 `psql` 或容器内 `psql` 执行 `select 1`。
+- [x] 执行 `git diff --check`，确认环境示例中没有真实密钥。
 
-**提交：** `chore: prepare local web development environment`
+**提交：** `chore: 配置本地 Web 开发环境`
 
 ---
 
-## 任务 2：PostgreSQL 与数据库迁移
+## Task 2：PostgreSQL 与数据库迁移
 
 **结果：** Server 启动前可验证数据库并幂等执行初始迁移，所有本期业务表、约束和索引落在 PostgreSQL。
 
@@ -114,11 +114,11 @@
 - [ ] 临时改成不可连接的 `DATABASE_URL` 启动 Server，确认明确失败且不开始监听端口。
 - [ ] 在 `apps/server` 执行 `bun run typecheck` 和 `bun run build`。
 
-**提交：** `feat: add postgres persistence foundation`
+**提交：** `feat(server): 添加 PostgreSQL 持久化基础`
 
 ---
 
-## 任务 3：本地账号、会话与权限
+## Task 3：本地账号、会话与权限
 
 **结果：** 支持手机号验证码自动注册/登录、密码登录与设置/重置、模拟 Google 登录、登出和双会话限制；管理员由环境变量首次初始化，API 权限由数据库会话决定。
 
@@ -166,11 +166,11 @@
 - [ ] 关闭两个模拟开关后验证任意验证码和模拟 Google 均不能通过。
 - [ ] 验证普通用户访问管理员接口返回 403，匿名用户访问业务接口返回 401，响应和日志不含令牌及密码。
 
-**提交：** `feat: add local authentication and authorization`
+**提交：** `feat(server): 添加本地认证与权限控制`
 
 ---
 
-## 任务 4：登录页与前端会话路由
+## Task 4：登录页与前端会话路由
 
 **结果：** 原 TF-Router 引导页替换为本地统一登录页，前端启动时恢复会话并按角色跳转，普通用户和管理员共享登录入口。
 
@@ -204,11 +204,11 @@
 - [ ] 检查浏览器存储，确认没有会话令牌、密码、验证码或供应商密钥。
 - [ ] 使用键盘完成登录页切换、表单提交和错误恢复。
 
-**提交：** `feat: replace external onboarding with local login`
+**提交：** `feat(web): 使用本地登录替换外部引导`
 
 ---
 
-## 任务 5：项目归属与文件隔离
+## Task 5：项目归属与文件隔离
 
 **结果：** 用户项目由 PostgreSQL 管理，所有工作区文件按 `data/workspaces/{userId}/{projectId}` 隔离；浏览器不再提交服务器绝对目录。
 
@@ -254,11 +254,11 @@
 - [ ] 验证 `..`、绝对路径、符号链接逃逸、同名创建和写入失败仍走原有安全及错误映射。
 - [ ] 浏览器打开现有画布和文档，验证读取、自动保存、改名、删除、素材预览和刷新恢复。
 
-**提交：** `feat: isolate projects by authenticated user`
+**提交：** `feat(server): 按登录用户隔离项目`
 
 ---
 
-## 任务 6：供应商密钥与模型管理
+## Task 6：供应商密钥与模型管理
 
 **结果：** 只有管理员能保存、测试和同步供应商；API Key 加密入库，普通用户只读取已启用模型的安全字段。
 
@@ -298,11 +298,11 @@
 - [ ] 修改密钥或地址后验证供应商回到待测试状态，未测试时生成请求被拒绝。
 - [ ] 检查连接错误、审计详情、HTTP 响应和控制台日志，确认常见认证头、密钥字段及 URL 查询密钥均被遮盖。
 
-**提交：** `feat: add encrypted provider administration`
+**提交：** `feat(server): 添加加密供应商管理`
 
 ---
 
-## 任务 7：三家模型供应商适配
+## Task 7：三家模型供应商适配
 
 **结果：** DeepSeek 文本、Agnes 视频和 BananaPro 图片通过本地统一适配器完成连接测试、模型同步和最小实际生成；未经真实接口验证的模型不能启用。
 
@@ -339,11 +339,11 @@
 - [ ] 每家执行一个最小实际请求：DeepSeek 短文本、BananaPro 单张低规格图片、Agnes 最短视频；确认产物写入当前项目。
 - [ ] 主动使用错误密钥、未知模型、超时和取消，确认状态明确、产物不残留、日志已脱敏。
 
-**提交：** `feat: connect managed generation providers`
+**提交：** `feat(server): 接入管理员配置的生成模型`
 
 ---
 
-## 任务 8：积分账本与生成任务 Worker
+## Task 8：积分账本与生成任务 Worker
 
 **结果：** 任务创建时冻结积分，同进程 Worker 从 PostgreSQL 领取任务，成功结算、失败或取消退款，重启后处理失联任务。
 
@@ -383,11 +383,11 @@
 - [ ] 人为终止运行中的 Worker 并重启，确认超时任务失败且只退款一次。
 - [ ] 并发提交超过 Worker 并发数的任务，确认其余任务保持等待且没有重复领取。
 
-**提交：** `feat: add credit ledger and generation worker`
+**提交：** `feat(server): 添加积分账本与生成任务 Worker`
 
 ---
 
-## 任务 9：现有生成链路接入任务与计费
+## Task 9：现有生成链路接入任务与计费
 
 **结果：** 画布节点、媒体工具和 Agent 继续按原业务方式工作，但模型只能来自管理员启用列表，每次生成都有任务和积分记录。
 
@@ -426,11 +426,11 @@
 - [ ] 刷新或断开文本流后查看任务中心，确认最终状态可恢复且没有重复扣费。
 - [ ] 普通用户伪造供应商 ID、模型 ID、用户 ID、项目 ID和目录，确认服务端拒绝且不产生扣费。
 
-**提交：** `feat: meter existing generation workflows`
+**提交：** `feat(server): 为现有生成流程接入计费`
 
 ---
 
-## 任务 10：用户端 UI 重构
+## Task 10：用户端 UI 重构
 
 **结果：** 普通用户看到面向短剧创作的首页、项目页、任务中心和账户页，默认流程不出现 API、Agent、Skill、供应商或节点术语。
 
@@ -475,11 +475,11 @@
 - [ ] 全局搜索普通模式页面，确认不出现 API Key、供应商、Agent、Skill、节点或工作区绝对路径。
 - [ ] 打开已有画布项目，确认高级模式没有破坏节点、文档和 Agent 的既有交互。
 
-**提交：** `feat: redesign the creator web experience`
+**提交：** `feat(web): 重构短剧创作端界面`
 
 ---
 
-## 任务 11：管理端 UI
+## Task 11：管理端 UI
 
 **结果：** 管理员拥有独立后台，可查看统计、管理用户与白名单、赠送积分、配置供应商和模型、查看任务与审计。
 
@@ -523,11 +523,11 @@
 - [ ] 普通用户直接请求每个管理员接口，确认均返回 403。
 - [ ] 管理员打开用户项目摘要后查询审计记录，确认敏感查看动作存在且不可修改。
 
-**提交：** `feat: add the local administration console`
+**提交：** `feat(web): 添加本地管理后台`
 
 ---
 
-## 任务 12：外部依赖与桌面入口清理
+## Task 12：外部依赖与桌面入口清理
 
 **结果：** Web 运行时不再依赖 Minifeel 外部服务、桌面壳、外部插件市场、遥测或默认联网工具，生产构建只部署应用服务与 PostgreSQL。
 
@@ -570,11 +570,11 @@
 - [ ] 断开互联网并保留本地 PostgreSQL，验证登录、项目、画布、文档、账户和管理后台可用；生成操作给出供应商网络错误而不是应用崩溃。
 - [ ] 检查生产构建目录和启动日志，确认不要求桌面程序、更新服务、远程插件市场或运行时下载 FFmpeg。
 
-**提交：** `refactor: remove hosted and desktop dependencies`
+**提交：** `refactor: 移除托管平台与桌面端依赖`
 
 ---
 
-## 任务 13：旧项目导入与全流程验收
+## Task 13：旧项目导入与全流程验收
 
 **结果：** 用户可明确导入旧项目副本；本地开发与生产构建按文档启动，普通用户和管理员核心流程完成最终验收。
 
@@ -607,7 +607,7 @@
 - [ ] 执行 `bun run routes`、根 `bun run typecheck`、根 `bun run build` 和 `git diff --check`。
 - [ ] 在浏览器完成桌面与手机宽度的最终检查，确认普通模式无需理解 API、供应商、Agent、Skill 或节点即可开始创作。
 
-**提交：** `feat: complete self-hosted web migration`
+**提交：** `feat: 完成自托管 Web 迁移`
 
 ---
 

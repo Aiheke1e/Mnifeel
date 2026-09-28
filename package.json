@@ -24,6 +24,7 @@
     "dev": "bun run --filter '@minifeel/web' --filter '@minifeel/server' dev",
     "dev:web": "bun run --filter '@minifeel/web' dev",
     "dev:server": "bun run --filter '@minifeel/server' dev",
+    "db:migrate": "bun run --cwd apps/server migrate",
     "dev:desktop": "bun run --filter '@minifeel/desktop' dev",
     "dev:plugins": "NODE_ENV=dev bun run --filter './packages/tools/*' --filter './packages/nodes/*' build",
     "dev:updateServer": "bun run --filter '@minifeel/updateServer' dev",

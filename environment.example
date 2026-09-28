@@ -1,0 +1,20 @@
+# PostgreSQL 连接地址。请复制为本机环境变量或未提交的 .env 后再替换密码。
+DATABASE_URL=postgres://minifeel:replaceMe@127.0.0.1:5432/minifeel
+
+# 项目文件、生成素材和运行数据的本地目录。
+MINIFEEL_DATA_DIR=./data
+
+# 32 字节随机密钥的 Base64 文本，用于加密供应商 API Key。
+MINIFEEL_SECRET_KEY=
+
+# 仅在数据库尚无管理员时使用，初始化完成后不会覆盖现有管理员。
+MINIFEEL_ADMIN_PHONE=+8613800000000
+MINIFEEL_ADMIN_PASSWORD=changeBeforeFirstRun
+
+# V1 本地开发开关。关闭验证码模拟后必须接入真实短信发送实现。
+MINIFEEL_AUTH_MOCK_CODE=true
+MINIFEEL_AUTH_MOCK_GOOGLE=true
+
+# 会话有效天数和应用监听端口。
+MINIFEEL_SESSION_DAYS=30
+PORT=3000

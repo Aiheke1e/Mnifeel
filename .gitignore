@@ -22,7 +22,7 @@ Thumbs.db
 [Dd]esktop.ini
 .env
 .env.*
-!.env.example
+/postgresData/
 /apps/updateServer/build/
 .vscode
 *.p12
