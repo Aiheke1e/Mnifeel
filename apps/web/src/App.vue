@@ -5,7 +5,6 @@
         <component :is="currentComponent" />
       </transition>
     </router-view>
-    <ffmpegRequired />
   </el-config-provider>
 </template>
 
@@ -15,7 +14,6 @@ import { useZIndex } from "element-plus";
 import zhCn from "element-plus/es/locale/lang/zh-cn";
 import { uiSettings } from "@/stores/settings";
 import { useMcpControl } from "@/lib/mcpControl";
-import ffmpegRequired from "@/components/settings/ffmpegRequired.vue";
 import "element-plus/theme-chalk/dark/css-vars.css";
 
 useMcpControl();

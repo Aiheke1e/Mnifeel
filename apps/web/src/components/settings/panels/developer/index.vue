@@ -12,13 +12,6 @@
       <el-text v-if="requestError" type="danger" role="alert">{{ requestError }}</el-text>
       <div class="developerRow">
         <div class="toolDescription">
-          <h3>首次使用引导</h3>
-          <p>当前{{ hello.completed ? '已完成' : '未完成' }}。重置后打开引导页，保留已配置的模型。</p>
-        </div>
-        <el-button :icon="IconRefresh" :loading="resettingHello" :disabled="importingStorage || writingStorage" @click="resetHello">重置并打开引导页</el-button>
-      </div>
-      <div class="developerRow">
-        <div class="toolDescription">
           <h3>供应商开发工具</h3>
           <p>授权读取本地供应商文件，调试生成接口与媒体结果。</p>
         </div>
@@ -114,9 +107,7 @@
 
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from "vue";
-import { useRouter } from "vue-router";
 import { useDeveloperStore } from "@/stores/developer";
-import { useHelloStore } from "@/stores/hello";
 import { saveSettings, settings } from "@/stores/settings";
 import saveFile from "@/lib/saveFile";
 import { installPluginFile } from "../../installPluginFile";
@@ -125,9 +116,6 @@ import axios from "axios";
 import { IconCode, IconTerminal2, IconFileUpload, IconDownload, IconRefresh, IconEdit, IconTrash } from "@tabler/icons-vue";
 
 const developerStore = useDeveloperStore();
-const hello = useHelloStore();
-const router = useRouter();
-const resettingHello = ref(false);
 const providerDebugDialog = defineAsyncComponent(() => import("./providerDebugDialog.vue"));
 const providerDebugVisible = ref(false);
 const systemPromptDialog = defineAsyncComponent(() => import("./systemPromptDialog.vue"));
@@ -162,20 +150,6 @@ async function saveCustomUpdateUrl() {
   }
 }
 
-async function resetHello() {
-  if (storageBusy.value) return;
-  resettingHello.value = true;
-  try {
-    await hello.reset();
-    loadStorage();
-    await router.replace("/hello");
-  } catch {
-    ElMessage.error("重置引导失败，请重试");
-  } finally {
-    resettingHello.value = false;
-  }
-}
-
 function confirmDeveloper() {
   developerStore.developerConfirmed = true;
   loadStorage();
@@ -206,7 +180,7 @@ const storageValue = ref("");
 const storageFileInput = ref<HTMLInputElement>();
 const importingStorage = ref(false);
 const writingStorage = ref(false);
-const storageBusy = computed(() => importingStorage.value || writingStorage.value || resettingHello.value);
+const storageBusy = computed(() => importingStorage.value || writingStorage.value);
 const storageMessage = ref("");
 
 function readStorage() {

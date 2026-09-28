@@ -3,13 +3,12 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import components from "unplugin-vue-components/vite";
 import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
-import desktopConfig from "../../electrobun.config.ts";
 import postcssConfig from "../../postcss.config.ts";
 
 export default defineConfig({
   css: { postcss: postcssConfig },
   define: {
-    "import.meta.env.appVersion": JSON.stringify(desktopConfig.app.version),
+    "import.meta.env.appVersion": JSON.stringify(process.env.npm_package_version ?? "dev"),
   },
   server: {
     proxy: {

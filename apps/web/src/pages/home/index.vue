@@ -5,14 +5,17 @@
       <el-badge isDot :hidden="!hasDesktopUpdate">
         <el-button round size="large" :icon="IconSettings" :aria-label="hasDesktopUpdate ? '设置，有新版本可用' : '设置'" @click="settingsVisible = true">设置</el-button>
       </el-badge>
-      <div class="githubAction">
-        <span class="arrowHint starHint">
-          点个 Star 支持一下
-          <svg viewBox="0 0 84 44" fill="none" aria-hidden="true">
-            <path d="M4 29C18 40 44 38 44 18C44 1 21 3 24 19C27 37 57 32 77 16M65 17L77 16L73 28" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </span>
-        <el-button round size="large" :icon="IconBrandGithub" tag="a" href="https://github.com/Aiheke1e/Mnifeel" target="_blank" rel="noopener noreferrer">GitHub</el-button>
+      <div class="headerActions">
+        <div class="githubAction">
+          <span class="arrowHint starHint">
+            点个 Star 支持一下
+            <svg viewBox="0 0 84 44" fill="none" aria-hidden="true">
+              <path d="M4 29C18 40 44 38 44 18C44 1 21 3 24 19C27 37 57 32 77 16M65 17L77 16L73 28" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+          <el-button round size="large" :icon="IconBrandGithub" tag="a" href="https://github.com/Aiheke1e/Mnifeel" target="_blank" rel="noopener noreferrer">GitHub</el-button>
+        </div>
+        <el-button round size="large" :icon="IconLogout" @click="logout()">退出登录</el-button>
       </div>
     </el-header>
     <el-main class="pageContent">
@@ -89,12 +92,13 @@ import {
   IconArrowUp, IconLayoutGrid,
   IconList, IconSortDescending,
   IconSortAscending, IconFolder, IconEdit,
-  IconTrash, IconFolderPlus, IconFolderOpen as iconFolderOpen,
+  IconTrash, IconFolderPlus, IconFolderOpen as iconFolderOpen, IconLogout,
 } from "@tabler/icons-vue";
 import modelPopover from "@/components/modelPopover.vue";
 import logoUrl from "@minifeel/assets/logo.svg";
 import { useWorkspaceStore, type Project } from "@/stores/workspace";
 import { hasDesktopUpdate } from "@/stores/desktopUpdate";
+import { useAuthStore } from "@/stores/auth";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import settings from "@/components/settings/index.vue";
 import bg from "./bg.vue";
@@ -102,6 +106,7 @@ import workspacePicker from "./workspacePicker.vue";
 
 const settingsVisible = ref(false);
 const router = useRouter();
+const authStore = useAuthStore();
 const creating = ref(false);
 const opening = ref(false);
 const relocationPicker = ref<InstanceType<typeof workspacePicker>>();
@@ -161,6 +166,11 @@ const viewMode = ref("grid");
 const sortedProjects = computed(() => [...projectList.value].sort((left, right) =>
   sortDescending.value ? right.lastOpenedAt - left.lastOpenedAt : left.lastOpenedAt - right.lastOpenedAt
 ));
+
+async function logout() {
+  await authStore.logout();
+  await router.replace("/login");
+}
 
 async function openProject(project?: Project) {
   if (creating.value || opening.value) return;
@@ -271,6 +281,12 @@ async function createProject(fromPrompt = true) {
 
     a {
       text-decoration: none;
+    }
+
+    .headerActions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
 
     .githubAction {
