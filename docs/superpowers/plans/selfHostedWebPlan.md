@@ -699,6 +699,8 @@
 - `http://117.72.202.33` 返回 Minifeel 首页；模拟验证码登录返回管理员信息，携带会话 Cookie 再请求 `/api/auth/me` 返回 200。
 - 本地执行 `bun run typecheck`、`bun run build:server` 和 `git diff --check` 通过；服务器执行 Compose 配置解析、容器健康检查、数据库表查询和备份文件检查通过。
 - `minifeel.cn` 当前 DNS 返回 NXDOMAIN，因此 Caddy 暂不能签发公开证书；该项按用户决定留到后续处理。
+- 2026-09-29 使用普通账号完成本地欢迎页到媒体生成复验：修复公开欢迎页被初始化 401 抢先跳转的问题；BananaPro 成功生成 2 张角色图和 3 张分镜图；Agnes 因共享密钥每分钟一次且存在并发调用返回 503，按用户要求暂停视频复验。
+- `apps/server/sql/initialData.sql` 增加 1 个管理员和 4 个普通测试账号的幂等 DML；按手机号更新角色、状态与 Argon2id 密码哈希，新建账号时补齐身份和积分账户，现有项目、会话与积分关联不改用户 ID。
 
 **提交：** `feat(server): 添加生产 Docker 部署`、`feat(server): 支持公网 IP 临时访问`、`fix(server): 支持临时 HTTP 登录`
 
