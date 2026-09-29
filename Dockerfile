@@ -2,7 +2,11 @@ FROM oven/bun:1.3.14
 
 WORKDIR /app
 
-RUN apt-get update \
+RUN sed -i \
+      -e "s|http://deb.debian.org/debian-security|http://mirrors.jdcloudcs.com/debian-security|" \
+      -e "s|http://deb.debian.org/debian|http://mirrors.jdcloudcs.com/debian|" \
+      /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
