@@ -17,7 +17,9 @@ app.use(pinia);
 app.use(router);
 setUnauthorizedHandler(() => {
   useAuthStore().clear();
-  if (router.currentRoute.value.path !== "/login") void router.replace({ path: "/login", query: { redirect: router.currentRoute.value.fullPath } });
+  const route = router.currentRoute.value;
+  if (!route.matched.length || route.meta.public || route.path === "/login") return;
+  void router.replace({ path: "/login", query: { redirect: route.fullPath } });
 });
 
 router.isReady().then(() => {
