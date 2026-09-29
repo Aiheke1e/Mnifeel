@@ -10,7 +10,7 @@
       </el-button>
     </header>
     <div v-show="visible" class="directorContent">
-      <agent v-model="visible" mode="guided" />
+      <agent ref="agentRef" v-model="visible" mode="guided" @updated="emit('updated')" />
     </div>
   </section>
 </template>
@@ -19,7 +19,16 @@
 import { ref } from "vue";
 import agent from "@/components/agent/index.vue";
 
+const emit = defineEmits<{ updated: [] }>();
 const visible = ref(true);
+const agentRef = ref<InstanceType<typeof agent>>();
+
+function fillPrompt(prompt: string) {
+  visible.value = true;
+  return agentRef.value?.fillPrompt(prompt);
+}
+
+defineExpose({ fillPrompt });
 </script>
 
 <style scoped lang="scss">

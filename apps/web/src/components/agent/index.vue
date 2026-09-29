@@ -30,6 +30,7 @@
       :mode="props.mode"
       @session="setSessionFile(item, $event)"
       @event="receiveAgentEvent"
+      @updated="emit('updated')"
       @sent="updateConversationName(item, $event)" />
   </section>
 </template>
@@ -47,6 +48,7 @@ import conversation from "./conversation.vue";
 
 const visible = defineModel<boolean>({ default: false });
 const props = withDefaults(defineProps<{ mode?: "advanced" | "guided" }>(), { mode: "advanced" });
+const emit = defineEmits<{ updated: [] }>();
 type OpenConversation = { key: number; name: string; file?: string; parentFile?: string; subAgents: AgentSubAgent[]; session: AgentConversation | null };
 // ACT: 会话实例保留到工作区关闭，让切换后的回复继续接收流式内容。
 const conversations = ref<OpenConversation[]>([]);
@@ -121,6 +123,12 @@ function receiveAgentEvent(event: AgentEvent) {
     if (parent) deliverEvent(parent, event);
   }
 }
+
+function fillPrompt(prompt: string) {
+  return conversationRefs.get(conversationKey.value)?.fillPrompt(prompt);
+}
+
+defineExpose({ fillPrompt });
 
 function backToParent() {
   const file = selectedConversation.value?.parentFile;

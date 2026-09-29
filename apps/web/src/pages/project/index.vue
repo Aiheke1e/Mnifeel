@@ -23,24 +23,59 @@
           </div>
         </div>
 
-        <ol class="stageChecklist">
-          <li v-for="item in stageContent.checklist" :key="item"><icon-circle-check :size="18" aria-hidden="true" />{{ item }}</li>
-        </ol>
+        <el-alert
+          v-for="warning in creativeView?.warnings"
+          :key="warning"
+          class="creativeWarning"
+          :title="warning"
+          type="warning"
+          showIcon
+          :closable="false" />
 
-        <div class="modelChoice">
-          <label for="stageModel">本步骤使用的模型</label>
-          <el-select id="stageModel" v-model="selectedModelId" :loading="modelsLoading" placeholder="暂无可用模型" size="large">
-            <el-option v-for="model in stageModels" :key="model.id" :label="model.displayName" :value="model.id">
-              <span>{{ model.displayName }}</span>
-              <small v-if="model.isDefault">推荐</small>
-            </el-option>
-          </el-select>
-          <p>{{ modelHint }}</p>
-        </div>
+        <scriptStage
+          v-if="activeStage === 'script'"
+          :script="creativeView?.script"
+          :loading="creativeLoading"
+          :errorMessage="creativeError"
+          :busy="creativeBusy"
+          @saveContent="saveScript"
+          @confirmContent="confirmNode"
+          @requestRepair="fillRepairPrompt('script')" />
+
+        <characterStage
+          v-else-if="activeStage === 'characters'"
+          v-model="selectedModelId"
+          :projectId="workspaceStore.project.id"
+          :characters="creativeView?.characters ?? []"
+          :models="stageModels"
+          :modelsLoading="modelsLoading"
+          :loading="creativeLoading"
+          :errorMessage="creativeError"
+          :busy="creativeBusy"
+          @saveContent="saveCharacter"
+          @confirmContent="confirmNode"
+          @requestRepair="fillRepairPrompt('characters')" />
+
+        <template v-else>
+          <ol class="stageChecklist">
+            <li v-for="item in stageContent.checklist" :key="item"><icon-circle-check :size="18" aria-hidden="true" />{{ item }}</li>
+          </ol>
+
+          <div class="modelChoice">
+            <label for="stageModel">本步骤使用的模型</label>
+            <el-select id="stageModel" v-model="selectedModelId" :loading="modelsLoading" placeholder="暂无可用模型" size="large">
+              <el-option v-for="model in stageModels" :key="model.id" :label="model.displayName" :value="model.id">
+                <span>{{ model.displayName }}</span>
+                <small v-if="model.isDefault">推荐</small>
+              </el-option>
+            </el-select>
+            <p>{{ modelHint }}</p>
+          </div>
+        </template>
       </main>
 
       <aside class="projectAside" aria-label="项目状态">
-        <directorPanel v-if="runtimeReady" />
+        <directorPanel v-if="runtimeReady" ref="directorRef" @updated="refreshCreativeView" />
 
         <section class="panelCard progressCard">
           <p class="eyebrow">项目进度</p>
@@ -67,7 +102,9 @@
 <script setup lang="ts">
 import { computed, onMounted, provide, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { ElMessage } from "element-plus";
 import { IconCircleCheck, IconFileText, IconPhoto, IconVideo } from "@tabler/icons-vue";
+import type { CanvasContext } from "@minifeel/tool-canvas/runtime";
 import { apiErrorMessage } from "@/lib/api";
 import { getProjectModel, setProjectMode, setProjectModel } from "@/lib/projectMode";
 import { useProjectSaveGuard } from "@/lib/projectSaveGuard";
@@ -78,6 +115,9 @@ import projectHeader from "./components/projectHeader.vue";
 import projectStages, { type ProjectStage, type ProjectStageStatus } from "./components/projectStages.vue";
 import projectRuntime from "./components/projectRuntime.vue";
 import directorPanel from "./components/directorPanel.vue";
+import scriptStage from "./components/scriptStage.vue";
+import characterStage from "./components/characterStage.vue";
+import { readCreativeView, type CreativeView } from "./creativeViewAdapter";
 
 const route = useRoute();
 const router = useRouter();
@@ -86,9 +126,15 @@ const userAppStore = useUserAppStore();
 const loading = ref(false);
 const modelsLoading = ref(false);
 const errorMessage = ref("");
+const creativeLoading = ref(false);
+const creativeError = ref("");
+const creativeBusy = ref(false);
+const creativeView = ref<CreativeView>();
 const activeStage = ref<ProjectStage>("script");
 const selectedModelId = ref("");
 const runtimeRef = ref<InstanceType<typeof projectRuntime>>();
+const directorRef = ref<InstanceType<typeof directorPanel>>();
+let creativeRefreshVersion = 0;
 const runtimeReady = computed(() => runtimeRef.value?.canvasReady ?? false);
 provide("canvas", () => runtimeReady.value ? runtimeRef.value?.getCanvasContext() : undefined);
 useProjectSaveGuard({
@@ -106,22 +152,14 @@ const stageContent = computed(() => stageContents[activeStage.value]);
 const stageModels = computed(() => userAppStore.models.filter(model => model.mediaType === stageContent.value.mediaType));
 const projectTasks = computed(() => userAppStore.tasks.filter(task => task.projectId === workspaceStore.project?.id));
 const activeTasks = computed(() => projectTasks.value.filter(task => task.status === "pending" || task.status === "running"));
-const stageStatuses = computed<Record<ProjectStage, ProjectStageStatus>>(() => ({
-  script: taskStageStatus("text"),
-  characters: taskStageStatus("image"),
-  storyboard: taskStageStatus("image"),
-  video: taskStageStatus("video"),
+const stageStatuses = computed<Record<ProjectStage, ProjectStageStatus>>(() => creativeView.value?.statuses ?? ({
+  script: "notStarted",
+  characters: "notStarted",
+  storyboard: "notStarted",
+  video: "notStarted",
 }));
 const completedStageCount = computed(() => Object.values(stageStatuses.value).filter(status => status === "complete").length);
 const modelHint = computed(() => stageModels.value.length ? "可用模型由管理员统一配置，你只需选择适合当前步骤的模型。" : "管理员暂未启用此类模型。" );
-
-function taskStageStatus(taskType: "text" | "image" | "video"): ProjectStageStatus {
-  const tasks = projectTasks.value.filter(task => task.taskType === taskType);
-  if (tasks.some(task => task.status === "pending" || task.status === "running")) return "running";
-  if (tasks.some(task => task.status === "failed")) return "failed";
-  if (tasks.some(task => task.status === "succeeded")) return "complete";
-  return "notStarted";
-}
 
 function savedModelId(projectId: string) {
   try {
@@ -144,6 +182,10 @@ watch(selectedModelId, modelId => {
   if (projectId && stageContent.value.mediaType === "text") setProjectModel(projectId, modelId ? JSON.stringify(["deepSeek", modelId]) : "");
 });
 
+watch([runtimeReady, () => workspaceStore.project?.id], ([, projectId]) => {
+  if (projectId) void refreshCreativeView();
+}, { immediate: true });
+
 onMounted(async () => {
   const projectId = String(route.params.projectId || "");
   if (!projectId) return;
@@ -156,6 +198,7 @@ onMounted(async () => {
       userAppStore.loadTasks(),
       userAppStore.loadModels(),
     ]);
+    await refreshCreativeView();
   } catch (error) {
     errorMessage.value = apiErrorMessage(error, "项目加载失败");
   } finally {
@@ -163,6 +206,67 @@ onMounted(async () => {
     modelsLoading.value = false;
   }
 });
+
+function getCanvas(): CanvasContext {
+  const canvas = runtimeRef.value?.getCanvasContext();
+  if (!runtimeReady.value || !canvas) throw new Error("创作画布尚未准备好，请稍后重试");
+  return canvas;
+}
+
+async function refreshCreativeView() {
+  const projectId = workspaceStore.project?.id;
+  if (!projectId) return;
+  const version = ++creativeRefreshVersion;
+  creativeLoading.value = true;
+  creativeError.value = "";
+  try {
+    await runtimeRef.value?.flushSave();
+    const view = await readCreativeView(projectId, userAppStore.tasks.filter(task => task.projectId === projectId));
+    if (version !== creativeRefreshVersion || projectId !== workspaceStore.project?.id) return;
+    creativeView.value = view;
+  } catch (error) {
+    if (version === creativeRefreshVersion && projectId === workspaceStore.project?.id) {
+      creativeView.value = undefined;
+      creativeError.value = apiErrorMessage(error, "创作内容读取失败");
+    }
+  } finally {
+    if (version === creativeRefreshVersion && projectId === workspaceStore.project?.id) creativeLoading.value = false;
+  }
+}
+
+async function updateNode(nodeId: string, label: string, tool?: { name: string; args: Record<string, unknown> }) {
+  if (creativeBusy.value) return;
+  creativeBusy.value = true;
+  try {
+    const canvas = getCanvas();
+    if (tool) await canvas.call({ name: "nodeTools", args: { nodeId, name: tool.name, args: tool.args } });
+    await canvas.call({ name: "renameNodes", args: { renames: [{ nodeId, label }] } });
+    await refreshCreativeView();
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, "保存失败，请稍后重试"));
+  } finally {
+    creativeBusy.value = false;
+  }
+}
+
+function saveScript(nodeId: string, text: string, draftLabel: string) {
+  return updateNode(nodeId, draftLabel, { name: "node:setText", args: { text } });
+}
+
+function saveCharacter(nodeId: string, prompt: string, draftLabel: string) {
+  return updateNode(nodeId, draftLabel, { name: "node:setPrompt", args: { prompt } });
+}
+
+function confirmNode(nodeId: string, confirmedLabel: string) {
+  return updateNode(nodeId, confirmedLabel);
+}
+
+function fillRepairPrompt(type: "script" | "characters") {
+  const prompt = type === "script"
+    ? "请检查当前画布中的故事内容，把合适的文本节点整理为 Minifeel/剧本；如果还没有完整剧本，请新建文本节点补齐。只整理文字草稿，不生成图片或视频，不删除其他节点。"
+    : "请根据 Minifeel/剧本 整理角色。每个角色使用一个图片生成节点，命名为 Minifeel/角色/<角色名>，只填写角色提示词，不生成图片，不删除其他节点。";
+  void directorRef.value?.fillPrompt(prompt);
+}
 
 async function openAdvanced() {
   if (!workspaceStore.project) return;
@@ -195,6 +299,10 @@ async function openAdvanced() {
   .stageWorkspace {
     min-height: 480px;
     padding: 30px;
+
+    .creativeWarning { margin-top: 18px; }
+    :deep(.scriptStage),
+    :deep(.characterStage) { margin-top: 24px; }
 
     .stageHeading {
       display: flex;

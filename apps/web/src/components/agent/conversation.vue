@@ -163,7 +163,7 @@ import "@tdesign-vue-next/chat/es/style/index.css";
 import "x-sender/lib/XSender.css";
 
 const props = withDefaults(defineProps<{ active: boolean; initialSession: AgentConversation | null; sessionFile?: string; disabled: boolean; mode?: "advanced" | "guided" }>(), { mode: "advanced" });
-const emit = defineEmits<{ session: [file: string]; sent: [prompt: string]; event: [event: AgentEvent] }>();
+const emit = defineEmits<{ session: [file: string]; sent: [prompt: string]; event: [event: AgentEvent]; updated: [] }>();
 const workspaceStore = useWorkspaceStore();
 const projectId = workspaceStore.project?.id;
 const draftAttachments = ref<AgentAttachment[]>([]);
@@ -239,6 +239,10 @@ function applyEvent(event: AgentEvent) {
     case "compaction": compacting.value = event.active; break;
     case "session": emit("session", event.file); break;
     case "stats": stats.value = event.stats; contextUsage.value = event.contextUsage; break;
+    case "tool":
+      stream.receive(event);
+      if (props.mode === "guided" && event.tool.status === "success") emit("updated");
+      break;
     default: stream.receive(event);
   }
 }
@@ -268,7 +272,7 @@ function guidedToolText(tool: AgentToolCall) {
   return `项目更新失败：${detail}`;
 }
 
-defineExpose({ receiveEvent });
+defineExpose({ receiveEvent, fillPrompt });
 
 async function selectSkill(name: string) {
   const instance = sender;

@@ -37,7 +37,7 @@
 | --- | --- | --- | --- | --- |
 | 1. 工作台路由与三栏外壳 | 已完成 | 默认项目路由和首页新建/打开进入导演式工作台；完成响应式三栏外壳、阶段状态与高级画布往返 | Web 类型检查和生产构建通过；浏览器验证首页打开、普通页刷新、高级画布往返、390px 窄屏无页面横向溢出，控制台无错误 | — |
 | 2. 共享画布运行层与导演助手 | 已完成 | 普通页复用固定尺寸隐藏画布运行层；普通与高级模式共用保存拦截；Agent 增加导演模式并隐藏技术入口；启动时补齐缺失的内置工具 | Web、Server 类型检查与构建通过；浏览器验证新项目首条消息只发送一次并创建真实文本节点、刷新不重复、普通模式隐藏技术卡片、高级模式保持完整、窄屏折叠无溢出；断开 Server 后保存失败会拦截退出，恢复后可保存 | — |
-| 3. 创作视图适配、剧本与角色 | 未开始 | — | — | — |
+| 3. 创作视图适配、剧本与角色 | 已完成 | 新增画布标签适配器、剧本编辑确认、角色设定编辑锁定与已有预览；收紧首轮 Agent 指令，并让导演助手工具成功后刷新创作视图；并发刷新只提交最新结果且保留未保存输入 | Web 类型检查和生产构建通过；浏览器验证新项目只创建文本草稿节点，剧本与角色修改刷新后保留，保存一个角色不会覆盖另一个角色的未保存输入，高级画布读取同一数据；旧项目显示兼容提示且修复操作只填入 Agent；损坏 JSON 显示明确错误且原文件哈希恢复一致；干净页面无控制台错误 | — |
 | 4. 生成估价与确认 | 未开始 | — | — | — |
 | 5. 分镜、成片与任务恢复 | 未开始 | — | — | — |
 | 6. 全流程验收与生产部署 | 未开始 | — | — | — |
@@ -247,6 +247,9 @@ git push origin dev
 - Create: `apps/web/src/pages/project/components/characterStage.vue`
 - Modify: `apps/web/src/pages/app/dashboard.vue`
 - Modify: `apps/web/src/pages/project/index.vue`
+- Modify: `apps/web/src/pages/project/components/directorPanel.vue`
+- Modify: `apps/web/src/components/agent/index.vue`
+- Modify: `apps/web/src/components/agent/conversation.vue`
 - Modify: `docs/superpowers/plans/guidedStudioPlan.md`
 
 **Interfaces:**
@@ -254,7 +257,7 @@ git push origin dev
 - Consumes: `useWorkspaceFiles(projectId)`、`CanvasContext.call(...)`、`GenerationTask[]`。
 - Produces: `readCreativeView(projectId, tasks): Promise<CreativeView>`、`parseCreativeLabel(label)`、`scriptStage` 和 `characterStage` 的保存事件。
 
-- [ ] **Step 1: 定义稳定的画布标签契约**
+- [x] **Step 1: 定义稳定的画布标签契约**
 
 `creativeViewAdapter.ts` 使用以下标签，不增加额外项目数据文件：
 
@@ -269,7 +272,7 @@ const creativeLabels = {
 
 角色标签尾部是角色名；分镜和成片标签尾部使用三位顺序号，例如 `Minifeel/分镜/001`。用户确认的节点在末尾增加 `/已确认`，例如 `Minifeel/剧本/已确认`、`Minifeel/角色/小雨/已确认`。用户再次修改内容时使用 `renameNodes` 去掉后缀，使阶段回到 `review`。旧项目中不符合约定的节点不删除、不改名，并在 `warnings` 中提示可进入高级画布整理。
 
-- [ ] **Step 2: 实现只读创作视图适配器**
+- [x] **Step 2: 实现只读创作视图适配器**
 
 定义核心返回类型：
 
@@ -295,7 +298,7 @@ export type CreativeView = {
 
 `readCreativeView` 读取 `画布1.json`，验证 `minifeelCanvas === true`、`nodes` 和节点基础字段；剧本文本从文本节点的 `data.textPath` 读取；图片、视频输出从节点 `data.outputs` 读取。任务通过 `requestSummary.input.outputDirectory === "assets/<nodeId>"` 关联到卡片。任何结构无效时抛出可读错误，不覆盖文件。
 
-- [ ] **Step 3: 收紧首页初始 Agent 提示**
+- [x] **Step 3: 收紧首页初始 Agent 提示**
 
 保留现有 `/skill:workflow`，明确要求首轮只创建草稿节点：
 
@@ -305,7 +308,7 @@ export type CreativeView = {
 
 禁止提示词要求模型创建第二份状态文件或直接修改画布 JSON。
 
-- [ ] **Step 4: 实现剧本阶段**
+- [x] **Step 4: 实现剧本阶段**
 
 `scriptStage.vue` 接收 `script`、`loading` 和 `errorMessage`，使用文本编辑区展示剧本；保存时向父组件发出 `save(nodeId, text)`。父组件调用：
 
@@ -321,13 +324,13 @@ await refreshCreativeView();
 
 缺少剧本节点时显示“让导演助手重新整理剧本”操作，该操作只向现有 Agent 填入修复指令，不创建空节点覆盖旧项目。
 
-- [ ] **Step 5: 实现角色阶段**
+- [x] **Step 5: 实现角色阶段**
 
 `characterStage.vue` 按标签展示角色名、提示词、预览、任务状态和模型选择。修改设定时调用角色节点的 `node:setPrompt` 并去掉 `/已确认` 后缀；锁定角色时使用 `renameNodes` 增加 `/已确认`。预览使用 `useWorkspaceFiles(projectId).acquireUrl(path, mimeType)`，组件卸载或路径变化时调用 `release()`。
 
 本任务只接入角色编辑和已有图片预览；生成按钮保持禁用并显示“确认生成”说明，Task 4 接入真实确认逻辑。
 
-- [ ] **Step 6: 验证新项目和旧项目读取**
+- [x] **Step 6: 验证新项目和旧项目读取**
 
 Run:
 
@@ -338,10 +341,10 @@ bun run --cwd apps/web build
 
 Expected: 新项目首轮生成后出现剧本、角色和分镜草稿节点；编辑剧本和角色提示词后刷新仍存在；进入高级画布可看到同一批节点和修改；普通页没有生成媒体。打开一个没有约定标签的旧项目时页面不白屏、不修改画布，并提供高级画布入口。把画布文件内容临时改成无效 JSON 后打开项目，页面显示读取失败且文件内容未变化；验证后恢复原文件。
 
-- [ ] **Step 7: 更新进度并提交推送**
+- [x] **Step 7: 更新进度并提交推送**
 
 ```powershell
-git add apps/web/src/pages/project/creativeViewAdapter.ts apps/web/src/pages/project/components/scriptStage.vue apps/web/src/pages/project/components/characterStage.vue apps/web/src/pages/app/dashboard.vue apps/web/src/pages/project/index.vue docs/superpowers/plans/guidedStudioPlan.md
+git add apps/web/src/pages/project/creativeViewAdapter.ts apps/web/src/pages/project/components/scriptStage.vue apps/web/src/pages/project/components/characterStage.vue apps/web/src/pages/app/dashboard.vue apps/web/src/pages/project/index.vue apps/web/src/pages/project/components/directorPanel.vue apps/web/src/components/agent/index.vue apps/web/src/components/agent/conversation.vue docs/superpowers/plans/guidedStudioPlan.md
 git commit -m "feat(web): 接入剧本与角色创作流程"
 git pull --rebase origin dev
 git push origin dev
