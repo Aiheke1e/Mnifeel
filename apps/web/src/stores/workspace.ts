@@ -33,6 +33,15 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     return data.data;
   }
 
+  async function importLegacyProject(legacyId: string, name: string, signal?: AbortSignal) {
+    const { data } = await api.post<ApiResponse<Project>>("/projects/legacy/import", { legacyId, name }, { signal });
+    signal?.throwIfAborted();
+    pendingAgentMessage.value = null;
+    project.value = data.data;
+    projectList.value = [data.data, ...projectList.value.filter(item => item.id !== data.data.id)];
+    return data.data;
+  }
+
   async function openProject(projectId: string, signal?: AbortSignal) {
     const { data } = await api.get<ApiResponse<Project>>("/workspaces/check", { params: { projectId }, signal });
     signal?.throwIfAborted();
@@ -55,5 +64,5 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     if (project.value?.id === projectId) project.value = null;
   }
 
-  return { project, projectList, pendingAgentMessage, loadProjects, createProject, openProject, renameProject, removeProject };
+  return { project, projectList, pendingAgentMessage, loadProjects, createProject, importLegacyProject, openProject, renameProject, removeProject };
 });

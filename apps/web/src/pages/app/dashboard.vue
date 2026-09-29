@@ -6,10 +6,16 @@
         <h1>{{ greeting }}，准备好讲一个新故事了吗？</h1>
         <p>从一句灵感开始，按步骤完成短剧创作。</p>
       </div>
-      <router-link class="primaryAction" to="/app/projects/new">
-        <icon-plus :size="18" aria-hidden="true" />
-        开始创作
-      </router-link>
+      <div class="headerActions">
+        <router-link class="secondaryAction" to="/app/projects/import">
+          <icon-file-import :size="18" aria-hidden="true" />
+          导入旧项目
+        </router-link>
+        <router-link class="primaryAction" to="/app/projects/new">
+          <icon-plus :size="18" aria-hidden="true" />
+          开始创作
+        </router-link>
+      </div>
     </header>
 
     <el-alert v-if="errorMessage" class="pageAlert" :title="errorMessage" type="error" showIcon :closable="false" />
@@ -102,7 +108,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { IconChevronRight, IconFileText, IconMovie, IconPhoto, IconPlus, IconVideo } from "@tabler/icons-vue";
+import { IconChevronRight, IconFileImport, IconFileText, IconMovie, IconPhoto, IconPlus, IconVideo } from "@tabler/icons-vue";
 import { apiErrorMessage } from "@/lib/api";
 import { getProjectMode } from "@/lib/projectMode";
 import { useAuthStore } from "@/stores/auth";
@@ -151,6 +157,8 @@ async function openProject(project: Project) {
 
 <style scoped lang="scss">
 .dashboardPage {
+  .headerActions { display: flex; gap: 10px; }
+
   .summaryGrid {
     display: grid;
     grid-template-columns: 1.35fr 1fr 1fr;
@@ -301,6 +309,7 @@ async function openProject(project: Project) {
 
 @media (max-width: 620px) {
   .dashboardPage {
+    .headerActions { width: 100%; flex-direction: column; .primaryAction, .secondaryAction { width: 100%; } }
     .summaryGrid, .templateGrid { grid-template-columns: 1fr; }
     .summaryGrid .accentCard { grid-column: auto; }
     .projectGrid .projectCard { grid-template-columns: 56px minmax(0, 1fr) auto; .projectCover { width: 56px; height: 56px; } }

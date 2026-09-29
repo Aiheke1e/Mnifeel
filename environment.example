@@ -4,6 +4,9 @@ DATABASE_URL=postgres://minifeel:replaceMe@127.0.0.1:5432/minifeel
 # 项目文件、生成素材和运行数据的本地目录。
 MINIFEEL_DATA_DIR=./data
 
+# 可选：旧版项目所在的绝对目录。用户只能复制导入此目录下第一层文件夹。
+MINIFEEL_LEGACY_WORKSPACE_DIR=
+
 # 32 字节随机密钥的 Base64 文本，用于加密供应商 API Key。
 MINIFEEL_SECRET_KEY=
 

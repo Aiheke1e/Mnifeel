@@ -4,7 +4,7 @@ Minifeel 当前以 Web 前端、Bun 业务服务和 PostgreSQL 运行。账号�
 
 ## 本地开发
 
-先安装根目录 `package.json` 指定的 Bun 版本和 PostgreSQL，再复制 `.env.example` 为 `.env` 并填写数据库连接、会话密钥和初始管理员信息。
+先安装根目录 `package.json` 指定的 Bun 版本和 PostgreSQL，再复制 `environment.example` 为 `.env` 并填写数据库连接、会话密钥和初始管理员信息。
 
 ```sh
 bun install
@@ -39,7 +39,7 @@ bun run build
 bun run start:server
 ```
 
-通过 `PORT` 修改监听端口，通过 `MINIFEEL_DATA_DIR` 指定数据目录。数据库连接和会话密钥从环境变量读取，具体字段见 `.env.example`。生产环境应持久化 PostgreSQL 数据目录和 `MINIFEEL_DATA_DIR`。
+通过 `PORT` 修改监听端口，通过 `MINIFEEL_DATA_DIR` 指定数据目录。数据库连接和会话密钥从环境变量读取，具体字段见 `environment.example`。生产环境应持久化 PostgreSQL 数据目录和 `MINIFEEL_DATA_DIR`。
 
 FFmpeg 不会在运行时下载。需要视频合成或音频处理时，请在服务器预先安装 `ffmpeg` 与 `ffprobe`，并确保两者位于应用进程的 `PATH` 中。启动日志会报告缺失情况，相关操作也会返回明确错误。
 

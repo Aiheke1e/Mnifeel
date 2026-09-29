@@ -26,6 +26,7 @@ const router = createRouter({
         { path: "tasks", component: () => import("@/pages/app/tasks.vue") },
         { path: "account", component: () => import("@/pages/app/account.vue") },
         { path: "projects/new", component: () => import("@/pages/app/projectCreate.vue") },
+        { path: "projects/import", component: () => import("@/pages/app/legacyImport.vue") },
         { path: "projects/:projectId", component: () => import("@/pages/project/index.vue") },
       ],
     },
