@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as wait } from "node:timers/promises";
 import { z } from "zod";
 import type postgres from "postgres";
 import { writeAudit } from "@/utils/audit";
@@ -254,6 +255,83 @@ export async function syncProviderModels(adminUserId: string, providerId: string
     });
   });
   return { count: definitions.length };
+}
+
+export async function debugProviderModel(adminUserId: string, input: {
+  providerId: string;
+  modelId: string;
+  prompt: string;
+  referenceImage?: { data: string; mimeType: string };
+}, signal?: AbortSignal) {
+  let provider: ProviderRow | undefined;
+  let model: ModelRow | undefined;
+  let config: ProviderRuntimeConfig | undefined;
+  try {
+    provider = await readProvider(input.providerId);
+    if (provider.connectionStatus !== "passed") invalid("供应商连接测试通过后才能调试模型", 409);
+    const rows = await getDatabase()<ModelRow[]>`
+      select m.*, p."type" as "providerType", p."displayName" as "providerDisplayName"
+      from "modelConfigs" m join "providerConfigs" p on p."id" = m."providerId"
+      where m."id" = ${input.modelId} and m."providerId" = ${input.providerId}
+      limit 1
+    `;
+    model = rows[0] ?? invalid("该供应商下不存在这个模型", 404);
+    if (input.referenceImage && provider.type !== "bananaPro") invalid("只有 BananaPro 图片调试支持参考图");
+    config = runtimeProvider(provider);
+    const adapter = requireAdapter(provider.type);
+    const definition = {
+      upstreamModelId: model.upstreamModelId,
+      displayName: model.displayName,
+      mediaType: model.mediaType,
+      capabilities: model.capabilities,
+    } satisfies ProviderModelDefinition;
+    let result;
+    if (provider.type === "deepSeek") {
+      if (model.mediaType !== "text" || !adapter.runText) invalid("所选模型不支持文本调试");
+      result = { type: "text" as const, ...await adapter.runText(config, definition, {
+        messages: [{ role: "user", content: input.prompt }],
+      }, signal) };
+    } else if (provider.type === "bananaPro") {
+      if (model.mediaType !== "image" || !adapter.runImage) invalid("所选模型不支持图片调试");
+      const assets = await adapter.runImage(config, definition, {
+        prompt: input.prompt,
+        images: input.referenceImage ? [input.referenceImage] : undefined,
+      }, signal);
+      if (!assets.length) invalid("供应商未返回图片", 502);
+      const asset = assets[0]!;
+      if (asset.type === "base64" && !["image/jpeg", "image/png", "image/webp"].includes(asset.mimeType)) {
+        invalid("供应商返回了不支持的图片格式", 502);
+      }
+      result = { type: "image" as const, asset };
+    } else {
+      if (model.mediaType !== "video" || !adapter.createVideo || !adapter.getVideo) invalid("所选模型不支持视频调试");
+      const task = await adapter.createVideo(config, definition, { prompt: input.prompt }, signal);
+      while (!result) {
+        signal?.throwIfAborted();
+        const video = await adapter.getVideo(config, task, signal);
+        if (video.status === "succeeded") {
+          if (!video.asset) invalid("视频任务完成但没有返回文件", 502);
+          result = { type: "video" as const, asset: video.asset };
+        } else if (video.status === "failed") {
+          invalid(video.error || "视频生成失败", 502);
+        } else {
+          await wait(3000, undefined, { signal });
+        }
+      }
+    }
+    await writeAudit({
+      adminUserId, action: "providerModelDebugged", targetType: "model", targetId: input.modelId,
+      details: { providerType: provider.type, mediaType: model.mediaType },
+    });
+    return result;
+  } catch (reason) {
+    const message = safeProviderMessage(reason, "模型调试失败", config?.apiKey);
+    await writeAudit({
+      adminUserId, action: "providerModelDebugFailed", targetType: "model", targetId: input.modelId,
+      details: { providerType: provider?.type, mediaType: model?.mediaType, message },
+    });
+    throw Object.assign(new Error(message), { status: (reason as { status?: number })?.status ?? 502 });
+  }
 }
 
 export async function listAdminModels() {

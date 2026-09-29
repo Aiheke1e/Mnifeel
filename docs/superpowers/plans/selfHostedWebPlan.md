@@ -706,6 +706,53 @@
 
 ---
 
+## Task 15：管理员模型调试台
+
+**状态：** 已完成
+
+**结果：** 管理员可在供应商配置页直接验证已配置的文本、图片和视频模型，并查看模型返回结果，无需进入普通用户项目或消耗用户积分。
+
+**范围：**
+
+- 在每张供应商卡片增加“功能调试”入口，弹窗只展示该供应商已经同步的模型。
+- DeepSeek 支持输入文字并显示文本、推理内容和 Token 用量。
+- BananaPro 支持输入提示词、可选上传一张参考图，并预览返回图片。
+- Agnes 支持输入提示词生成视频，完成后直接播放；当前模型能力仅为文生视频，不提供无效的图片上传入口。
+- 调试请求仅允许管理员调用，不扣积分、不写入用户项目，后端不得向前端返回 API Key。
+- 复用现有三家供应商适配器；展示真实错误信息，并对供应商密钥做脱敏处理。
+- Agnes 调试只由管理员手动触发，并继续遵守同一密钥每分钟一次请求的串行限制；部署验证不主动调用视频生成。
+
+**实际改动：**
+
+- 新增：`apps/server/src/routes/admin/providers/debug.ts`
+- 修改：`apps/server/src/utils/providers/index.ts`
+- 修改：`apps/web/src/pages/admin/providers.vue`
+- 自动生成：`apps/server/src/router.ts`
+- 同步：`docs/productExperienceIssues.md`
+- 同步：`docs/superpowers/plans/selfHostedWebPlan.md`
+
+**实现说明：**
+
+- 新增管理员专用 `POST /api/admin/providers/debug`，按供应商和模型 ID 调用现有适配器；连接未通过、模型不属于供应商或媒体类型不匹配时直接拒绝。
+- 文本结果返回正文、推理内容、结束原因和 Token 用量；图片结果返回供应商素材并支持一张不超过 10 MB 的 JPG、PNG 或 WebP 参考图；视频结果在同一请求内等待供应商完成并返回可播放素材。
+- 请求关闭时中止上游调用，统一使用 30 分钟总超时；Agnes 内部的一分钟串行限流保持不变。
+- 成功和失败分别写入 `providerModelDebugged`、`providerModelDebugFailed` 审计记录，审计和错误信息均不包含 API Key。
+
+**验证：**
+
+- [x] 执行 `bun run routes`、Server/Web 类型检查、Server 独立构建、Web 生产构建和 `git diff --check`，均通过。
+- [x] 使用管理员会话实际完成 DeepSeek 文本调试和 BananaPro 单参考图图片调试；分别返回文本、Token 用量和 JPEG 结果地址。按用户要求未调用 Agnes 视频生成。
+- [x] 使用普通用户会话请求调试接口返回 403；上传 SVG 格式返回 400，未向供应商发起请求。
+- [x] 检查接口响应和最新审计记录，响应仅包含调试结果，审计记录为 `providerModelDebugged`，均不包含供应商 API Key。
+
+**后续事项：**
+
+- [ ] 将初始化 DML 中的 5 个演示账号同步到生产数据库；执行前先备份，完成后逐个验证登录。本次模型调试台开发与部署不处理该项。
+
+**提交：** `feat(admin): 添加模型功能调试台`
+
+---
+
 ## 实施记录规则
 
 每次开始任务时，将状态从“未开始”改为“进行中”。任务提交前：
