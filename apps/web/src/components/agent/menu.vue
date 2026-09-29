@@ -75,12 +75,12 @@
           </div>
         </div>
       </el-popover>
-      <el-button text circle :loading="configLoading" :icon="IconAdjustmentsHorizontal" aria-label="媒体生成控制" title="媒体生成控制" @click="openMediaConfig" />
+      <el-button v-if="authStore.user?.role === 'admin'" text circle :loading="configLoading" :icon="IconAdjustmentsHorizontal" aria-label="媒体生成控制" title="媒体生成控制" @click="openMediaConfig" />
       <slot name="actions" />
       <el-button text circle aria-label="关闭对话" title="关闭" @click="emit('close')"><icon-x :size="17" /></el-button>
     </div>
   </header>
-  <pluginConfigDialog v-if="mediaTool" v-model="configVisible" :plugin="mediaTool" :canManage="canManageTools" />
+  <mediaToolDialog v-if="mediaTool" v-model="configVisible" :plugin="mediaTool" :canManage="canManageTools" />
 </template>
 
 <script setup lang="ts">
@@ -89,8 +89,9 @@ import { nextTick, ref, shallowRef, watch } from "vue";
 import { ElMessage, ElMessageBox, type InputInstance } from "element-plus";
 import type { AgentHistory } from "./types";
 import type { AgentSubAgent } from "@minifeel/server/agent/types";
-import pluginConfigDialog from "@/components/settings/panels/pluginMarket/pluginConfigDialog.vue";
-import type { Plugin } from "@/components/settings/panels/pluginMarket/types";
+import mediaToolDialog from "./mediaToolDialog.vue";
+import type { Plugin } from "./mediaToolTypes";
+import { useAuthStore } from "@/stores/auth";
 import {
   IconMessagePlus, IconHistory,
   IconX, IconPencil,
@@ -106,6 +107,7 @@ const props = defineProps<{
   subAgents?: AgentSubAgent[];
   parentFile?: string;
 }>();
+const authStore = useAuthStore();
 const emit = defineEmits<{ newChat: []; history: []; select: [file: string]; rename: [file: string, name: string]; remove: [file: string]; close: []; openSubAgent: [file: string]; back: [] }>();
 const historyVisible = ref(false);
 const subAgentsVisible = ref(false);

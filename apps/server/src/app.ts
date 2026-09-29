@@ -6,7 +6,6 @@ import type { Request, Response, NextFunction } from "express";
 import buildRoute from "@/core";
 import { error } from "@/lib/responseFormat";
 import { getAuth, requireAdmin, requireAuth, resolveAuth } from "@/lib/middleware";
-import desktopRequest from "@/lib/desktop";
 import initializePlugins from "@/utils/plugins/initialize";
 import { redactError, redactErrorMessage } from "@/utils/providers/redact";
 
@@ -23,7 +22,6 @@ export async function createApp({
   dataDirectory?: string;
   toolsRoot?: string;
   nodesRoot?: string;
-  providersRoot?: string;
   skillsRoot?: string;
   agentsRoot?: string;
   pluginRevision?: string;
@@ -56,7 +54,6 @@ export async function createApp({
   app.use(["/api/workspaces/files/write", "/api/assets/save"], express.raw({ type: "application/octet-stream", limit: "100mb" }));
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ extended: true, limit: "100mb" }));
-  app.use("/api/desktop", desktopRequest);
   app.use("/api", resolveAuth);
   app.use("/api", (request, response, next) => {
     const publicRoutes = new Set([
@@ -72,8 +69,14 @@ export async function createApp({
     requireAuth(request, response, next);
   });
   app.use("/api/admin", requireAdmin);
-  app.use("/api/providers", requireAdmin);
   app.use("/api/agents/a2a", requireAdmin);
+  app.use([
+    "/api/nodes/install", "/api/nodes/save", "/api/nodes/setEnabled", "/api/nodes/uninstall",
+    "/api/tools/install", "/api/tools/save", "/api/tools/setEnabled", "/api/tools/uninstall",
+    "/api/skills/create", "/api/skills/install", "/api/skills/move", "/api/skills/order", "/api/skills/save", "/api/skills/uninstall",
+    "/api/agents/install", "/api/agents/save", "/api/agents/setEnabled", "/api/agents/uninstall",
+    "/api/plugins/export",
+  ], requireAdmin);
   app.use(["/api/assets", "/api/workspaces/list", "/api/workspaces/selectDirectory"], requireAdmin);
 
   const router = await import("@/router");
@@ -118,6 +121,8 @@ export async function createApp({
     import("@/utils/generation/executors"),
   ]);
   registerGenerationExecutors();
+  const ffmpegStatus = await (await import("@/utils/ffmpeg")).getStatus();
+  if (!ffmpegStatus.available) console.warn(`[FFmpeg 不可用]: ${ffmpegStatus.error}`);
   await startGenerationWorker();
 
   return app;

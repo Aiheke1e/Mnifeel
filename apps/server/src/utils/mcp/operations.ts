@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { toolNameSchema } from "@minifeel/tools-scaffold/runtime";
-import { mediaModelsSchema, mediaProviderFileSchema } from "@/utils/media/provider";
 import { getMcpRuntime } from "@/utils/mcp/runtime";
 
 const maxBytes = 20 * 1024 * 1024;
@@ -10,15 +9,12 @@ const pluginName = z.string().regex(/^[a-z][a-zA-Z0-9]*$/);
 const skillName = z.string().min(1).max(1024);
 const skillPath = z.string().min(1).max(1024);
 const sessionFile = z.string().regex(/^[\w-]+\.jsonl$/);
-const revision = z.string().regex(/^[a-f0-9]{64}$/);
 const base64 = z.string().max(Math.ceil(maxBytes / 3) * 4).base64();
 const sourceFields = {
   source: z.string().min(1).max(maxBytes).optional(),
-  url: z.url().max(4096).optional(),
   force: z.boolean().optional(),
 };
-const sourceRequired = (value: { fileName?: string; source?: string; url?: string }) =>
-  value.url ? value.source === undefined : value.fileName !== undefined && value.source !== undefined;
+const sourceRequired = (value: { fileName?: string; source?: string }) => value.fileName !== undefined && value.source !== undefined;
 
 export const appOperations: {
   name: string;
@@ -26,7 +22,7 @@ export const appOperations: {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   parameters: z.ZodType;
-  refresh?: { type: "node" | "tool" | "skill" | "provider"; nameField?: string };
+  refresh?: { type: "node" | "tool" | "skill"; nameField?: string };
 }[] = [
   {
     name: "listNodes", description: "列出已安装节点的元数据、说明和启用状态。", method: "GET", path: "/api/nodes/get", parameters: z.strictObject({}),
@@ -36,8 +32,8 @@ export const appOperations: {
     parameters: z.strictObject({ name: pluginName, enabled: z.boolean() }), refresh: { type: "node", nameField: "name" },
   },
   {
-    name: "installNode", description: "通过 fileName/source 安装节点 UMD，或使用 url 下载；force 显式允许覆盖。下载和版本检查沿用现有安装接口。", method: "POST", path: "/api/nodes/install",
-    parameters: z.strictObject({ ...sourceFields, fileName: z.string().max(128).optional() }).refine(sourceRequired, "提供 url 或 fileName/source，不能同时提供 url 和 source"), refresh: { type: "node" },
+    name: "installNode", description: "通过 fileName/source 安装本地节点 UMD；force 显式允许覆盖。", method: "POST", path: "/api/nodes/install",
+    parameters: z.strictObject({ ...sourceFields, fileName: z.string().max(128).optional() }).refine(sourceRequired, "必须提供 fileName/source"), refresh: { type: "node" },
   },
   {
     name: "uninstallNode", description: "卸载指定节点插件，不删除工作区的画布和节点输出。", method: "DELETE", path: "/api/nodes/uninstall",
@@ -55,8 +51,8 @@ export const appOperations: {
     parameters: z.strictObject({ name: toolNameSchema, config: z.record(z.string(), z.json()) }), refresh: { type: "tool", nameField: "name" },
   },
   {
-    name: "installTool", description: "通过 fileName/source 安装 .tool.js，或使用 url 下载；force 显式允许覆盖。", method: "POST", path: "/api/tools/install",
-    parameters: z.strictObject({ ...sourceFields, fileName: z.string().max(104).regex(/^[a-z][a-zA-Z0-9]*\.tool\.js$/).optional() }).refine(sourceRequired, "提供 url 或 fileName/source，不能同时提供 url 和 source"), refresh: { type: "tool" },
+    name: "installTool", description: "通过 fileName/source 安装本地 .tool.js；force 显式允许覆盖。", method: "POST", path: "/api/tools/install",
+    parameters: z.strictObject({ ...sourceFields, fileName: z.string().max(104).regex(/^[a-z][a-zA-Z0-9]*\.tool\.js$/).optional() }).refine(sourceRequired, "必须提供 fileName/source"), refresh: { type: "tool" },
   },
   {
     name: "uninstallTool", description: "卸载指定工具并删除其配置。", method: "DELETE", path: "/api/tools/uninstall",
@@ -85,28 +81,13 @@ export const appOperations: {
     parameters: z.strictObject({ name: skillName, path: skillPath, target: skillPath }), refresh: { type: "skill", nameField: "name" },
   },
   {
-    name: "installSkill", description: "使用 fileName/base64 安装技能文件或压缩包，或使用 url 下载；force 显式允许覆盖。", method: "POST", path: "/api/skills/install",
-    parameters: z.strictObject({ fileName: z.string().max(128).optional(), base64: base64.min(1).optional(), url: z.url().max(4096).optional(), force: z.boolean().optional() })
-      .refine(value => value.url ? value.base64 === undefined : value.fileName !== undefined && value.base64 !== undefined, "提供 url 或 fileName/base64，不能同时提供 url 和 base64"), refresh: { type: "skill" },
+    name: "installSkill", description: "使用 fileName/base64 安装本地技能文件或压缩包；force 显式允许覆盖。", method: "POST", path: "/api/skills/install",
+    parameters: z.strictObject({ fileName: z.string().max(128).optional(), base64: base64.min(1).optional(), force: z.boolean().optional() })
+      .refine(value => value.fileName !== undefined && value.base64 !== undefined, "必须提供 fileName/base64"), refresh: { type: "skill" },
   },
   {
     name: "uninstallSkill", description: "卸载全局技能及其文件，不影响工作区内的同名技能。", method: "DELETE", path: "/api/skills/uninstall",
     parameters: z.strictObject({ name: skillName }), refresh: { type: "skill", nameField: "name" },
-  },
-  {
-    name: "listMediaProviders", description: "读取媒体供应商及预置 models、配置 revision；保存与删除时使用最新 revision。", method: "GET", path: "/api/providers/media/list", parameters: z.strictObject({}),
-  },
-  {
-    name: "addMediaProvider", description: "从完整 TypeScript source 添加媒体供应商，沿用现有供应商结构检查。", method: "POST", path: "/api/providers/media/add",
-    parameters: z.strictObject({ source: z.string().min(1).max(2 * 1024 * 1024) }), refresh: { type: "provider" },
-  },
-  {
-    name: "saveMediaProviderModels", description: "修改供应商 TS 中的 models；revision 不匹配时拒绝覆盖。API Key 等凭证通过 updateSettings 配置。", method: "PUT", path: "/api/providers/media/save",
-    parameters: z.strictObject({ fileName: mediaProviderFileSchema, models: mediaModelsSchema, revision }), refresh: { type: "provider", nameField: "fileName" },
-  },
-  {
-    name: "deleteMediaProvider", description: "删除指定媒体供应商及其保存的配置；必须提供当前 revision。", method: "DELETE", path: "/api/providers/media/delete",
-    parameters: z.strictObject({ fileName: mediaProviderFileSchema, revision }), refresh: { type: "provider", nameField: "fileName" },
   },
   {
     name: "listAssets", description: "列出全局素材库的文件和文件夹树；与工作区 asstes 目录不同。", method: "GET", path: "/api/assets/list", parameters: z.strictObject({}),

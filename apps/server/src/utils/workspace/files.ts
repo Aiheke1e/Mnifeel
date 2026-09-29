@@ -59,7 +59,7 @@ export async function resolveWorkspacePath(root: string, path: string, allowMiss
   return { directory: root, path: actual, relativePath: relative(root, actual).split(sep).join("/") };
 }
 
-// ACT: 桌面和独立 Server 均为单进程；锁防止并发文件操作互相覆盖。
+// ACT: 独立 Server 为单进程；锁防止并发文件操作互相覆盖。
 const busyFiles = new Set<string>();
 export function lockWorkspaceFiles(paths: string[]) {
   const keys = paths.map(path => process.platform === "win32" ? resolve(path).toLowerCase() : resolve(path));

@@ -74,7 +74,7 @@ import axios from "axios";
 import { ElMessage, type InputInstance } from "element-plus";
 import { IconCopy, IconDownload, IconFileText, IconRefresh, IconTerminal2 } from "@tabler/icons-vue";
 import { saveSettings, settings } from "@/stores/settings";
-import saveFile from "@/lib/saveFile";
+import downloadFile from "@/lib/downloadFile";
 import { writeClipboardText } from "@/lib/clipboard";
 import messageMarkdown from "@/components/messageMarkdown.vue";
 
@@ -200,7 +200,7 @@ async function handleSkill(action: "view" | "copy" | "download") {
   try {
     const readSkill = () => axios.get<Blob>("/api/mcp/skill", { headers, responseType: "blob" }).then(({ data }) => data);
     if (action === "download") {
-      await saveFile(readSkill, "SKILL.md");
+      await downloadFile(readSkill, "SKILL.md");
       return;
     }
     skillContent.value ||= await (await readSkill()).text();

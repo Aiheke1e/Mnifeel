@@ -1,7 +1,6 @@
 import { onScopeDispose, shallowRef, watch, type WatchSource } from "vue";
 import { useRouter } from "vue-router";
 import type { NodeToolInfo } from "@minifeel/tools-scaffold/runtime";
-import { invalidateNodeModels } from "@minifeel/nodes-scaffold/nodeAi";
 import { saveSettings, settings } from "@/stores/settings";
 import { useAuthStore } from "@/stores/auth";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -107,19 +106,8 @@ export function useMcpControl() {
             await saveSettings(() => { callSignal.throwIfAborted(); return patch as Record<string, unknown>; });
             result = readSettings();
           } else if (request.name === "refreshResources") {
-            const { type, name, removedProviderId } = request.args;
-            if (type !== "node" && type !== "tool" && type !== "skill" && type !== "provider") throw new Error("未知资源类型");
-            if (type === "provider") {
-              if (typeof removedProviderId === "string" && removedProviderId) await saveSettings(current => {
-                callSignal.throwIfAborted();
-                const configs = current.mediaProviderConfigs;
-                if (!configs || typeof configs !== "object" || Array.isArray(configs) || !Object.hasOwn(configs, removedProviderId)) return;
-                const next = { ...configs } as Record<string, unknown>;
-                delete next[removedProviderId];
-                return { mediaProviderConfigs: next };
-              });
-              invalidateNodeModels("media");
-            }
+            const { type, name } = request.args;
+            if (type !== "node" && type !== "tool" && type !== "skill") throw new Error("未知资源类型");
             window.dispatchEvent(new CustomEvent("minifeel:plugin-installed", { detail: { type, name: typeof name === "string" ? name : "" } }));
             result = { refreshed: true };
           } else if (request.name === "openProject") {

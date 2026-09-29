@@ -2,7 +2,6 @@
 .github
 .vscode
 .idea
-.hutch
 .cottontail-tmp
 **/node_modules
 **/dist
@@ -14,12 +13,6 @@ coverage
 .playwright-mcp
 playwright-report
 test-results
-compat/macIntel/generated
-packages/startup/assets/macX64
-packages/startup/assets/macArm64
-apps/updateServer/public
-apps/updateServer/releases
-apps/updateServer/build
 **/.env
 **/.env.*
 **/*.log

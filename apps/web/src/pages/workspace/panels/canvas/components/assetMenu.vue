@@ -26,7 +26,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef } from "vue";
 import axios from "axios";
-import saveFile from "@/lib/saveFile";
+import downloadFile from "@/lib/downloadFile";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { ElMessage, ElMessageBox, type DropdownInstance } from "element-plus";
 import { IconChevronRight, IconFolder, IconFolderPlus } from "@tabler/icons-vue";
@@ -128,7 +128,7 @@ async function handleCommand(command: string) {
   closeMenu();
   try {
     if (command === "download") {
-      await saveFile(() => useWorkspaceFiles(props.projectId).read(entry.path).then(data => new Blob([data])), entry.name);
+      await downloadFile(() => useWorkspaceFiles(props.projectId).read(entry.path).then(data => new Blob([data])), entry.name);
     }
     if (command === "rename") {
       const { value } = await ElMessageBox.prompt("名称", "重命名", {

@@ -19,7 +19,7 @@
             <keep-alive include="personalization">
               <component
                 :is="activePanel.component"
-                v-bind="['pluginMarket', 'languageModel', 'mediaModel', 'personalization'].includes(activePanel.id) ? { visible } : {}" />
+                v-bind="activePanel.id === 'personalization' ? { visible } : {}" />
             </keep-alive>
           </transition>
         </div>
@@ -34,42 +34,22 @@ import { useAuthStore } from "@/stores/auth";
 import {
   IconPalette,
   IconSettings,
-  IconPhotoVideo,
-  IconBuildingStore,
   IconInfoCircle,
   IconCode,
-  IconShieldLock,
   IconPlugConnected,
   IconUserCog,
-  IconSubtitlesAi,
 } from "@tabler/icons-vue";
 
 const allSettingsPanels = [
   { id: "ui", label: "界面设置", icon: IconPalette, component: defineAsyncComponent(() => import("./panels/ui.vue")) },
   { id: "general", label: "常规配置", icon: IconSettings, component: defineAsyncComponent(() => import("./panels/general/index.vue")) },
-  {
-    id: "languageModel",
-    label: "文本模型",
-    icon: IconSubtitlesAi,
-    groupLabel: "模型",
-    component: defineAsyncComponent(() => import("./panels/languageModel/index.vue")),
-  },
-  { id: "mediaModel", label: "媒体模型", icon: IconPhotoVideo, component: defineAsyncComponent(() => import("./panels/mediaModel/index.vue")) },
-  {
-    id: "pluginMarket",
-    label: "插件市场",
-    icon: IconBuildingStore,
-    groupLabel: "市场",
-    component: defineAsyncComponent(() => import("./panels/pluginMarket/index.vue")),
-  },
   { id: "mcp", label: "MCP", icon: IconPlugConnected, groupLabel: "其他", component: defineAsyncComponent(() => import("./panels/mcp/index.vue")) },
   { id: "personalization", label: "个性化", icon: IconUserCog, component: defineAsyncComponent(() => import("./panels/personalization.vue")) },
-  { id: "privacy", label: "隐私", icon: IconShieldLock, component: defineAsyncComponent(() => import("./panels/privacy.vue")) },
   { id: "developer", label: "开发者选项", icon: IconCode, component: defineAsyncComponent(() => import("./panels/developer/index.vue")) },
   { id: "about", label: "关于", icon: IconInfoCircle, component: defineAsyncComponent(() => import("./panels/about.vue")) },
 ];
 const authStore = useAuthStore();
-const userPanelIds = new Set(["ui", "general", "privacy"]);
+const userPanelIds = new Set(["ui", "general"]);
 const settingsPanels = computed(() => authStore.user?.role === "admin" ? allSettingsPanels : allSettingsPanels.filter(item => userPanelIds.has(item.id)));
 const activePanel = shallowRef(allSettingsPanels[0]!);
 const visible = defineModel<boolean>({ default: false });

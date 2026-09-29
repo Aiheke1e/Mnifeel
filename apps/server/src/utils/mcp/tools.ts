@@ -95,7 +95,7 @@ export async function getMcpTools(userId: string): Promise<McpTool[]> {
     tools.push(wrapTool(name, uiDescriptions[name as keyof typeof uiSchemas], z.toJSONSchema(schema), async (input, target, signal) => {
       const args = schema.parse(input);
       const { connection, projectId } = await resolveTarget(userId, target, !["openProject", "getSettings", "updateSettings"].includes(name));
-      if (!connection) throw new Error("请先打开 Minifeel 桌面或网页");
+      if (!connection) throw new Error("请先打开 Minifeel 网页");
       if (name === "openProject") await getProjectSummary(connection.userId, (args as { projectId: string }).projectId);
       const result = await callControl(connection.id, name, args, signal, projectId);
       return name === "getSettings" || name === "updateSettings" ? redactSecrets(result) : result;
@@ -181,7 +181,7 @@ export async function getMcpTools(userId: string): Promise<McpTool[]> {
       return { name, description, parameters: schema };
     });
   }));
-  tools.push(wrapTool("appOperation", "执行 listAppOperations 公布的应用管理操作，parameters 必须符合对应 schema。文件与节点操作使用专门工具；安装来源、覆盖和卸载须符合用户请求。", z.toJSONSchema(z.strictObject({ name: z.string(), parameters: z.record(z.string(), z.json()) })), async (args, target, signal) => {
+  tools.push(wrapTool("appOperation", "执行 listAppOperations 公布的应用管理操作，parameters 必须符合对应 schema。文件与节点操作使用专门工具；安装、覆盖和卸载须符合用户请求。", z.toJSONSchema(z.strictObject({ name: z.string(), parameters: z.record(z.string(), z.json()) })), async (args, target, signal) => {
     const operation = appOperations.find(item => item.name === args.name);
     if (!operation) throw new Error("应用操作不存在，请查询 listAppOperations");
     const parameters = { ...args.parameters as Record<string, unknown> };

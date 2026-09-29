@@ -44,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeMount, onMounted, onScopeDispose, provide, ref } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeMount, onScopeDispose, provide, ref } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import axios from "axios";
 import { IconLayoutDashboard, IconFileText } from "@tabler/icons-vue";
@@ -53,7 +53,6 @@ import settings from "@/components/settings/index.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { registerWorkspaceControl, waitForControlValue } from "@/lib/mcpControl";
-import anonymousData from "@/lib/anonymousData";
 import { setProjectMode } from "@/lib/projectMode";
 import canvasPanel from "./panels/canvas/canvasHost.vue";
 import workspaceMenu from "./components/workspaceMenu.vue";
@@ -65,7 +64,6 @@ const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 const activePanel = ref<"canvas" | "document">("canvas");
-onMounted(() => anonymousData.track("workspace.canvas"));
 const workspaceStore = useWorkspaceStore();
 const returnPath = computed(() => authStore.user?.role === "admin"
   ? "/admin/dashboard"
@@ -183,10 +181,8 @@ async function switchPanel(value: string | number | boolean) {
   if (value !== "canvas" && value !== "document") return false;
   try {
     if (activePanel.value === "document") await documentPanelRef.value?.flushSave();
-    const changed = activePanel.value !== value;
     activePanel.value = value;
     await nextTick();
-    if (changed) anonymousData.track(value === "canvas" ? "workspace.canvas" : "workspace.document");
     return true;
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "文本保存失败");

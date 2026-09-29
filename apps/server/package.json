@@ -4,7 +4,6 @@
   "type": "module",
   "exports": {
     "./app": "./src/app.ts",
-    "./desktop": "./src/types/desktop.ts",
     "./mcp": "./src/utils/mcp/runtime.ts",
     "./agent/types": "./src/agent/runtime/types.ts"
   },
@@ -17,14 +16,11 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@babel/parser": "^7.29.8",
-    "@breezystack/lamejs": "^1.2.7",
     "@earendil-works/pi-ai": "0.85.1",
     "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-coding-agent": "^0.85.1",
     "@minifeel/ffmpeg": "workspace:*",
     "@minifeel/mcp": "workspace:*",
-    "@minifeel/providers": "workspace:*",
     "@minifeel/teams-scaffold": "workspace:*",
     "@minifeel/tool-canvas": "workspace:*",
     "@minifeel/tool-media-generation": "workspace:*",
@@ -36,7 +32,6 @@
     "fflate": "^0.8.3",
     "morgan": "^1.12.1",
     "postgres": "^3.4.7",
-    "wavefile": "^11.0.0",
     "zod": "^4.6.2"
   },
   "devDependencies": {

@@ -1,8 +1,6 @@
 import { lstat, mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
-import type { AgentCard } from "@minifeel/teams-scaffold/a2a";
-import conf from "@/utils/conf";
 import { decodeText, skillPath } from "@/utils/plugins/install";
 import { resolveWorkspacePath, writeWorkspaceFile } from "@/utils/workspace/files";
 import { agentsDirectory, checkName, editablePath, maxBytes, readFiles, validateFiles, withTeamFiles } from "./files";
@@ -10,13 +8,7 @@ import { agentsDirectory, checkName, editablePath, maxBytes, readFiles, validate
 export { agentsDirectory, teamNamePattern } from "./files";
 export { installTeam } from "./install";
 
-export type RemoteTeam = { name: string; cardUrl: string; token?: string; enabled: boolean; card: AgentCard };
 const require = createRequire(import.meta.url);
-
-export function getRemoteTeam(name: string) {
-  checkName(name);
-  return conf.get("remoteConnections", {})[name];
-}
 
 async function readSnapshot(name: string) {
   const { directory, files } = await readFiles(name);
@@ -50,37 +42,13 @@ export async function listTeams() {
           loadError: error instanceof Error ? error.message : String(error), kind: "local" as const });
       }
     }
-    const remote = Object.values(conf.get("remoteConnections", {})).map(({ name, cardUrl, card, enabled }) => ({
-      name, displayName: card.name, description: card.description, version: card.version, author: "", github: "", readme: "", enabled,
-      loadError: "", kind: "remote" as const, cardUrl,
-    }));
-    return [...local, ...remote].sort((left, right) => left.name.localeCompare(right.name));
-  });
-}
-
-export async function saveRemoteTeam(record: RemoteTeam) {
-  checkName(record.name);
-  return withTeamFiles(async () => {
-    const remotes = conf.get("remoteConnections", {});
-    const locals = await readdir(agentsDirectory).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return [];
-      throw error;
-    });
-    if ([...locals, ...Object.keys(remotes)].some(name => name.toLowerCase() === record.name.toLowerCase())) {
-      throw Object.assign(new Error("已存在同名团队或远端连接"), { status: 409 });
-    }
-    conf.set("remoteConnections", { ...remotes, [record.name]: record });
+    return local.sort((left, right) => left.name.localeCompare(right.name));
   });
 }
 
 export async function setEnabled(name: string, enabled: boolean) {
   checkName(name);
   return withTeamFiles(async () => {
-    const remote = getRemoteTeam(name);
-    if (remote) {
-      conf.set("remoteConnections", { ...conf.get("remoteConnections", {}), [name]: { ...remote, enabled } });
-      return;
-    }
     const { files } = await readFiles(name);
     if (enabled) validateFiles(name, files);
     const path = resolve(agentsDirectory, `${name}.disabled`);
@@ -94,13 +62,6 @@ export async function setEnabled(name: string, enabled: boolean) {
 export async function uninstall(name: string) {
   checkName(name);
   return withTeamFiles(async () => {
-    const remote = getRemoteTeam(name);
-    if (remote) {
-      const remotes = { ...conf.get("remoteConnections", {}) };
-      delete remotes[name];
-      conf.set("remoteConnections", remotes);
-      return;
-    }
     const { directory, files } = await readFiles(name);
     for (const path of files.keys()) if (path.startsWith("tools/")) delete require.cache[resolve(directory, path)];
     // ACT: readFiles 已验证实际目录范围与全部条目，单进程锁内删除该团队目录。

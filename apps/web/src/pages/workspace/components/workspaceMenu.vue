@@ -5,10 +5,8 @@
         <el-button class="toolButton" text :aria-label="returnTitle" :title="returnTitle" @click="exitVisible = true">
           <icon-arrow-left :size="17" aria-hidden="true" />
         </el-button>
-        <el-button class="toolButton" text :aria-label="hasDesktopUpdate ? '设置，有新版本可用' : '设置'" title="设置" @click="emit('openSettings')">
-          <el-badge isDot :hidden="!hasDesktopUpdate">
-            <icon-settings :size="17" aria-hidden="true" />
-          </el-badge>
+        <el-button class="toolButton" text aria-label="设置" title="设置" @click="emit('openSettings')">
+          <icon-settings :size="17" aria-hidden="true" />
         </el-button>
       </div>
     </el-card>
@@ -26,7 +24,6 @@
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { IconArrowLeft, IconSettings } from "@tabler/icons-vue";
-import { hasDesktopUpdate } from "@/stores/desktopUpdate";
 import { setProjectMode } from "@/lib/projectMode";
 
 const props = defineProps<{ returnPath: string }>();

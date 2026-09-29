@@ -1,7 +1,6 @@
 import axios from "axios";
 import { computed, nextTick, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { invalidateNodeModels } from "@minifeel/nodes-scaffold/nodeAi";
 import { canvasShortcutFields, defaultCanvasShortcuts, getShortcutBindings, isShortcutAllowed, normalizeShortcut, type CanvasShortcuts } from "@/lib/canvasShortcuts";
 import "element-plus/es/components/message/style/css";
 
@@ -22,7 +21,7 @@ let remoteSettings = false;
 let saveQueue = Promise.resolve();
 let applyingSettings = false;
 const userSettingsKey = "minifeel.userSettings";
-const userSettingNames = ["ui", "general", "privacy"] as const;
+const userSettingNames = ["ui", "general"] as const;
 
 function readUserSettings() {
   try {
@@ -106,22 +105,6 @@ export function updateGeneralSettings(patch: Partial<typeof generalSettings.valu
   settings.value = { ...settings.value, general: { ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}), ...patch } };
 }
 
-export const privacySettings = computed(() => {
-  const raw = settings.value.privacy;
-  const privacy = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
-  return {
-    dataCollectionEnabled: privacy.dataCollectionEnabled !== false,
-    anonymousId: typeof privacy.anonymousId === "string" ? privacy.anonymousId : "",
-  };
-});
-
-export type CustomProviderModel = { id: string; label: string; contextWindow?: number; maxOutputTokens?: number };
-export type CustomProvider = { id: string; label: string; version?: string; apiUrl: string; apiKey: string; protocol: string; models: CustomProviderModel[] };
-export const customProviders = computed<CustomProvider[]>(() => Array.isArray(settings.value.customProviders)
-  ? settings.value.customProviders.filter((item): item is CustomProvider => !!item && typeof item.id === "string" && typeof item.label === "string" && Array.isArray(item.models)
-    && item.models.every((model: CustomProviderModel) => !!model && typeof model.id === "string" && typeof model.label === "string"))
-  : []);
-
 export const modelChoices = computed(() => platformModels.value.map(model => ({
   value: JSON.stringify([model.providerId, model.modelId]),
   providerId: model.providerId,
@@ -174,7 +157,6 @@ export function saveSettings(update?: (current: Record<string, unknown>) => Reco
     }
     const { data } = await axios.put("/api/settings/save", { settings: { ...settings.value, ...patch } }, { headers: { "x-minifeel-workspace": "1" } });
     if (data.code !== 200) throw new Error("保存设置失败");
-    if (patch && Object.hasOwn(patch, "customProviders")) invalidateNodeModels("language");
     if (patch) {
       applyingSettings = true;
       try { settings.value = { ...settings.value, ...patch }; }

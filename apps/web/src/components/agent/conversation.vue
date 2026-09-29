@@ -149,7 +149,6 @@ import toolMessage from "./toolMessage.vue";
 import attachmentList from "./attachmentList.vue";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { writeClipboardText } from "@/lib/clipboard";
-import anonymousData from "@/lib/anonymousData";
 import { modelChoices } from "@/stores/settings";
 import { getProjectModel, setProjectModel } from "@/lib/projectMode";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -411,7 +410,6 @@ async function sendMessage(source?: AgentMessage) {
   const handledCanvasCalls = new Set<string>();
   const pendingQuestions = new Map<string, string>();
   const activeChildFiles = new Set<string>();
-  const finishStats = anonymousData.startAgent();
   try {
     if (!source) await instance.reset();
     requestController.signal.throwIfAborted();
@@ -474,10 +472,8 @@ async function sendMessage(source?: AgentMessage) {
       }
     }
     if (source && !accepted) throw new Error("服务端未确认重发，请重新打开对话后重试");
-    finishStats("success");
     emit("sent", prompt || attachments[0]?.name || "新对话");
   } catch (error) {
-    finishStats(requestController.signal.aborted ? "cancelled" : "failed");
     const responseMessage = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
     const message = requestController.signal.aborted ? "已停止生成" : responseMessage || (error instanceof Error ? error.message : "发送失败，请重试");
     if ((source && !accepted) || !ownsStream) { userMessage.error = message; ElMessage.error(message); }

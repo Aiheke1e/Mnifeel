@@ -10,6 +10,3 @@ await $`${process.execPath} build src/index.ts --target=bun --minify --outdir ..
 const skillsOutput = resolve(projectDir, "build/skills");
 await rm(skillsOutput, { recursive: true, force: true });
 await cp(resolve(projectDir, "packages/skills"), skillsOutput, { recursive: true });
-const providersOutput = resolve(projectDir, "build/providers");
-await rm(providersOutput, { recursive: true, force: true });
-await cp(resolve(projectDir, "packages/providers/src"), providersOutput, { recursive: true });

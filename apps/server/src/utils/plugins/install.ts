@@ -3,10 +3,8 @@ import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { crc32, inflateRawSync } from "node:zlib";
 import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
-import type { PluginInstallType } from "@/types/desktop";
 import conf from "@/utils/conf";
 import { parseTool, toolsDirectory } from "@/utils/plugins/tools";
-import { addMediaProvider } from "@/utils/media/provider";
 import { isSafeSegment } from "@/utils/skills/files";
 import { isWithin, lockWorkspaceFiles, writeWorkspaceFile } from "@/utils/workspace/files";
 
@@ -36,16 +34,6 @@ function nodeVersion(source: string) {
   catch { return undefined; }
 }
 
-function remoteAddress(value: string) {
-  let address: URL;
-  try { address = new URL(value); }
-  catch { return invalid("下载地址格式无效，请提供完整的 HTTP / HTTPS 文件地址"); }
-  if (!["http:", "https:"].includes(address.protocol) || address.username || address.password) {
-    invalid("仅支持不含账号密码的 HTTP / HTTPS 地址");
-  }
-  return address;
-}
-
 async function readBounded(stream: ReadableStream<Uint8Array>, limit: number, message: string) {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
@@ -60,45 +48,6 @@ async function readBounded(stream: ReadableStream<Uint8Array>, limit: number, me
     }
     return Buffer.concat(chunks);
   } finally { await reader.cancel().catch(() => {}); }
-}
-
-async function download(url: string, limit: number, label: string) {
-  let address = remoteAddress(url);
-  const signal = AbortSignal.timeout(30_000);
-  try {
-    for (let redirects = 0; redirects <= 5; redirects++) {
-      const response = await fetch(address, { signal, redirect: "manual" });
-      if ([301, 302, 303, 307, 308].includes(response.status)) {
-        const location = response.headers.get("location");
-        await response.body?.cancel();
-        if (!location) invalid(`${label}下载失败：服务器重定向响应缺少 Location 地址`, 502);
-        if (redirects === 5) invalid(`${label}下载失败：重定向超过 5 次，请使用文件的直接下载地址`, 502);
-        try { address = remoteAddress(new URL(location, address).href); }
-        catch { invalid(`${label}下载失败：重定向目标不是有效的 HTTP / HTTPS 地址`, 502); }
-        continue;
-      }
-      if (!response.ok) {
-        await response.body?.cancel();
-        const hint = response.status === 401 || response.status === 403
-          ? "下载被拒绝，链接可能已过期、签名无效或没有访问权限，请重新生成下载链接"
-          : response.status === 404 ? "文件不存在，请确认上传路径和文件名；改名后需要重新生成下载链接"
-          : response.status === 410 ? "文件已失效，请获取新的下载链接"
-          : response.status === 429 ? "下载请求过于频繁，请稍后重试"
-          : response.status >= 500 ? "下载服务器暂时异常，请稍后重试"
-          : "服务器未返回文件，请检查下载地址";
-        invalid(`${label}下载失败（HTTP ${response.status}）：${hint}`, 502);
-      }
-      if (!response.body) invalid(`${label}下载失败：服务器没有返回文件内容`, 502);
-      const bytes = await readBounded(response.body, limit, `${label}文件不能超过 ${limit / 1024 / 1024} MB`);
-      if (!bytes.byteLength) invalid(`${label}下载失败：文件内容为空，请重新上传文件`, 502);
-      return bytes;
-    }
-  } catch (error) {
-    if (error instanceof Error && "status" in error) throw error;
-    if (signal.aborted) invalid(`${label}下载超时（30 秒），请检查网络或重新获取下载链接`, 504);
-    invalid(`${label}下载连接失败，请检查网络、下载域名和 HTTPS 证书后重试`, 502);
-  }
-  return invalid("下载地址无效");
 }
 
 export function decodeText(bytes: Uint8Array) {
@@ -387,25 +336,4 @@ export async function installSkill(fileName: string, bytes: Uint8Array, force = 
       }
     } finally { release(); }
   }
-}
-
-export async function installRemotePlugin(type: PluginInstallType, url: string, fileName?: string, force = false) {
-  const address = remoteAddress(url);
-  if (fileName === undefined) {
-    try { fileName = decodeURIComponent(address.pathname.split("/").at(-1) ?? ""); }
-    catch { return invalid("下载地址中的文件名编码无效，请重新生成下载链接"); }
-  }
-  const patterns = { node: /^[a-z][a-zA-Z0-9]*\.umd\.js$/, tool: /^[a-z][a-zA-Z0-9]*\.tool\.js$/, skill: /\.(md|zip|tar|tar\.gz|tgz)$/i, provider: /^[a-z][a-zA-Z0-9]*\.ts$/, agent: /^[a-z][a-zA-Z0-9]*\.agent\.zip$/ };
-  const examples = { node: "audioNode.umd.js", tool: "exampleTool.tool.js", skill: "example.zip、SKILL.md、example.tar、example.tar.gz 或 example.tgz", provider: "exampleProvider.ts", agent: "exampleTeam.agent.zip" };
-  if (!Object.hasOwn(patterns, type)) invalid("不支持此插件类型，可选值为 node、tool、skill、provider、agent");
-  if (!fileName) invalid(`下载地址缺少文件名，请使用指向文件的地址，例如 ${examples[type]}`);
-  if (fileName.length > 128 || /[\\/]/.test(fileName)) invalid("插件文件名无效，不能包含目录路径或超过 128 字符");
-  if (!patterns[type].test(fileName)) invalid(`下载文件名“${fileName.slice(0, 128)}”不符合 ${type} 类型规范，文件名示例：${examples[type]}；改名后请重新生成下载链接`);
-  const bytes = await download(url, type === "provider" ? 2 * 1024 * 1024 : maxBytes, { node: "节点", tool: "工具", skill: "技能", provider: "供应商", agent: "团队" }[type]);
-  if (type === "agent") return (await import("@/utils/teams/install")).installTeam(fileName, bytes, force);
-  if (type === "skill") return installSkill(fileName, bytes, force);
-  const source = decodeText(bytes);
-  if (type === "node") return installNode(fileName, source, force);
-  if (type === "tool") return installTool(fileName, source, force);
-  return { name: (await addMediaProvider(source)).id };
 }

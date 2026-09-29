@@ -2,12 +2,13 @@ import u from "@/utils";
 import { readdir } from "node:fs/promises";
 import { Router } from "express";
 import { success } from "@/lib/responseFormat";
+import { getAuth } from "@/lib/middleware";
 
 const router = Router();
 
 export default router.get("/", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  const canConfigure = u.workspace.isLocalWorkspaceRequest(req);
+  const canConfigure = getAuth(res).user.role === "admin" && u.workspace.isLocalWorkspaceRequest(req);
   const files = await readdir(u.nodePlugins.nodesDirectory, { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
     if (err.code === "ENOENT") return [];
     throw err;
