@@ -8,6 +8,8 @@
 
     <el-alert v-if="errorMessage" class="pageAlert" :title="errorMessage" type="error" showIcon :closable="false" />
 
+    <projectRuntime v-if="workspaceStore.project" :key="workspaceStore.project.id" ref="runtimeRef" />
+
     <div v-if="workspaceStore.project" class="projectShell">
       <projectStages v-model="activeStage" class="stageNavigation" :statuses="stageStatuses" />
 
@@ -38,6 +40,8 @@
       </main>
 
       <aside class="projectAside" aria-label="项目状态">
+        <directorPanel v-if="runtimeReady" />
+
         <section class="panelCard progressCard">
           <p class="eyebrow">项目进度</p>
           <strong>{{ completedStageCount }} / 4</strong>
@@ -61,16 +65,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, provide, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { IconCircleCheck, IconFileText, IconPhoto, IconVideo } from "@tabler/icons-vue";
 import { apiErrorMessage } from "@/lib/api";
 import { getProjectModel, setProjectMode, setProjectModel } from "@/lib/projectMode";
+import { useProjectSaveGuard } from "@/lib/projectSaveGuard";
 import { useUserAppStore } from "@/stores/userApp";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { formatDate, taskStatusLabels, taskStatusTypes, taskTypeLabels } from "@/pages/app/appFormat";
 import projectHeader from "./components/projectHeader.vue";
 import projectStages, { type ProjectStage, type ProjectStageStatus } from "./components/projectStages.vue";
+import projectRuntime from "./components/projectRuntime.vue";
+import directorPanel from "./components/directorPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -81,6 +88,14 @@ const modelsLoading = ref(false);
 const errorMessage = ref("");
 const activeStage = ref<ProjectStage>("script");
 const selectedModelId = ref("");
+const runtimeRef = ref<InstanceType<typeof projectRuntime>>();
+const runtimeReady = computed(() => runtimeRef.value?.canvasReady ?? false);
+provide("canvas", () => runtimeReady.value ? runtimeRef.value?.getCanvasContext() : undefined);
+useProjectSaveGuard({
+  isBusy: () => runtimeRef.value?.saveBusy ?? false,
+  flushSave: () => runtimeRef.value?.flushSave() ?? Promise.resolve(),
+  cancelSave: () => runtimeRef.value?.cancelSave(),
+});
 const stageContents = {
   script: { number: 1, title: "把灵感变成完整剧本", description: "先确定人物、冲突和结局，再补充场景与对白。", checklist: ["写下一句话故事梗概", "整理主要人物和人物关系", "按场景完善对白与行动"], icon: IconFileText, mediaType: "text" },
   characters: { number: 2, title: "建立统一的角色形象", description: "为主要人物确定外貌、服装和情绪，让前后画面保持一致。", checklist: ["选择角色的年龄和气质", "补充服装与外貌特征", "生成并确认角色参考图"], icon: IconPhoto, mediaType: "image" },
@@ -160,7 +175,7 @@ async function openAdvanced() {
 .projectPage {
   .projectShell {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr) 300px;
+    grid-template-columns: 220px minmax(0, 1fr) 340px;
     align-items: start;
     gap: 18px;
     margin-top: 22px;

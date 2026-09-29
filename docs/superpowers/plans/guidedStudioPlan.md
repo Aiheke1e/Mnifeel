@@ -36,7 +36,7 @@
 | 任务 | 状态 | 实际改动 | 验证结果 | 剩余事项 |
 | --- | --- | --- | --- | --- |
 | 1. 工作台路由与三栏外壳 | 已完成 | 默认项目路由和首页新建/打开进入导演式工作台；完成响应式三栏外壳、阶段状态与高级画布往返 | Web 类型检查和生产构建通过；浏览器验证首页打开、普通页刷新、高级画布往返、390px 窄屏无页面横向溢出，控制台无错误 | — |
-| 2. 共享画布运行层与导演助手 | 未开始 | — | — | — |
+| 2. 共享画布运行层与导演助手 | 已完成 | 普通页复用固定尺寸隐藏画布运行层；普通与高级模式共用保存拦截；Agent 增加导演模式并隐藏技术入口；启动时补齐缺失的内置工具 | Web、Server 类型检查与构建通过；浏览器验证新项目首条消息只发送一次并创建真实文本节点、刷新不重复、普通模式隐藏技术卡片、高级模式保持完整、窄屏折叠无溢出；断开 Server 后保存失败会拦截退出，恢复后可保存 | — |
 | 3. 创作视图适配、剧本与角色 | 未开始 | — | — | — |
 | 4. 生成估价与确认 | 未开始 | — | — | — |
 | 5. 分镜、成片与任务恢复 | 未开始 | — | — | — |
@@ -149,6 +149,7 @@ git push origin dev
 - Modify: `apps/web/src/pages/workspace/index.vue`
 - Modify: `apps/web/src/components/agent/index.vue`
 - Modify: `apps/web/src/components/agent/conversation.vue`
+- Modify: `apps/server/src/utils/plugins/initialize.ts`
 - Modify: `docs/superpowers/plans/guidedStudioPlan.md`
 
 **Interfaces:**
@@ -156,7 +157,7 @@ git push origin dev
 - Consumes: `canvasHost.getCanvasContext()`、`canvasHost.flushSave()`、`canvasHost.cancelSave()`、`canvasHost.saveBusy`、现有 `<agent v-model>`。
 - Produces: `projectRuntime` 暴露 `canvasReady`、`getCanvasContext()`、`flushSave()`、`cancelSave()` 和只读 `saveBusy`；`useProjectSaveGuard(options)` 统一两个页面的离开保护；Agent 新增 `mode?: "advanced" | "guided"`。
 
-- [ ] **Step 1: 创建不可交互但可计算尺寸的运行层**
+- [x] **Step 1: 创建不可交互但可计算尺寸的运行层**
 
 `projectRuntime.vue` 内只挂载现有 `canvasHost`。容器使用固定 `1280px × 720px`，放置到视口外侧，设置 `inert`、`aria-hidden="true"` 和 `pointer-events: none`，不能使用 `display: none` 或零尺寸。
 
@@ -172,7 +173,7 @@ defineExpose({
 });
 ```
 
-- [ ] **Step 2: 抽取统一离开保护**
+- [x] **Step 2: 抽取统一离开保护**
 
 `projectSaveGuard.ts` 导出：
 
@@ -186,7 +187,7 @@ export function useProjectSaveGuard(options: {
 
 该函数注册 `onBeforeRouteLeave`：繁忙时阻止离开；保存失败时显示“留在项目/仍然退出”；用户明确强制退出后才调用 `cancelSave()`。把高级画布现有重复逻辑改为调用此函数，确保两个模式修复同一条保存链路。
 
-- [ ] **Step 3: 在普通项目页提供 CanvasContext**
+- [x] **Step 3: 在普通项目页提供 CanvasContext**
 
 `project/index.vue` 挂载 `projectRuntime`，并提供：
 
@@ -198,7 +199,7 @@ provide("canvas", () => runtimeRef.value?.canvasReady
 
 只有项目加载成功且运行层 `canvasReady` 后才挂载导演助手。页面卸载和路由离开走共享保存保护。
 
-- [ ] **Step 4: 为 Agent 增加普通展示模式**
+- [x] **Step 4: 为 Agent 增加普通展示模式**
 
 `agent/index.vue` 增加 `mode` 属性并传给 `conversation.vue`。`conversation.vue` 在 `guided` 模式下：
 
@@ -209,11 +210,11 @@ provide("canvas", () => runtimeRef.value?.canvasReady
 
 高级模式不改变现有内容和交互。
 
-- [ ] **Step 5: 创建导演助手容器**
+- [x] **Step 5: 创建导演助手容器**
 
 `directorPanel.vue` 使用 `<agent v-model="visible" mode="guided" />`，桌面常驻显示，窄屏可折叠。组件不复制会话、流式请求和历史加载逻辑。
 
-- [ ] **Step 6: 验证运行层和首条消息**
+- [x] **Step 6: 验证运行层和首条消息**
 
 Run:
 
@@ -226,7 +227,7 @@ Expected: 创建项目后首条 `pendingAgentMessage` 只发送一次；刷新�
 
 停止本地 Server 后编辑并尝试离开，确认出现保存失败提示；选择留在项目不会跳转，恢复 Server 后重试可保存。生成节点繁忙时离开被阻止。
 
-- [ ] **Step 7: 更新进度并提交推送**
+- [x] **Step 7: 更新进度并提交推送**
 
 ```powershell
 git add apps/web/src/pages/project/components/projectRuntime.vue apps/web/src/pages/project/components/directorPanel.vue apps/web/src/lib/projectSaveGuard.ts apps/web/src/pages/project/index.vue apps/web/src/pages/workspace/index.vue apps/web/src/components/agent/index.vue apps/web/src/components/agent/conversation.vue docs/superpowers/plans/guidedStudioPlan.md

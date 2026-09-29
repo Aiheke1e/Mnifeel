@@ -7,7 +7,7 @@ export default async function initializePlugins(targetDirectory: string, sourceD
     if (error.code === "ENOENT") return null;
     throw error;
   });
-  if (initialized !== null && (revision === undefined || initialized === revision)) return;
+  if (initialized !== null && revision !== undefined && initialized === revision) return;
 
   const entries = await readdir(sourceDirectory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
@@ -23,6 +23,7 @@ export default async function initializePlugins(targetDirectory: string, sourceD
     const source = resolve(sourceDirectory, file.name);
     const target = resolve(targetDirectory, file.name);
     if (revision === undefined) {
+      // ACT: 无构建版本时每次启动只补齐缺失文件，保留用户已经安装或修改的内容。
       await cp(source, target, { recursive: true, force: false });
       continue;
     }

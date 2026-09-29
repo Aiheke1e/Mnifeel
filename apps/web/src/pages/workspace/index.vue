@@ -45,15 +45,16 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeMount, onScopeDispose, provide, ref } from "vue";
-import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import axios from "axios";
 import { IconLayoutDashboard, IconFileText } from "@tabler/icons-vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage } from "element-plus";
 import settings from "@/components/settings/index.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { registerWorkspaceControl, waitForControlValue } from "@/lib/mcpControl";
 import { setProjectMode } from "@/lib/projectMode";
+import { useProjectSaveGuard } from "@/lib/projectSaveGuard";
 import canvasPanel from "./panels/canvas/canvasHost.vue";
 import documentPanel from "./panels/document/index.vue";
 import workspaceMenu from "./components/workspaceMenu.vue";
@@ -147,35 +148,13 @@ async function flushSave() {
   await canvasPanelRef.value?.flushSave();
 }
 
-onBeforeRouteLeave(async () => {
-  if (canvasPanelRef.value?.saveBusy) {
-    ElMessage.warning("画布操作尚未完成，请稍后退出");
-    return false;
-  }
-  try {
-    await flushSave();
-    return true;
-  } catch (error) {
-    const message = axios.isAxiosError<{ message?: string }>(error)
-      ? error.response?.data?.message || error.message
-      : error instanceof Error
-      ? error.message
-      : "项目保存失败";
-    const leave = await ElMessageBox.confirm(`无法保存项目：${message}。文件或目录可能已被移动或删除。仍然退出将丢弃尚未保存的修改。`, "项目未保存", {
-      type: "warning",
-      confirmButtonText: "仍然退出",
-      cancelButtonText: "留在项目",
-      closeOnClickModal: false,
-    }).then(
-      () => true,
-      () => false
-    );
-    if (leave) {
-      documentPanelRef.value?.cancelSave();
-      canvasPanelRef.value?.cancelSave();
-    }
-    return leave;
-  }
+useProjectSaveGuard({
+  isBusy: () => canvasPanelRef.value?.saveBusy ?? false,
+  flushSave,
+  cancelSave: () => {
+    documentPanelRef.value?.cancelSave();
+    canvasPanelRef.value?.cancelSave();
+  },
 });
 
 async function switchPanel(value: string | number | boolean) {

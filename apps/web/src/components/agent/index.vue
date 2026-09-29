@@ -5,8 +5,8 @@
       :name="name"
       :history="history"
       :sessionFile="sessionFile"
-      :parentFile="selectedConversation?.parentFile"
-      :subAgents="selectedConversation?.subAgents"
+      :parentFile="props.mode === 'advanced' ? selectedConversation?.parentFile : undefined"
+      :subAgents="props.mode === 'advanced' ? selectedConversation?.subAgents : undefined"
       :loading="loading || historyLoading"
       @open-sub-agent="selectConversation"
       @back="backToParent"
@@ -27,6 +27,7 @@
       :initialSession="item.session"
       :sessionFile="item.file"
       :disabled="loading || !initialized"
+      :mode="props.mode"
       @session="setSessionFile(item, $event)"
       @event="receiveAgentEvent"
       @sent="updateConversationName(item, $event)" />
@@ -45,6 +46,7 @@ import agentMenu from "./menu.vue";
 import conversation from "./conversation.vue";
 
 const visible = defineModel<boolean>({ default: false });
+const props = withDefaults(defineProps<{ mode?: "advanced" | "guided" }>(), { mode: "advanced" });
 type OpenConversation = { key: number; name: string; file?: string; parentFile?: string; subAgents: AgentSubAgent[]; session: AgentConversation | null };
 // ACT: 会话实例保留到工作区关闭，让切换后的回复继续接收流式内容。
 const conversations = ref<OpenConversation[]>([]);

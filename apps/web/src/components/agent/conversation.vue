@@ -7,11 +7,11 @@
             <div class="welcomeHeader">
               <span class="welcomeIcon" aria-hidden="true"><span class="welcomeLogo" :style="{ maskImage: `url(${logoUrl})` }" /></span>
               <div>
-                <p class="welcomeLabel">你好，我是 Minifeel 助手</p>
-                <h3>从一个想法开始</h3>
+                <p class="welcomeLabel">{{ welcomeContent.label }}</p>
+                <h3>{{ welcomeContent.title }}</h3>
               </div>
             </div>
-            <p class="welcomeDescription">聊聊你的故事、画面或镜头，让我们一起把想法落到画布上。</p>
+            <p class="welcomeDescription">{{ welcomeContent.description }}</p>
             <div class="welcomeSuggestions">
               <el-button v-for="item in welcomeSuggestions" :key="item.label" class="welcomeSuggestion" text bg :disabled="locked" :aria-label="`填入提示：${item.label}`" @click="fillPrompt(item.prompt)">
                 <component :is="item.icon" :size="19" aria-hidden="true" />
@@ -27,12 +27,15 @@
         <chat-item :role="item.role" :variant="item.role === 'user' ? 'base' : 'text'" :textLoading="!!item.streaming && !compacting && !item.parts?.some(part => part.type === 'tool' || part.content)" animation="moving">
           <template #content>
             <div class="messageContent">
-              <div v-if="item.report" class="reportHeader"><icon-users-group :size="14" />{{ item.report.name }} 上报</div>
+              <div v-if="item.report && props.mode === 'advanced'" class="reportHeader"><icon-users-group :size="14" />{{ item.report.name }} 上报</div>
               <template v-for="part in item.parts" :key="part.id">
                 <div v-if="part.type === 'thinking' && part.content" class="messageReasoning" role="status">
                   {{ item.streaming ? "正在整理创作内容…" : `已完成思考${part.duration !== undefined ? ` · ${part.duration.toFixed(1)} 秒` : ""}` }}
                 </div>
-                <toolMessage v-else-if="part.type === 'tool'" :tool="part.tool" :projectId="projectId" @copy="copyMessage" />
+                <toolMessage v-else-if="part.type === 'tool' && props.mode === 'advanced'" :tool="part.tool" :projectId="projectId" @copy="copyMessage" />
+                <div v-else-if="part.type === 'tool'" class="guidedToolStatus" :data-status="part.tool.status" role="status">
+                  {{ guidedToolText(part.tool) }}
+                </div>
                 <messageMarkdown v-else-if="part.type === 'text' && part.content" :content="part.content" :streaming="!!item.streaming" :projectId="projectId" />
               </template>
               <attachmentList v-if="item.attachments?.length" :attachments="item.attachments" :projectId="projectId" />
@@ -82,11 +85,12 @@
         @keydown.up.prevent="setSenderHeight((sender?.chatElement.rollBox.clientHeight ?? 44) + 16)"
         @keydown.down.prevent="setSenderHeight((sender?.chatElement.rollBox.clientHeight ?? 44) - 16)" />
       <attachmentList v-if="draftAttachments.length" class="draftAttachments" :attachments="draftAttachments" :projectId="projectId" removable @remove="draftAttachments.splice($event, 1)" />
-      <div ref="senderElement" class="senderEditor" @keydown.capture="skillMenuRef?.handleKeydown($event)"></div>
+      <div ref="senderElement" class="senderEditor" @keydown.capture="props.mode === 'advanced' && skillMenuRef?.handleKeydown($event)"></div>
       <div class="senderActions">
         <modelPopover v-model="selectedModel" v-model:reasoningEffort="reasoningEffort" :active="active" :disabled="disabled" />
-        <skillMenu ref="skillMenuRef" :projectId="projectId" :active="active" :disabled="locked || editingId !== undefined || !projectId" :query="skillQuery" :editor="senderElement" @select="selectSkill" @dismiss="skillQuery = undefined" />
+        <skillMenu v-if="props.mode === 'advanced'" ref="skillMenuRef" :projectId="projectId" :active="active" :disabled="locked || editingId !== undefined || !projectId" :query="skillQuery" :editor="senderElement" @select="selectSkill" @dismiss="skillQuery = undefined" />
         <el-popover
+          v-if="props.mode === 'advanced'"
           v-model:visible="contextMenuVisible"
           trigger="click"
           placement="top"
@@ -147,7 +151,7 @@ import { modelChoices } from "@/stores/settings";
 import { getProjectModel, setProjectModel } from "@/lib/projectMode";
 import { useWorkspaceStore } from "@/stores/workspace";
 import type { AgentAttachment, AgentConversation, AgentMessage } from "./types";
-import type { AgentEvent } from "@minifeel/server/agent/types";
+import type { AgentEvent, AgentToolCall } from "@minifeel/server/agent/types";
 import { createConversationStream, readAgentEvents } from "./replyStream";
 import type { CanvasContext } from "@minifeel/tool-canvas/runtime";
 import chatList from "@tdesign-vue-next/chat/es/chat-list";
@@ -158,7 +162,7 @@ import "tdesign-vue-next/es/style/index.css";
 import "@tdesign-vue-next/chat/es/style/index.css";
 import "x-sender/lib/XSender.css";
 
-const props = defineProps<{ active: boolean; initialSession: AgentConversation | null; sessionFile?: string; disabled: boolean }>();
+const props = withDefaults(defineProps<{ active: boolean; initialSession: AgentConversation | null; sessionFile?: string; disabled: boolean; mode?: "advanced" | "guided" }>(), { mode: "advanced" });
 const emit = defineEmits<{ session: [file: string]; sent: [prompt: string]; event: [event: AgentEvent] }>();
 const workspaceStore = useWorkspaceStore();
 const projectId = workspaceStore.project?.id;
@@ -193,11 +197,26 @@ watch(selectedModel, model => { if (projectId) setProjectModel(projectId, model)
 const contextWindow = computed(() => contextUsage.value?.contextWindow ?? selectedModelChoice.value?.contextWindow ?? 262144);
 const contextPercent = computed(() => (contextUsage.value?.tokens ?? 0) / contextWindow.value * 100);
 const inputTokens = computed(() => stats.value ? stats.value.tokens.input + stats.value.tokens.cacheRead + stats.value.tokens.cacheWrite : 0);
-const welcomeSuggestions = [
+const advancedWelcomeSuggestions = [
   { label: "搭建创作画布", description: "把创意串成清晰的节点流程", icon: IconLayoutGrid, prompt: "帮我搭建一个创作画布，先和我确认需要的节点与流程。" },
   { label: "梳理故事分镜", description: "拆解故事，安排画面与镜头", icon: IconMovie, prompt: "帮我把故事整理成分镜，先和我确认故事内容、时长和画面风格。" },
   { label: "生成图片素材", description: "为角色和场景寻找视觉方向", icon: IconPhoto, prompt: "帮我生成图片素材，先和我确认画面内容、风格和使用的模型。" },
 ];
+const guidedWelcomeSuggestions = [
+  { label: "完善故事", description: "补充人物、冲突和结局", icon: IconLayoutGrid, prompt: "帮我完善这个故事，先指出最需要补充的情节。" },
+  { label: "梳理分镜", description: "安排画面与镜头节奏", icon: IconMovie, prompt: "帮我把当前故事整理成适合短剧的分镜。" },
+  { label: "确定视觉方向", description: "统一角色和场景风格", icon: IconPhoto, prompt: "帮我为当前故事确定角色和场景的视觉方向。" },
+];
+const welcomeContent = computed(() => props.mode === "guided" ? {
+  label: "你好，我是你的短剧导演助手",
+  title: "一起把故事拍出来",
+  description: "告诉我你想调整的剧情、角色或镜头，我会直接更新这个项目。",
+} : {
+  label: "你好，我是 Minifeel 助手",
+  title: "从一个想法开始",
+  description: "聊聊你的故事、画面或镜头，让我们一起把想法落到画布上。",
+});
+const welcomeSuggestions = computed(() => props.mode === "guided" ? guidedWelcomeSuggestions : advancedWelcomeSuggestions);
 watch([locked, editingId, () => props.active], ([locked, editingId, active]) => {
   if (!active || locked || editingId !== undefined) sender?.disable();
   else sender?.enable();
@@ -230,6 +249,23 @@ function receiveEvent(event: AgentEvent) {
     compacting.value = false;
   } else if (["userMessage", "text", "thinking", "tool"].includes(event.type)) remoteRunning.value = true;
   applyEvent(event);
+}
+
+function guidedToolText(tool: AgentToolCall) {
+  if (tool.status === "running") return "正在更新项目…";
+  if (tool.status === "success") return "项目内容已更新";
+  if (tool.status === "interrupted") return "项目更新已停止";
+  let detail = "请重试或调整要求";
+  if (typeof tool.result === "string") {
+    try {
+      const result = JSON.parse(tool.result) as { error?: unknown; message?: unknown };
+      const message = result.error ?? result.message;
+      if (typeof message === "string" && message.trim()) detail = message.trim().slice(0, 160);
+    } catch {
+      if (tool.result.trim()) detail = tool.result.trim().slice(0, 160);
+    }
+  }
+  return `项目更新失败：${detail}`;
 }
 
 defineExpose({ receiveEvent });
@@ -538,7 +574,7 @@ watch(senderElement, (element, _previous, onCleanup) => {
   if (!props.active || locked.value || editingId.value !== undefined) instance.disable();
   instance.bus.on("agentConversation", xSender.EventSet.EVENT_COMMON_SEND, () => void sendMessage());
   instance.bus.on("agentConversation", xSender.EventSet.EVENT_COMMON_CHANGE, () => {
-    skillQuery.value = /^\/([^\s/]*)$/.exec(instance.getText())?.[1];
+    skillQuery.value = props.mode === "advanced" ? /^\/([^\s/]*)$/.exec(instance.getText())?.[1] : undefined;
   });
   const editor = instance.chatElement.richText;
   editor.setAttribute("role", "textbox");
@@ -774,6 +810,16 @@ watch(() => !props.initialSession?.parentFile && !!workspaceStore.pendingAgentMe
       .messageError {
         color: var(--el-color-danger);
         font-size: 12px;
+      }
+
+      .guidedToolStatus {
+        padding: 8px 10px;
+        border-radius: var(--ui-radius);
+        background: var(--el-fill-color-light);
+        color: var(--el-text-color-secondary);
+        font-size: 12px;
+        &[data-status="success"] { color: var(--el-color-success); }
+        &[data-status="error"] { color: var(--el-color-danger); }
       }
 
       .reportHeader {
