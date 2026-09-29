@@ -44,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeMount, onScopeDispose, provide, ref } from "vue";
+import { computed, nextTick, onBeforeMount, onScopeDispose, provide, ref } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import axios from "axios";
 import { IconLayoutDashboard, IconFileText } from "@tabler/icons-vue";
@@ -55,10 +55,9 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { registerWorkspaceControl, waitForControlValue } from "@/lib/mcpControl";
 import { setProjectMode } from "@/lib/projectMode";
 import canvasPanel from "./panels/canvas/canvasHost.vue";
+import documentPanel from "./panels/document/index.vue";
 import workspaceMenu from "./components/workspaceMenu.vue";
 import floatingAgent from "./components/floatingAgent.vue";
-
-const documentPanel = defineAsyncComponent(() => import("./panels/document/index.vue"));
 
 const route = useRoute();
 const router = useRouter();
