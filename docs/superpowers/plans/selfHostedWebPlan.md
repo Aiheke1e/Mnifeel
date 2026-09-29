@@ -668,7 +668,7 @@
 
 ## Task 14：生产 Docker 与域名部署
 
-**结果：** 服务器通过 Docker Compose 运行 PostgreSQL、Minifeel 与 Caddy；`minifeel.cn` 使用自动 HTTPS；后续更新只需运行服务器脚本拉取 `origin/dev` 并重建应用。
+**结果：** 京东云服务器已通过 Docker Compose 运行 PostgreSQL、Minifeel 与 Caddy，公网 IP 可临时访问和登录；`minifeel.cn` 保留自动 HTTPS 配置，等待后续注册、备案和 DNS 解析。后续更新只需运行服务器脚本拉取 `origin/dev` 并重建应用。
 
 **文件：**
 
@@ -684,12 +684,22 @@
 - [x] 用独立网络隔离 PostgreSQL，应用连接公网网络和数据库网络，Caddy 只连接公网网络。
 - [x] 将 PostgreSQL、应用数据和 Caddy 证书配置放入具名卷，重建应用时保留业务数据。
 - [x] 为 `minifeel.cn` 与 `www.minifeel.cn` 配置自动 HTTPS 和主域名跳转。
+- [x] 增加公网 IP 的临时 HTTP 入口和可控的会话 Cookie 配置，域名 HTTPS 生效后恢复安全 Cookie。
 - [x] 提供不含真实密钥的生产环境模板，V1 保留模拟手机号与 Google 登录开关。
 - [x] 更新脚本检查 Docker、Compose 配置和服务器工作区；检测已有 PostgreSQL 卷后先启动并备份，再快进拉取 `origin/dev`、重建容器并等待健康检查。
-- [ ] 执行根类型检查、生产构建、Compose 解析、容器启动与 HTTPS 冒烟验证。
-- [ ] 将域名 A 记录指向 `117.72.202.33`，完成服务器部署并记录实际运行结果。
+- [x] 执行根类型检查、生产构建、Compose 解析、容器启动、数据库表检查和公网 HTTP 登录冒烟验证。
+- [ ] 注册并备案 `minifeel.cn`，将主域名和 `www` 的 A 记录指向 `117.72.202.33`，完成 HTTPS 冒烟验证。
 
-**提交：** `feat(server): 添加生产 Docker 部署`
+**2026-09-29 部署记录：**
+
+- Ubuntu 24.04.2 服务器已安装 Docker 29.1.3 和 Docker Compose 2.40.3，部署目录为 `/opt/minifeel`。
+- PostgreSQL、Minifeel 和 Caddy 容器健康运行；数据库完成两次迁移并创建 14 张业务表，PostgreSQL、应用数据和 Caddy 使用 4 个具名卷持久化。
+- 更新脚本已实际完成数据库备份、拉取 `origin/dev`、生产镜像构建、容器替换和健康检查；服务器访问 GitHub 失败时使用 Git bundle 同步同一提交，不改动业务数据卷。
+- `http://117.72.202.33` 返回 Minifeel 首页；模拟验证码登录返回管理员信息，携带会话 Cookie 再请求 `/api/auth/me` 返回 200。
+- 本地执行 `bun run typecheck`、`bun run build:server` 和 `git diff --check` 通过；服务器执行 Compose 配置解析、容器健康检查、数据库表查询和备份文件检查通过。
+- `minifeel.cn` 当前 DNS 返回 NXDOMAIN，因此 Caddy 暂不能签发公开证书；该项按用户决定留到后续处理。
+
+**提交：** `feat(server): 添加生产 Docker 部署`、`feat(server): 支持公网 IP 临时访问`、`fix(server): 支持临时 HTTP 登录`
 
 ---
 
