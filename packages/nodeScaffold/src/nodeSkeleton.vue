@@ -12,7 +12,7 @@
       @command="handleCommand">
       <template #dropdown>
         <el-dropdown-menu>
-          <el-dropdown-item v-if="assetOutputs.length && saveNodeToAssets" command="saveAsset" :icon="IconFolderPlus">另存到我的资产</el-dropdown-item>
+          <el-dropdown-item v-if="assetOutputs.length && saveNodeToAssets" command="saveAsset" :icon="IconFolderPlus">保存到我的资产</el-dropdown-item>
           <el-dropdown-item :divided="!!(assetOutputs.length && saveNodeToAssets)" command="copy" :icon="IconCopy">复制节点</el-dropdown-item>
           <el-dropdown-item command="duplicate" :icon="IconCopyPlus">创建副本</el-dropdown-item>
           <el-dropdown-item command="delete" :icon="IconTrash">删除节点</el-dropdown-item>
@@ -37,8 +37,8 @@
             :icon="IconFolderPlus"
             :disabled="!assetOutputs.length || !saveNodeToAssets"
             text
-            title="另存到我的资产"
-            aria-label="另存到我的资产"
+            title="保存到我的资产"
+            aria-label="保存到我的资产"
             @click.stop="handleCommand('saveAsset')" />
           <slot name="topActions" />
           <el-button

@@ -207,7 +207,7 @@ nodeTools.register({
 
 ### 上下悬浮插槽
 
-骨架提供 `top`、`bottom` 两个具名插槽，分别通过 `v-model:topVisible`、`v-model:bottomVisible` 控制显隐，默认隐藏。未提供 `top` 插槽时，上方默认显示“添加到素材库、下载、全屏”工具栏；未提供 `bottom` 插槽时不渲染下方浮层。浮层水平居中，与节点相距 12px，上方浮层位于标题栏之上，避免遮挡标题。两者不占据节点布局空间，不影响卡片和连接点位置。
+骨架提供 `top`、`bottom` 两个具名插槽，分别通过 `v-model:topVisible`、`v-model:bottomVisible` 控制显隐，默认隐藏。未提供 `top` 插槽时，上方默认显示“保存到我的资产、下载、全屏”工具栏；未提供 `bottom` 插槽时不渲染下方浮层。浮层水平居中，与节点相距 12px，上方浮层位于标题栏之上，避免遮挡标题。两者不占据节点布局空间，不影响卡片和连接点位置。
 
 `topWidth`、`bottomWidth` 默认均为 `"20vw"`。数字按 px 处理，字符串支持百分比等 CSS 宽度。默认工具栏建议设置 `topWidth="max-content"`；传入 `downloadUrl`、`downloadName` 控制下载，通过 `@fullscreen` 打开节点自己的全屏视图。素材库按钮复用节点的输出与宿主保存弹窗，没有输出时禁用。额外按钮放在 `topActions` 插槽，位置在下载按钮前；图片、视频、音频节点在此提供替换按钮。自定义 `top` 则替换整个工具栏。编辑浮层内容不会拖动画布或弹出节点右键菜单。
 
