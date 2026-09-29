@@ -73,7 +73,7 @@
         :batchHistory="canvasHistory.batch"
         @update:showEdges="edgeDisconnect = undefined" />
       <nodeMenu
-        :key="JSON.stringify([project?.id, canvasId])"
+        :key="JSON.stringify(['nodeMenu', project?.id, canvasId])"
         ref="nodeMenuRef"
         :remoteNodes="availableNodes"
         :pasteNode="pasteClipboardNode"
@@ -87,7 +87,7 @@
         @undo="changeHistory('undo')"
         @redo="changeHistory('redo')" />
       <selectionToolbar
-        :key="JSON.stringify([project?.id, canvasId])"
+        :key="JSON.stringify(['selectionToolbar', project?.id, canvasId])"
         ref="selectionToolbarRef"
         :batchHistory="canvasHistory.batch"
         :getSignal="() => canvasController.signal"

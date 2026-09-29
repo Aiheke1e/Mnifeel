@@ -41,7 +41,7 @@ export default defineConfig({
       globsExclude: ["src/components/settings/panels/**/*Dialog.vue"],
       dts: "src/types/components.d.ts",
       resolvers: [
-        ElementPlusResolver(),
+        ElementPlusResolver({ importStyle: false }),
         (name) => {
           if (name.startsWith("Icon")) return { name, from: "@tabler/icons-vue" };
         },

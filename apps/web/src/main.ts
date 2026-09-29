@@ -4,9 +4,7 @@ import { createPinia } from "pinia";
 import { createPersistedState } from "pinia-plugin-persistedstate";
 import App from "./App.vue";
 import "@/assets/main.scss";
-import "element-plus/es/components/message-box/style/css";
-import "element-plus/es/components/button/style/css";
-import "element-plus/es/components/result/style/css";
+import "element-plus/dist/index.css";
 
 import router from "@/router";
 import { setUnauthorizedHandler } from "@/lib/api";

@@ -51,7 +51,7 @@ const contextSchema: z.ZodType<Context> = z.object({
 }).refine(context => Buffer.byteLength(JSON.stringify(context)) <= 8000000, "模型上下文不能超过 8 MB");
 
 const inputSchema = z.object({
-  providerId: z.literal("deepSeek"), modelId: z.string().min(1),
+  providerId: z.literal("deepSeek"), modelId: z.uuid(),
   context: contextSchema,
   projectId: z.uuid(),
   requestId: z.string().trim().min(8).max(150).optional(),

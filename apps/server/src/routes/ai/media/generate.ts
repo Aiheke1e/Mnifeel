@@ -7,7 +7,7 @@ import u from "@/utils";
 import { redactErrorMessage } from "@/utils/providers/redact";
 
 export default Router().post("/", validateFields({
-  projectId: z.uuid(), mediaType: z.enum(["image", "video"]),
+  projectId: z.uuid(), modelId: z.uuid(), mediaType: z.enum(["image", "video"]),
   requestId: z.string().trim().min(8).max(150).optional(),
 }), async (req, res) => {
   const { projectId, mediaType, requestId, ...request } = req.body;
