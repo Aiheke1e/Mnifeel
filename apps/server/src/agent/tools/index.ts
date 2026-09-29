@@ -41,14 +41,14 @@ export function createAgentToolContext(
       generateImage: async (request, signal) => {
         if (!generation) throw new Error("生成媒体需要已认证的项目上下文");
         const task = await runGenerationTask(generation.userId, {
-          projectId: generation.projectId, modelId: request.modelId, request: { ...request },
+          projectId: generation.projectId, modelId: request.modelId, taskType: "image", request: { ...request },
         }, signal);
         return (task.result as { files: Awaited<ReturnType<NonNullable<ToolContext["media"]>["generateImage"]>> }).files;
       },
       generateVideo: async (request, signal) => {
         if (!generation) throw new Error("生成媒体需要已认证的项目上下文");
         const task = await runGenerationTask(generation.userId, {
-          projectId: generation.projectId, modelId: request.modelId, request: { ...request },
+          projectId: generation.projectId, modelId: request.modelId, taskType: "video", request: { ...request },
         }, signal);
         return (task.result as { files: Awaited<ReturnType<NonNullable<ToolContext["media"]>["generateVideo"]>> }).files;
       },

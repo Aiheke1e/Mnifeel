@@ -2,7 +2,7 @@ import type postgres from "postgres";
 import { randomUUID } from "node:crypto";
 import { freezeTaskCredits, refundTaskCredits } from "@/utils/billing";
 import { calculateCredits, estimateUsage, parsePricing, type GenerationUsage, type Pricing } from "@/utils/billing/pricing";
-import { getDatabase } from "@/utils/database";
+import { getDatabase, type Database, type DatabaseTransaction } from "@/utils/database";
 import type { MediaType, TaskStatus, UserRole } from "@/utils/database/types";
 import { publishGenerationEvent, subscribeGenerationEvent, type GenerationEvent } from "@/utils/generation/events";
 import { abortGenerationTask, executeGenerationTask, wakeGenerationWorker } from "@/utils/generation/worker";
@@ -44,6 +44,29 @@ type ModelRow = {
   connectionStatus: string;
   userStatus: string;
   isWhitelist: boolean;
+};
+
+type GenerationInput = {
+  projectId: string;
+  modelId: string;
+  request: Record<string, unknown>;
+};
+
+type GenerationEstimate = {
+  taskType: MediaType;
+  request: Record<string, unknown>;
+  pricing: Pricing;
+  estimatedUsage: GenerationUsage;
+  estimatedCredits: number;
+  billable: boolean;
+};
+
+type GenerationOptions = {
+  wakeWorker?: boolean;
+  external?: boolean;
+  estimatedUsage?: GenerationUsage;
+  billable?: boolean;
+  expectedTaskType?: MediaType;
 };
 
 function invalid(message: string, status = 400): never {
@@ -97,12 +120,52 @@ function safeInput(input: Record<string, unknown>) {
   return redacted;
 }
 
+async function prepareGeneration(
+  database: Database | DatabaseTransaction,
+  userId: string,
+  input: GenerationInput,
+  options: GenerationOptions = {},
+): Promise<GenerationEstimate> {
+  const models = await database<ModelRow[]>`
+    select m."mediaType", m."pricing", m."capabilities", m."enabled" as "modelEnabled",
+      p."enabled" as "providerEnabled", p."connectionStatus", u."status" as "userStatus", u."isWhitelist"
+    from "modelConfigs" m
+    join "providerConfigs" p on p."id" = m."providerId"
+    join "users" u on u."id" = ${userId}
+    join "projects" pr on pr."id" = ${input.projectId} and pr."userId" = u."id" and pr."status" = 'active'
+    where m."id" = ${input.modelId}
+    limit 1
+  `;
+  const model = models[0] ?? invalid("项目或模型不存在", 404);
+  if (model.userStatus !== "active") invalid("账号已被禁用", 403);
+  if (options.expectedTaskType && model.mediaType !== options.expectedTaskType) invalid("所选模型类型已变更，请重新选择", 409);
+  if (!model.modelEnabled || !model.providerEnabled || model.connectionStatus !== "passed") {
+    invalid("所选模型尚未启用或供应商未通过连接测试", 409);
+  }
+  const pricing = parsePricing(model.mediaType, model.pricing);
+  const request = safeInput(input.request);
+  const estimatedUsage = options.estimatedUsage ?? estimateUsage(model.mediaType, request, model.capabilities);
+  const billable = options.billable ?? !(model.mediaType === "video" && model.isWhitelist);
+  const estimatedCredits = billable ? calculateCredits(model.mediaType, pricing, estimatedUsage) : 0;
+  return { taskType: model.mediaType, request, pricing, estimatedUsage, estimatedCredits, billable };
+}
+
+export async function estimateGenerationTask(userId: string, input: GenerationInput) {
+  const estimate = await prepareGeneration(getDatabase(), userId, input);
+  return {
+    taskType: estimate.taskType,
+    estimatedUsage: estimate.estimatedUsage,
+    estimatedCredits: estimate.estimatedCredits,
+    billable: estimate.billable,
+  };
+}
+
 export async function createGenerationTask(userId: string, input: {
   projectId: string;
   modelId: string;
   idempotencyKey: string;
   request: Record<string, unknown>;
-}, options: { wakeWorker?: boolean; external?: boolean; estimatedUsage?: GenerationUsage; billable?: boolean } = {}) {
+}, options: GenerationOptions = {}) {
   const result = await getDatabase().begin(async transaction => {
     await transaction`select pg_advisory_xact_lock(hashtext(${`${userId}:${input.idempotencyKey}`}))`;
     const existing = await transaction<GenerationTaskRow[]>`
@@ -111,26 +174,8 @@ export async function createGenerationTask(userId: string, input: {
       limit 1
     `;
     if (existing[0]) return { task: existing[0], created: false };
-    const models = await transaction<ModelRow[]>`
-      select m."mediaType", m."pricing", m."capabilities", m."enabled" as "modelEnabled",
-        p."enabled" as "providerEnabled", p."connectionStatus", u."status" as "userStatus", u."isWhitelist"
-      from "modelConfigs" m
-      join "providerConfigs" p on p."id" = m."providerId"
-      join "users" u on u."id" = ${userId}
-      join "projects" pr on pr."id" = ${input.projectId} and pr."userId" = u."id" and pr."status" = 'active'
-      where m."id" = ${input.modelId}
-      limit 1
-    `;
-    const model = models[0] ?? invalid("项目或模型不存在", 404);
-    if (model.userStatus !== "active") invalid("账号已被禁用", 403);
-    if (!model.modelEnabled || !model.providerEnabled || model.connectionStatus !== "passed") {
-      invalid("所选模型尚未启用或供应商未通过连接测试", 409);
-    }
-    const pricing = parsePricing(model.mediaType, model.pricing);
-    const request = safeInput(input.request);
-    const estimatedUsage = options.estimatedUsage ?? estimateUsage(model.mediaType, request, model.capabilities);
-    const billable = options.billable ?? !(model.mediaType === "video" && model.isWhitelist);
-    const frozenCredits = billable ? calculateCredits(model.mediaType, pricing, estimatedUsage) : 0;
+    const estimate = await prepareGeneration(transaction, userId, input, options);
+    const { taskType, request, pricing, estimatedUsage, billable, estimatedCredits } = estimate;
     const taskId = randomUUID();
     const status = options.external ? "running" : "pending";
     const startedAt = options.external ? new Date() : null;
@@ -141,12 +186,12 @@ export async function createGenerationTask(userId: string, input: {
         "id", "userId", "projectId", "modelId", "taskType", "status", "idempotencyKey", "requestSummary",
         "frozenCredits", "progress", "startedAt", "heartbeatAt"
       ) values (
-        ${taskId}, ${userId}, ${input.projectId}, ${input.modelId}, ${model.mediaType}, ${status}, ${input.idempotencyKey},
-        ${transaction.json(requestSummary as postgres.JSONValue)}, ${frozenCredits}, ${progress}, ${startedAt}, ${startedAt}
+        ${taskId}, ${userId}, ${input.projectId}, ${input.modelId}, ${taskType}, ${status}, ${input.idempotencyKey},
+        ${transaction.json(requestSummary as postgres.JSONValue)}, ${estimatedCredits}, ${progress}, ${startedAt}, ${startedAt}
       ) returning *
     `;
     const task = rows[0]!;
-    await freezeTaskCredits(transaction, { id: taskId, userId, frozenCredits });
+    await freezeTaskCredits(transaction, { id: taskId, userId, frozenCredits: estimatedCredits });
     return { task, created: true };
   });
   if (result.created) {
@@ -259,13 +304,15 @@ export async function waitGenerationTask(
 export async function runGenerationTask(userId: string, input: {
   projectId: string;
   modelId: string;
+  taskType: MediaType;
   request: Record<string, unknown>;
   idempotencyKey?: string;
 }, signal?: AbortSignal, onEvent?: (event: GenerationEvent) => void) {
+  const { taskType, ...generationInput } = input;
   const created = await createGenerationTask(userId, {
-    ...input,
+    ...generationInput,
     idempotencyKey: input.idempotencyKey ?? randomUUID(),
-  }, { external: true });
+  }, { external: true, expectedTaskType: taskType });
   const abort = () => { void cancelGenerationTask(userId, "user", created.task.id).catch(() => undefined); };
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) await cancelGenerationTask(userId, "user", created.task.id);

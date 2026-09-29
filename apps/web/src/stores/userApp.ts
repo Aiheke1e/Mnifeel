@@ -13,6 +13,7 @@ export type GenerationTask = {
   modelId: string;
   taskType: "text" | "image" | "video";
   status: GenerationStatus;
+  requestSummary: { input: Record<string, unknown> };
   progress: number;
   frozenCredits: number;
   actualCredits: number;
@@ -40,6 +41,13 @@ export type PublicModel = {
   capabilities: Record<string, unknown>;
   isDefault: boolean;
   pricing: Record<string, number>;
+};
+
+export type GenerationEstimate = {
+  taskType: "text" | "image" | "video";
+  estimatedUsage: Record<string, number>;
+  estimatedCredits: number;
+  billable: boolean;
 };
 
 export const useUserAppStore = defineStore("userApp", () => {
@@ -76,6 +84,11 @@ export const useUserAppStore = defineStore("userApp", () => {
     modelsLoaded.value = true;
   }
 
+  async function estimateGeneration(input: { projectId: string; modelId: string; request: Record<string, unknown> }) {
+    const { data } = await api.post<ApiResponse<GenerationEstimate>>("/generation/estimate", input);
+    return data.data;
+  }
+
   async function cancelTask(taskId: string) {
     const { data } = await api.post<ApiResponse<GenerationTask>>("/generation/cancel", { taskId });
     const index = tasks.value.findIndex(task => task.id === taskId);
@@ -96,6 +109,7 @@ export const useUserAppStore = defineStore("userApp", () => {
     loadAccount,
     loadTasks,
     loadModels,
+    estimateGeneration,
     cancelTask,
   };
 });

@@ -44,6 +44,7 @@ export async function createAgentModel(
       },
     }, {
       external: true,
+      expectedTaskType: "text",
       billable,
       estimatedUsage: {
         inputTokens: new TextEncoder().encode(JSON.stringify(context)).byteLength,

@@ -37,7 +37,7 @@ export default Router().post("/", validateFields({
       modelId: parsed.data.modelId,
       request: parsed.data,
       idempotencyKey: requestId ? `media:${requestId}` : crypto.randomUUID(),
-    }, { external: true });
+    }, { external: true, expectedTaskType: mediaType });
     taskId = created.task.id;
     res.set({
       "Content-Type": "application/json; charset=utf-8",

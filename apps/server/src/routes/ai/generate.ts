@@ -70,7 +70,7 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
       context: input.context,
       references: input.references ?? [],
     },
-  }, { external: true });
+  }, { external: true, expectedTaskType: "text" });
   res.set("X-Minifeel-Task-Id", created.task.id);
   res.set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
   res.flushHeaders();

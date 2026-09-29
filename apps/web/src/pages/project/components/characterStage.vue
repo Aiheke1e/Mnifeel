@@ -30,9 +30,14 @@
             <footer>
               <el-button :disabled="busy || drafts[character.nodeId] === character.prompt" @click="emit('saveContent', character.nodeId, drafts[character.nodeId] || '', character.draftLabel)">保存设定</el-button>
               <el-button type="success" plain :disabled="busy || character.confirmed || drafts[character.nodeId] !== character.prompt" @click="emit('confirmContent', character.nodeId, character.confirmedLabel)">锁定角色</el-button>
-              <el-tooltip content="下一阶段接入积分估价与确认" placement="top">
-                <span><el-button type="primary" disabled>确认生成</el-button></span>
-              </el-tooltip>
+              <el-button
+                type="primary"
+                :loading="isGenerating(character)"
+                :disabled="generateDisabled(character)"
+                :title="generateHint(character)"
+                @click="emit('requestGenerate', character.nodeId)">
+                {{ character.output ? "重新生成" : "确认生成" }}
+              </el-button>
             </footer>
           </div>
         </article>
@@ -63,6 +68,7 @@ const emit = defineEmits<{
   saveContent: [nodeId: string, prompt: string, draftLabel: string];
   confirmContent: [nodeId: string, confirmedLabel: string];
   requestRepair: [];
+  requestGenerate: [nodeId: string];
 }>();
 const drafts = reactive<Record<string, string>>({});
 const sourcePrompts = reactive<Record<string, string>>({});
@@ -124,6 +130,21 @@ function statusType(character: CreativeMediaCard) {
   if (character.task?.status === "failed") return "danger";
   if (character.confirmed) return "success";
   return "warning";
+}
+
+function isGenerating(character: CreativeMediaCard) {
+  return character.task?.status === "pending" || character.task?.status === "running";
+}
+
+function generateDisabled(character: CreativeMediaCard) {
+  return props.busy || isGenerating(character) || !props.modelValue || !character.prompt.trim() || drafts[character.nodeId] !== character.prompt;
+}
+
+function generateHint(character: CreativeMediaCard) {
+  if (!props.modelValue) return "管理员暂未启用图片模型";
+  if (drafts[character.nodeId] !== character.prompt) return "请先保存角色设定";
+  if (isGenerating(character)) return "角色图片正在生成";
+  return "查看预计积分并确认生成";
 }
 </script>
 

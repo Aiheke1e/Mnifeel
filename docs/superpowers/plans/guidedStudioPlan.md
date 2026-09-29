@@ -38,7 +38,7 @@
 | 1. 工作台路由与三栏外壳 | 已完成 | 默认项目路由和首页新建/打开进入导演式工作台；完成响应式三栏外壳、阶段状态与高级画布往返 | Web 类型检查和生产构建通过；浏览器验证首页打开、普通页刷新、高级画布往返、390px 窄屏无页面横向溢出，控制台无错误 | — |
 | 2. 共享画布运行层与导演助手 | 已完成 | 普通页复用固定尺寸隐藏画布运行层；普通与高级模式共用保存拦截；Agent 增加导演模式并隐藏技术入口；启动时补齐缺失的内置工具 | Web、Server 类型检查与构建通过；浏览器验证新项目首条消息只发送一次并创建真实文本节点、刷新不重复、普通模式隐藏技术卡片、高级模式保持完整、窄屏折叠无溢出；断开 Server 后保存失败会拦截退出，恢复后可保存 | — |
 | 3. 创作视图适配、剧本与角色 | 已完成 | 新增画布标签适配器、剧本编辑确认、角色设定编辑锁定与已有预览；收紧首轮 Agent 指令，并让导演助手工具成功后刷新创作视图；并发刷新只提交最新结果且保留未保存输入 | Web 类型检查和生产构建通过；浏览器验证新项目只创建文本草稿节点，剧本与角色修改刷新后保留，保存一个角色不会覆盖另一个角色的未保存输入，高级画布读取同一数据；旧项目显示兼容提示且修复操作只填入 Agent；损坏 JSON 显示明确错误且原文件哈希恢复一致；干净页面无控制台错误 | — |
-| 4. 生成估价与确认 | 未开始 | — | — | — |
+| 4. 生成估价与确认 | 已完成 | 新增只读生成估价接口并让估价与任务创建共用模型、项目、供应商、白名单及计费校验；角色阶段加入真实模型估价、积分确认、图片生成、账户与任务轮询 | Server 路由生成、类型检查和生产构建通过；Web 类型检查和生产构建通过；HTTP 验证估价无任务、流水或余额副作用，无权项目返回 404、停用模型返回 409、白名单视频估价为 0；浏览器验证取消无副作用，真实图片任务完成后扣除 1 积分、冻结归零、预览回填且刷新后保留，控制台无业务错误；已有失败任务记录确认冻结积分全额退回 | — |
 | 5. 分镜、成片与任务恢复 | 未开始 | — | — | — |
 | 6. 全流程验收与生产部署 | 未开始 | — | — | — |
 
@@ -359,6 +359,10 @@ git push origin dev
 - Create: `apps/server/src/routes/generation/estimate.ts`
 - Modify: `apps/server/src/utils/generation/index.ts`
 - Generated: `apps/server/src/router.ts`
+- Modify: `apps/server/src/routes/ai/generate.ts`
+- Modify: `apps/server/src/routes/ai/media/generate.ts`
+- Modify: `apps/server/src/agent/runtime/model.ts`
+- Modify: `apps/server/src/agent/tools/index.ts`
 - Create: `apps/web/src/pages/project/components/generationConfirm.vue`
 - Modify: `apps/web/src/stores/userApp.ts`
 - Modify: `apps/web/src/pages/project/components/characterStage.vue`
@@ -370,7 +374,7 @@ git push origin dev
 - Consumes: `parsePricing`、`estimateUsage`、`calculateCredits`、现有模型归属和白名单规则、节点 `getConfig`/`setConfig`/`generateImage`/`generateVideo`。
 - Produces: `estimateGenerationTask(userId, input)`；`POST /api/generation/estimate`；`userAppStore.estimateGeneration(input)`；统一生成确认组件。
 
-- [ ] **Step 1: 抽取创建与估价共用的模型校验**
+- [x] **Step 1: 抽取创建与估价共用的模型校验**
 
 在 `utils/generation/index.ts` 内提取私有查询函数，使任务创建和估价共用以下检查：项目归属、用户状态、模型启用、供应商启用、连接测试、媒体类型、价格结构和白名单。不能在路由复制 SQL 或积分算法。
 
@@ -388,7 +392,7 @@ export async function estimateGenerationTask(userId: string, input: {
 
 `createGenerationTask` 改为调用同一内部校验和估价逻辑，实际冻结积分的事务行为保持不变。
 
-- [ ] **Step 2: 添加只读估价接口**
+- [x] **Step 2: 添加只读估价接口**
 
 `routes/generation/estimate.ts` 使用 Zod 校验：
 
@@ -413,7 +417,7 @@ const inputSchema = z.object({
 
 只计算估价，不创建任务、不冻结积分、不调用供应商。
 
-- [ ] **Step 3: 生成路由并验证接口副作用**
+- [x] **Step 3: 生成路由并验证接口副作用**
 
 Run:
 
@@ -425,7 +429,7 @@ bun run --cwd apps/server build
 
 Expected: 路由生成、类型检查和构建退出码为 `0`。使用登录会话实际调用估价接口，确认任务表和积分流水数量调用前后不变；无权项目返回 `404`；停用模型返回 `409`；白名单视频返回 `estimatedCredits: 0`。
 
-- [ ] **Step 4: 给用户 Store 增加估价能力**
+- [x] **Step 4: 给用户 Store 增加估价能力**
 
 `userApp.ts` 增加：
 
@@ -446,11 +450,11 @@ async function estimateGeneration(input: {
 
 方法只调用 `/generation/estimate`，不缓存过期估价。
 
-- [ ] **Step 5: 创建统一确认组件**
+- [x] **Step 5: 创建统一确认组件**
 
 `generationConfirm.vue` 只负责展示和确认，属性包括 `modelName`、`generationType`、`count`、`estimatedCredits`、`availableCredits`、`loading`；发出 `confirm` 和 `cancel`。积分不足时禁用确认按钮，并显示缺少的积分数量。
 
-- [ ] **Step 6: 接入角色图片生成**
+- [x] **Step 6: 接入角色图片生成**
 
 用户选择管理员公开的图片模型后，父组件先调用角色节点 `node:getConfig`，再用 `node:setConfig` 设置同一个 `modelId`，根据节点提示词和配置请求服务端估价。用户确认后才调用 `node:generateImage`。
 
@@ -458,7 +462,7 @@ async function estimateGeneration(input: {
 
 如果估价后模型被停用、积分被其他任务占用或后端拒绝创建，显示后端错误、刷新账户和模型，不在前端假装任务成功。
 
-- [ ] **Step 7: 验证确认门禁**
+- [x] **Step 7: 验证确认门禁**
 
 Run:
 
@@ -469,10 +473,10 @@ bun run --cwd apps/web build
 
 Expected: 取消确认不会产生任务或积分流水；确认前能看到真实模型、数量和估价；积分不足不能确认；白名单视频估价显示 0；估价后停用模型再确认会显示错误并刷新模型；图片任务成功后角色卡出现结果，失败或取消后冻结积分退回。
 
-- [ ] **Step 8: 更新进度并提交推送**
+- [x] **Step 8: 更新进度并提交推送**
 
 ```powershell
-git add apps/server/src/routes/generation/estimate.ts apps/server/src/utils/generation/index.ts apps/server/src/router.ts apps/web/src/pages/project/components/generationConfirm.vue apps/web/src/stores/userApp.ts apps/web/src/pages/project/components/characterStage.vue apps/web/src/pages/project/index.vue docs/superpowers/plans/guidedStudioPlan.md
+git add apps/server/src/routes/generation/estimate.ts apps/server/src/utils/generation/index.ts apps/server/src/router.ts apps/server/src/routes/ai/generate.ts apps/server/src/routes/ai/media/generate.ts apps/server/src/agent/runtime/model.ts apps/server/src/agent/tools/index.ts apps/web/src/pages/project/components/generationConfirm.vue apps/web/src/stores/userApp.ts apps/web/src/pages/project/components/characterStage.vue apps/web/src/pages/project/index.vue docs/superpowers/plans/guidedStudioPlan.md
 git commit -m "feat(web): 添加生成估价与积分确认"
 git pull --rebase origin dev
 git push origin dev

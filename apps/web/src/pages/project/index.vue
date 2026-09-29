@@ -51,10 +51,11 @@
           :modelsLoading="modelsLoading"
           :loading="creativeLoading"
           :errorMessage="creativeError"
-          :busy="creativeBusy"
+          :busy="creativeBusy || !!taskDiscovery"
           @saveContent="saveCharacter"
           @confirmContent="confirmNode"
-          @requestRepair="fillRepairPrompt('characters')" />
+          @requestRepair="fillRepairPrompt('characters')"
+          @requestGenerate="prepareCharacterGeneration" />
 
         <template v-else>
           <ol class="stageChecklist">
@@ -96,11 +97,22 @@
         </section>
       </aside>
     </div>
+
+    <generationConfirm
+      :visible="generationDialogVisible"
+      :modelName="pendingGeneration?.modelName ?? ''"
+      generationType="角色图片"
+      :count="pendingGeneration?.estimate.estimatedUsage.imageCount ?? 1"
+      :estimatedCredits="pendingGeneration?.estimate.estimatedCredits ?? 0"
+      :availableCredits="userAppStore.availableCredits"
+      :loading="generationLoading"
+      @confirm="confirmGeneration"
+      @cancel="cancelGeneration" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, provide, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { IconCircleCheck, IconFileText, IconPhoto, IconVideo } from "@tabler/icons-vue";
@@ -108,7 +120,7 @@ import type { CanvasContext } from "@minifeel/tool-canvas/runtime";
 import { apiErrorMessage } from "@/lib/api";
 import { getProjectModel, setProjectMode, setProjectModel } from "@/lib/projectMode";
 import { useProjectSaveGuard } from "@/lib/projectSaveGuard";
-import { useUserAppStore } from "@/stores/userApp";
+import { useUserAppStore, type GenerationEstimate } from "@/stores/userApp";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { formatDate, taskStatusLabels, taskStatusTypes, taskTypeLabels } from "@/pages/app/appFormat";
 import projectHeader from "./components/projectHeader.vue";
@@ -117,7 +129,26 @@ import projectRuntime from "./components/projectRuntime.vue";
 import directorPanel from "./components/directorPanel.vue";
 import scriptStage from "./components/scriptStage.vue";
 import characterStage from "./components/characterStage.vue";
+import generationConfirm from "./components/generationConfirm.vue";
 import { readCreativeView, type CreativeView } from "./creativeViewAdapter";
+
+type PendingGeneration = {
+  nodeId: string;
+  modelId: string;
+  modelName: string;
+  request: Record<string, unknown>;
+  estimate: GenerationEstimate;
+};
+
+type TaskDiscovery = {
+  nodeId: string;
+  modelId: string;
+  outputDirectory: string;
+  previousTaskIds: Set<string>;
+  discoveryDeadline: number;
+  taskId?: string;
+  settleDeadline?: number;
+};
 
 const route = useRoute();
 const router = useRouter();
@@ -130,11 +161,18 @@ const creativeLoading = ref(false);
 const creativeError = ref("");
 const creativeBusy = ref(false);
 const creativeView = ref<CreativeView>();
+const generationDialogVisible = ref(false);
+const generationLoading = ref(false);
+const pendingGeneration = ref<PendingGeneration>();
 const activeStage = ref<ProjectStage>("script");
 const selectedModelId = ref("");
 const runtimeRef = ref<InstanceType<typeof projectRuntime>>();
 const directorRef = ref<InstanceType<typeof directorPanel>>();
 let creativeRefreshVersion = 0;
+let taskPollTimer: number | undefined;
+let taskPolling = false;
+const taskDiscovery = ref<TaskDiscovery>();
+let disposed = false;
 const runtimeReady = computed(() => runtimeRef.value?.canvasReady ?? false);
 provide("canvas", () => runtimeReady.value ? runtimeRef.value?.getCanvasContext() : undefined);
 useProjectSaveGuard({
@@ -197,14 +235,21 @@ onMounted(async () => {
       workspaceStore.project?.id === projectId ? Promise.resolve() : workspaceStore.openProject(projectId),
       userAppStore.loadTasks(),
       userAppStore.loadModels(),
+      userAppStore.loadAccount(),
     ]);
     await refreshCreativeView();
+    if (activeTasks.value.length) scheduleTaskPoll();
   } catch (error) {
     errorMessage.value = apiErrorMessage(error, "项目加载失败");
   } finally {
     loading.value = false;
     modelsLoading.value = false;
   }
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
+  if (taskPollTimer !== undefined) window.clearTimeout(taskPollTimer);
 });
 
 function getCanvas(): CanvasContext {
@@ -266,6 +311,172 @@ function fillRepairPrompt(type: "script" | "characters") {
     ? "请检查当前画布中的故事内容，把合适的文本节点整理为 Minifeel/剧本；如果还没有完整剧本，请新建文本节点补齐。只整理文字草稿，不生成图片或视频，不删除其他节点。"
     : "请根据 Minifeel/剧本 整理角色。每个角色使用一个图片生成节点，命名为 Minifeel/角色/<角色名>，只填写角色提示词，不生成图片，不删除其他节点。";
   void directorRef.value?.fillPrompt(prompt);
+}
+
+async function prepareCharacterGeneration(nodeId: string) {
+  const projectId = workspaceStore.project?.id;
+  const character = creativeView.value?.characters.find(item => item.nodeId === nodeId);
+  const model = userAppStore.models.find(item => item.id === selectedModelId.value && item.mediaType === "image");
+  if (!projectId || !character || !model || creativeBusy.value || taskDiscovery.value) return;
+  creativeBusy.value = true;
+  try {
+    const request = await configureCharacterGeneration(nodeId, model.id, character.prompt);
+    const [estimate] = await Promise.all([
+      userAppStore.estimateGeneration({ projectId, modelId: model.id, request }),
+      userAppStore.loadAccount(),
+    ]);
+    if (estimate.taskType !== "image") throw new Error("所选模型已不再是图片模型，请重新选择");
+    pendingGeneration.value = { nodeId, modelId: model.id, modelName: model.displayName, request, estimate };
+    generationDialogVisible.value = true;
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, "生成估价失败，请稍后重试"));
+    await Promise.allSettled([userAppStore.loadAccount(), userAppStore.loadModels()]);
+  } finally {
+    creativeBusy.value = false;
+  }
+}
+
+async function configureCharacterGeneration(nodeId: string, modelId: string, prompt: string) {
+  const canvas = getCanvas();
+  const available = readImageNodeConfig(await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:getConfig", args: {} } }));
+  if (!available.models.some(model => model.providerId === "managed" && model.modelId === modelId)) {
+    throw new Error("所选图片模型已不可用，请重新选择");
+  }
+  const configured = readImageNodeConfig(await canvas.call({
+    name: "nodeTools",
+    args: { nodeId, name: "node:setConfig", args: { providerId: "managed", modelId } },
+  }));
+  const request: Record<string, unknown> = {
+    providerId: "managed",
+    modelId,
+    prompt,
+    count: 1,
+    outputDirectory: `assets/${nodeId}`,
+  };
+  if (configured.config.size) request.size = configured.config.size;
+  if (configured.config.ratio) request.ratio = configured.config.ratio;
+  return request;
+}
+
+function readImageNodeConfig(value: unknown) {
+  if (!isRecord(value) || !isRecord(value.config) || !Array.isArray(value.models)) throw new Error("图片节点配置读取失败");
+  const models = value.models.flatMap(model => isRecord(model) && typeof model.providerId === "string" && typeof model.modelId === "string"
+    ? [{ providerId: model.providerId, modelId: model.modelId }]
+    : []);
+  return {
+    config: {
+      size: typeof value.config.size === "string" ? value.config.size : "",
+      ratio: typeof value.config.ratio === "string" ? value.config.ratio : "",
+    },
+    models,
+  };
+}
+
+async function confirmGeneration() {
+  const projectId = workspaceStore.project?.id;
+  const pending = pendingGeneration.value;
+  const character = creativeView.value?.characters.find(item => item.nodeId === pending?.nodeId);
+  if (!projectId || !pending || !character || generationLoading.value || taskDiscovery.value) return;
+  generationLoading.value = true;
+  creativeBusy.value = true;
+  try {
+    const request = await configureCharacterGeneration(pending.nodeId, pending.modelId, character.prompt);
+    const [estimate] = await Promise.all([
+      userAppStore.estimateGeneration({ projectId, modelId: pending.modelId, request }),
+      userAppStore.loadAccount(),
+    ]);
+    if (estimate.taskType !== "image") throw new Error("所选模型已不再是图片模型，请重新选择");
+    if (estimate.estimatedCredits !== pending.estimate.estimatedCredits || JSON.stringify(request) !== JSON.stringify(pending.request)) {
+      pendingGeneration.value = { ...pending, request, estimate };
+      ElMessage.warning("模型配置或估价已更新，请重新确认");
+      return;
+    }
+    if (estimate.estimatedCredits > userAppStore.availableCredits) {
+      pendingGeneration.value = { ...pending, request, estimate };
+      ElMessage.error(`积分不足，还需要 ${estimate.estimatedCredits - userAppStore.availableCredits} 积分`);
+      return;
+    }
+    taskDiscovery.value = {
+      nodeId: pending.nodeId,
+      modelId: pending.modelId,
+      outputDirectory: `assets/${pending.nodeId}`,
+      previousTaskIds: new Set(projectTasks.value.map(task => task.id)),
+      discoveryDeadline: Date.now() + 10_000,
+    };
+    await getCanvas().call({ name: "nodeTools", args: { nodeId: pending.nodeId, name: "node:generateImage", args: {} } });
+    generationDialogVisible.value = false;
+    pendingGeneration.value = undefined;
+    scheduleTaskPoll(300);
+  } catch (error) {
+    taskDiscovery.value = undefined;
+    ElMessage.error(apiErrorMessage(error, "图片生成未能启动"));
+    await Promise.allSettled([userAppStore.loadAccount(), userAppStore.loadModels(), userAppStore.loadTasks()]);
+    await refreshCreativeView();
+    if (activeTasks.value.length) scheduleTaskPoll();
+  } finally {
+    generationLoading.value = false;
+    creativeBusy.value = false;
+  }
+}
+
+function cancelGeneration() {
+  if (generationLoading.value) return;
+  generationDialogVisible.value = false;
+  pendingGeneration.value = undefined;
+}
+
+function scheduleTaskPoll(delay = 2_000) {
+  if (disposed || taskPollTimer !== undefined || taskPolling) return;
+  taskPollTimer = window.setTimeout(() => {
+    taskPollTimer = undefined;
+    void pollGenerationTasks();
+  }, delay);
+}
+
+async function pollGenerationTasks() {
+  if (disposed || taskPolling) return;
+  taskPolling = true;
+  try {
+    await Promise.all([userAppStore.loadTasks(), userAppStore.loadAccount()]);
+    await refreshCreativeView();
+    const discovery = taskDiscovery.value;
+    if (discovery && !discovery.taskId) {
+      const created = projectTasks.value.find(task =>
+        !discovery.previousTaskIds.has(task.id)
+        && task.taskType === "image"
+        && task.modelId === discovery.modelId
+        && task.requestSummary.input.outputDirectory === discovery.outputDirectory,
+      );
+      if (created) {
+        discovery.taskId = created.id;
+        ElMessage.success("生成任务已创建");
+      } else if (Date.now() >= discovery.discoveryDeadline) {
+        taskDiscovery.value = undefined;
+        ElMessage.error("生成任务未能启动，请检查模型和积分后重试");
+        await userAppStore.loadModels();
+      }
+    }
+    if (discovery?.taskId) {
+      const task = projectTasks.value.find(item => item.id === discovery.taskId);
+      const outputReady = !!creativeView.value?.characters.find(item => item.nodeId === discovery.nodeId)?.output;
+      const terminal = !!task && ["succeeded", "failed", "cancelled"].includes(task.status);
+      if (outputReady || (terminal && task.status !== "succeeded")) {
+        taskDiscovery.value = undefined;
+      } else if (task?.status === "succeeded") {
+        discovery.settleDeadline ??= Date.now() + 5_000;
+        if (Date.now() >= discovery.settleDeadline) taskDiscovery.value = undefined;
+      }
+    }
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, "生成任务状态刷新失败"));
+  } finally {
+    taskPolling = false;
+  }
+  if (activeTasks.value.length || taskDiscovery.value) scheduleTaskPoll();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 async function openAdvanced() {
