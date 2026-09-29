@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite build --watch",
+    "build": "vite build --configLoader runner",
+    "dev": "vite build --watch --configLoader runner",
     "typecheck": "vue-tsc --noEmit"
   },
   "peerDependencies": {

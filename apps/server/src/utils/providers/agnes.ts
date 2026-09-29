@@ -1,5 +1,10 @@
+import { setTimeout as wait } from "node:timers/promises";
 import { z } from "zod";
 import type { ProviderAdapter, ProviderRuntimeConfig } from "@/utils/providers/types";
+
+const requestInterval = 60_000;
+let nextRequestAt = 0;
+let requestQueue = Promise.resolve();
 
 const modelsSchema = z.object({
   data: z.array(z.object({
@@ -42,6 +47,19 @@ function pollEndpoint(config: ProviderRuntimeConfig, videoId: string, modelId: s
 
 function requestSignal(signal: AbortSignal | undefined, timeout: number) {
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout);
+}
+
+async function waitForVideoRequest(signal?: AbortSignal) {
+  const turn = requestQueue.then(async () => {
+    signal?.throwIfAborted();
+    const delay = Math.max(0, nextRequestAt - Date.now());
+    if (delay) await wait(delay, undefined, { signal });
+    signal?.throwIfAborted();
+    // ACT: Agnes 同一密钥的视频创建和查询接口每分钟只允许调用一次；服务端单进程内串行即可覆盖当前并发上限。
+    nextRequestAt = Date.now() + requestInterval;
+  });
+  requestQueue = turn.catch(() => undefined);
+  await turn;
 }
 
 async function fetchJson(config: ProviderRuntimeConfig, url: string, init: RequestInit = {}, signal?: AbortSignal, timeout = 30000) {
@@ -99,6 +117,7 @@ const agnes: ProviderAdapter = {
     if (!Number.isInteger(duration) || duration < 4 || duration > 12) throw Object.assign(new Error("Agnes 视频时长须为 4 到 12 秒的整数"), { status: 400 });
     if (!capabilities(model.upstreamModelId).resolutions.includes(resolution)) throw Object.assign(new Error("Agnes 模型不支持所选分辨率"), { status: 400 });
     if (!capabilities(model.upstreamModelId).ratios.includes(ratio)) throw Object.assign(new Error("Agnes 模型不支持所选画幅"), { status: 400 });
+    await waitForVideoRequest(signal);
     const result = createSchema.parse(await fetchJson(config, endpoint(config, "videos"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -121,6 +140,7 @@ const agnes: ProviderAdapter = {
   },
 
   async getVideo(config, task, signal) {
+    await waitForVideoRequest(signal);
     const result = resultSchema.parse(await fetchJson(config, pollEndpoint(config, task.id, task.modelId), {}, signal));
     const status = result.status.toLowerCase();
     if (status === "completed" || status === "succeeded" || status === "success") {
