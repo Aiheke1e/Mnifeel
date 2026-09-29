@@ -1,0 +1,91 @@
+name: minifeel
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgresData:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - database
+
+  minifeel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      MINIFEEL_DATA_DIR: /app/data
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MINIFEEL_SECRET_KEY: ${MINIFEEL_SECRET_KEY}
+      MINIFEEL_ADMIN_PHONE: ${MINIFEEL_ADMIN_PHONE}
+      MINIFEEL_ADMIN_PASSWORD: ${MINIFEEL_ADMIN_PASSWORD}
+      MINIFEEL_AUTH_MOCK_CODE: ${MINIFEEL_AUTH_MOCK_CODE:-true}
+      MINIFEEL_AUTH_MOCK_GOOGLE: ${MINIFEEL_AUTH_MOCK_GOOGLE:-true}
+      MINIFEEL_SESSION_DAYS: ${MINIFEEL_SESSION_DAYS:-30}
+      MINIFEEL_GENERATION_CONCURRENCY: ${MINIFEEL_GENERATION_CONCURRENCY:-4}
+      MINIFEEL_GENERATION_STALE_SECONDS: ${MINIFEEL_GENERATION_STALE_SECONDS:-120}
+    volumes:
+      - minifeelData:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - 'const response = await fetch("http://127.0.0.1:3000/"); process.exit(response.ok ? 0 : 1);'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - web
+      - database
+
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    depends_on:
+      minifeel:
+        condition: service_healthy
+    environment:
+      MINIFEEL_DOMAIN: ${MINIFEEL_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddyfile:/etc/caddy/Caddyfile:ro
+      - caddyData:/data
+      - caddyConfig:/config
+    networks:
+      - web
+
+networks:
+  web:
+  database:
+    internal: true
+
+volumes:
+  postgresData:
+    name: minifeelPostgresData
+  minifeelData:
+    name: minifeelData
+  caddyData:
+    name: minifeelCaddyData
+  caddyConfig:
+    name: minifeelCaddyConfig

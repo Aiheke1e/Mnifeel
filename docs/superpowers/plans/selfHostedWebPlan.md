@@ -47,6 +47,7 @@
 | 11. 管理端 UI | 已完成 | 添加 8 个管理接口和独立后台，覆盖统计、用户、积分、会话、供应商、模型计费、任务、审计与项目只读摘要；移除旧管理员首页 | 路由生成、Server/Web 类型检查和构建通过；实际数据库验证角色边界、用户操作、积分校验、项目审计；隔离 schema 与本机模拟供应商验证连接、同步和模型计费；桌面与手机浏览器验证通过 | — |
 | 12. 外部依赖与桌面入口清理 | 已完成 | 移除桌面壳、更新服务、托管平台 UI、遥测、远程插件安装和默认联网工具；FFmpeg 改为使用系统环境；插件管理限管理员本机操作 | 根类型检查与生产构建通过；生产服务在无 FFmpeg 环境正常启动；本地登录、项目、文件、账户、模型列表和权限边界 HTTP 验证通过 | — |
 | 13. 旧项目导入与全流程验收 | 已完成 | 添加受限旧项目复制导入、首页入口和独立自托管文档；导入完成后直接进入高级工作台 | 路由生成、根类型检查与生产构建通过；HTTP 验证文件格式、源目录不变、越界/同名/超限/中断清理；隔离空 schema 验证迁移、管理员、用户和积分；桌面与手机浏览器验证通过 | Task 7 的 Agnes 真实视频产物验证仍待官方队列恢复 |
+| 14. 生产 Docker 与域名部署 | 进行中 | 添加 PostgreSQL、Minifeel、Caddy 生产编排、`minifeel.cn` HTTPS 配置、生产环境模板和拉取更新脚本 | 部署脚本语法、缺少环境文件安全退出、环境字段、根类型检查、生产构建、差异和密钥扫描通过 | 服务器当前拒绝已提供的 SSH 密钥；Compose 容器验证和域名解析待服务器访问恢复后执行 |
 
 ---
 
@@ -662,6 +663,33 @@
 - 根目录 `bun run typecheck`、`bun run build`、`git diff --check` 通过；全新浏览器页面首次访问用户端和管理员端时没有新增控制台 warning/error。
 
 **提交：** `feat: 完成自托管 Web 迁移`
+
+---
+
+## Task 14：生产 Docker 与域名部署
+
+**结果：** 服务器通过 Docker Compose 运行 PostgreSQL、Minifeel 与 Caddy；`minifeel.cn` 使用自动 HTTPS；后续更新只需运行服务器脚本拉取 `origin/dev` 并重建应用。
+
+**文件：**
+
+- 创建：`compose.production.yaml`
+- 创建：`caddyfile`
+- 创建：`productionEnvironment.example`
+- 创建：`scripts/deployProduction.sh`
+- 修改：`docs/deployment.md`
+- 同步：`docs/superpowers/plans/selfHostedWebPlan.md`
+
+**步骤：**
+
+- [x] 用独立网络隔离 PostgreSQL，应用连接公网网络和数据库网络，Caddy 只连接公网网络。
+- [x] 将 PostgreSQL、应用数据和 Caddy 证书配置放入具名卷，重建应用时保留业务数据。
+- [x] 为 `minifeel.cn` 与 `www.minifeel.cn` 配置自动 HTTPS 和主域名跳转。
+- [x] 提供不含真实密钥的生产环境模板，V1 保留模拟手机号与 Google 登录开关。
+- [x] 更新脚本检查 Docker、Compose 配置和服务器工作区；检测已有 PostgreSQL 卷后先启动并备份，再快进拉取 `origin/dev`、重建容器并等待健康检查。
+- [ ] 执行根类型检查、生产构建、Compose 解析、容器启动与 HTTPS 冒烟验证。
+- [ ] 将域名 A 记录指向 `117.72.202.33`，完成服务器部署并记录实际运行结果。
+
+**提交：** `feat(server): 添加生产 Docker 部署`
 
 ---
 

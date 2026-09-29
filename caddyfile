@@ -1,0 +1,8 @@
+{$MINIFEEL_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy minifeel:3000
+}
+
+www.{$MINIFEEL_DOMAIN} {
+  redir https://{$MINIFEEL_DOMAIN}{uri} permanent
+}

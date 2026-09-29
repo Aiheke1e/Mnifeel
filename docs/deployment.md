@@ -65,95 +65,33 @@ chmod 600 .env.production
 
 ## 4. 生产环境变量
 
-在服务器部署目录创建 `.env.production`：
-
-```dotenv
-POSTGRES_DB=minifeel
-POSTGRES_USER=minifeel
-POSTGRES_PASSWORD=替换为数据库强密码
-
-MINIFEEL_SECRET_KEY=替换为32字节随机密钥的Base64文本
-MINIFEEL_ADMIN_PHONE=+8613800000000
-MINIFEEL_ADMIN_PASSWORD=替换为首次管理员强密码
-
-# 可选：需要导入旧版项目时，填写旧工作区在容器内的绝对路径并挂载对应目录
-MINIFEEL_LEGACY_WORKSPACE_DIR=
-
-MINIFEEL_SESSION_DAYS=30
-MINIFEEL_GENERATION_CONCURRENCY=4
-MINIFEEL_GENERATION_STALE_SECONDS=120
-```
-
-生成主密钥：
+仓库提供 `productionEnvironment.example`。复制后填写真实配置：
 
 ```sh
+cp productionEnvironment.example .env.production
+chmod 600 .env.production
+```
+
+数据库密码使用 URL 安全字符，主密钥使用 32 字节随机值：
+
+```sh
+openssl rand -hex 24
 openssl rand -base64 32
 ```
 
 `MINIFEEL_ADMIN_PHONE` 和 `MINIFEEL_ADMIN_PASSWORD` 只在数据库内还没有管理员时用于创建首个管理员，后续重启不会覆盖现有管理员密码。
 
-生产环境不要启用以下开发开关：
-
-```dotenv
-MINIFEEL_AUTH_MOCK_CODE=true
-MINIFEEL_AUTH_MOCK_GOOGLE=true
-MINIFEEL_ALLOW_INSECURE_PROVIDER_URLS=true
-```
-
-当前短信发送能力尚未接入时，可以直接使用初始化的管理员手机号和密码登录；不要为了登录而在公网生产环境开启模拟验证码。
+V1 演示环境暂时保留 `MINIFEEL_AUTH_MOCK_CODE=true` 和 `MINIFEEL_AUTH_MOCK_GOOGLE=true`。接入真实短信与 Google 登录后必须改为 `false`。生产环境始终不要启用 `MINIFEEL_ALLOW_INSECURE_PROVIDER_URLS`。
 
 ## 5. Docker Compose 配置
 
-仓库当前的 `compose.yaml` 尚未包含 PostgreSQL 和生产环境变量，不能直接作为完整生产配置使用。正式部署时应准备 `compose.production.yaml`，结构如下：
+生产环境使用仓库内的 `compose.production.yaml`，一次启动三个容器：
 
-```yaml
-services:
-  postgres:
-    image: postgres:17
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - postgresData:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+- `postgres`：保存账号、积分、模型和任务数据，只连接内部数据库网络；
+- `minifeel`：同时提供 Web、API 和生成任务 Worker；
+- `caddy`：对外监听 80/443，根据 `caddyfile` 为 `minifeel.cn` 自动申请和续期 HTTPS 证书。
 
-  minifeel:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    init: true
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      NODE_ENV: production
-      PORT: 3000
-      MINIFEEL_DATA_DIR: /app/data
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      MINIFEEL_SECRET_KEY: ${MINIFEEL_SECRET_KEY}
-      MINIFEEL_ADMIN_PHONE: ${MINIFEEL_ADMIN_PHONE}
-      MINIFEEL_ADMIN_PASSWORD: ${MINIFEEL_ADMIN_PASSWORD}
-      MINIFEEL_SESSION_DAYS: ${MINIFEEL_SESSION_DAYS:-30}
-      MINIFEEL_GENERATION_CONCURRENCY: ${MINIFEEL_GENERATION_CONCURRENCY:-4}
-      MINIFEEL_GENERATION_STALE_SECONDS: ${MINIFEEL_GENERATION_STALE_SECONDS:-120}
-    ports:
-      - "127.0.0.1:3000:3000"
-    volumes:
-      - minifeelData:/app/data
-
-volumes:
-  postgresData:
-  minifeelData:
-```
-
-如果数据库密码包含 `@`、`:`、`/`、`#`、`%` 等 URL 特殊字符，不能直接拼接进 `DATABASE_URL`。部署时应对用户名和密码进行 URL 编码，或单独提供已经正确编码的 `DATABASE_URL`。
+四个具名卷分别保存 PostgreSQL、Minifeel 数据目录、Caddy 证书和 Caddy 运行配置。重新构建应用容器不会删除这些数据。
 
 ## 6. 首次部署
 
@@ -166,59 +104,32 @@ git clone <仓库地址> /opt/minifeel
 cd /opt/minifeel
 ```
 
-放入 `.env.production` 和 `compose.production.yaml` 后，先启动空的 PostgreSQL：
+复制环境模板，填写域名、数据库密码、主密钥和初始化管理员账号：
 
 ```sh
-docker compose --env-file .env.production -f compose.production.yaml up -d postgres
+cp productionEnvironment.example .env.production
+chmod 600 .env.production
+vi .env.production
 ```
 
-首次上线的新数据库依次执行 DDL 和初始化 DML。DDL 会创建完整表结构、索引、约束、触发器以及中文表和字段注释；DML 会登记当前迁移版本。以下命令只用于空数据库，不要在已有业务数据的数据库上重复执行：
+首次部署和以后更新都执行同一个脚本：
 
 ```sh
-docker compose --env-file .env.production -f compose.production.yaml exec -T postgres \
-  sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
-  < apps/server/sql/schema.sql
-
-docker compose --env-file .env.production -f compose.production.yaml exec -T postgres \
-  sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
-  < apps/server/sql/initialData.sql
+chmod +x scripts/deployProduction.sh
+./scripts/deployProduction.sh
 ```
 
-然后构建并启动 Minifeel：
-
-```sh
-docker compose --env-file .env.production -f compose.production.yaml up -d --build minifeel
-docker compose --env-file .env.production -f compose.production.yaml ps
-docker compose --env-file .env.production -f compose.production.yaml logs -f minifeel
-```
-
-应用启动时仍会检查数据库、执行后续新增的迁移、初始化管理员及内置插件。未手工初始化的开发数据库也会由应用自动建表。日志出现下面内容表示应用已经开始监听：
+脚本会拉取 `origin/dev`、构建镜像、启动 PostgreSQL/Minifeel/Caddy，并等待应用健康检查通过。数据库首次启动时由应用自动建表、执行迁移和初始化管理员。日志出现下面内容表示应用已经开始监听：
 
 ```text
 [服务启动成功]: http://localhost:3000
 ```
 
-在服务器本机验证接口：
-
-```sh
-curl --fail http://127.0.0.1:3000/api/auth/options
-```
-
-接口应返回包含 `code`、`data` 和 `message` 的 JSON。
-
 ## 7. 域名和 HTTPS
 
 生产环境必须通过 HTTPS 访问。服务在 `NODE_ENV=production` 时使用 Secure Cookie，直接通过公网 HTTP 访问会导致登录会话无法正常工作。
 
-以 Caddy 为例：
-
-```caddyfile
-minifeel.example.com {
-  reverse_proxy 127.0.0.1:3000
-}
-```
-
-将 `minifeel.example.com` 替换为实际域名。确认 DNS 已解析到服务器后，Caddy 会自动申请和续期 HTTPS 证书。
+在域名控制台为根域名 `minifeel.cn` 和 `www.minifeel.cn` 添加指向服务器公网 IP 的 A 记录，并确认服务器安全组开放 TCP 80、TCP 443 和 UDP 443。DNS 生效后，Caddy 会自动申请和续期证书；`www.minifeel.cn` 会永久跳转到 `minifeel.cn`。
 
 反向代理需支持普通 HTTP、流式响应和长连接，不要对生成事件流启用响应缓冲。上传大小建议设置为至少 100 MB，与应用当前请求上限一致。
 
@@ -241,23 +152,20 @@ minifeel.example.com {
 docker compose --env-file .env.production -f compose.production.yaml ps
 docker compose --env-file .env.production -f compose.production.yaml logs --tail=200 minifeel
 docker compose --env-file .env.production -f compose.production.yaml logs --tail=200 postgres
+docker compose --env-file .env.production -f compose.production.yaml logs --tail=200 caddy
 docker compose --env-file .env.production -f compose.production.yaml exec minifeel ffmpeg -version
 ```
 
 ## 9. 更新发布
 
-更新前先备份数据库和 `/app/data`，再拉取指定版本并重建应用：
+运行部署脚本即可从 `origin/dev` 拉取最新代码并重新构建。检测到已有 PostgreSQL 数据卷时，脚本会先启动数据库并把备份保存到仓库已忽略的 `backup/` 目录；可通过 `MINIFEEL_BACKUP_DIR` 改为其他可写目录：
 
 ```sh
 cd /opt/minifeel
-git fetch --all --tags
-git checkout <经过验证的版本标签或提交>
-docker compose --env-file .env.production -f compose.production.yaml build minifeel
-docker compose --env-file .env.production -f compose.production.yaml up -d
-docker compose --env-file .env.production -f compose.production.yaml logs --tail=200 minifeel
+./scripts/deployProduction.sh
 ```
 
-不要直接部署未经验证的分支最新提交。正式发布应记录本次 Git 提交、镜像标识、部署时间和数据库备份位置。
+脚本只允许在干净的 Git 工作区执行，并使用 `git pull --ff-only`，避免服务器产生未记录的合并提交。正式发布前仍应先在本地完成类型检查和生产构建。
 
 数据库迁移由应用启动自动执行。迁移后如果需要回滚代码，应先确认旧版本是否兼容新数据库结构；不能只回滚容器而忽略数据库变化。
 

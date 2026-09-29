@@ -1,0 +1,20 @@
+# 复制为 .env.production，仅保存在服务器，不要提交真实值。
+MINIFEEL_DOMAIN=minifeel.cn
+
+POSTGRES_DB=minifeel
+POSTGRES_USER=minifeel
+POSTGRES_PASSWORD=replaceWithUrlSafePassword
+
+# 使用 openssl rand -base64 32 生成，部署后不得更换。
+MINIFEEL_SECRET_KEY=
+
+MINIFEEL_ADMIN_PHONE=+8613800000000
+MINIFEEL_ADMIN_PASSWORD=replaceBeforeFirstRun
+
+# V1 演示环境保留模拟登录；接入真实短信和 Google 登录后改为 false。
+MINIFEEL_AUTH_MOCK_CODE=true
+MINIFEEL_AUTH_MOCK_GOOGLE=true
+
+MINIFEEL_SESSION_DAYS=30
+MINIFEEL_GENERATION_CONCURRENCY=4
+MINIFEEL_GENERATION_STALE_SECONDS=120
