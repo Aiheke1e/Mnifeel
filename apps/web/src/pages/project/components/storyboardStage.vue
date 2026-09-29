@@ -21,7 +21,13 @@
       <div class="shotList">
         <article v-for="(shot, index) in shots" :key="shot.nodeId" class="shotCard">
           <div class="shotPreview">
-            <img v-if="previewUrls[shot.nodeId]" :src="previewUrls[shot.nodeId]" :alt="`镜头 ${shot.title} 预览`" />
+            <button
+              v-if="previewUrls[shot.nodeId]"
+              type="button"
+              :aria-label="`放大查看镜头${shot.title}`"
+              @click="openPreview(previewUrls[shot.nodeId], `镜头 ${shot.title} 预览`)">
+              <img :src="previewUrls[shot.nodeId]" :alt="`镜头 ${shot.title} 预览`" />
+            </button>
             <icon-photo v-else :size="42" aria-hidden="true" />
           </div>
           <div class="shotBody">
@@ -44,11 +50,21 @@
         </article>
       </div>
     </template>
+    <el-dialog
+      :modelValue="Boolean(selectedPreviewUrl)"
+      :title="selectedPreviewTitle"
+      width="min(1100px, 92vw)"
+      appendToBody
+      alignCenter
+      destroyOnClose
+      @update:modelValue="handlePreviewVisibility">
+      <img v-if="selectedPreviewUrl" class="dialogPreviewImage" :src="selectedPreviewUrl" :alt="selectedPreviewTitle" />
+    </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, watch } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { IconArrowDown, IconArrowUp, IconPhoto, IconPhotoOff } from "@tabler/icons-vue";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { friendlyTaskError } from "@/pages/app/appFormat";
@@ -77,6 +93,8 @@ const emit = defineEmits<{
 const drafts = reactive<Record<string, string>>({});
 const sourcePrompts = reactive<Record<string, string>>({});
 const previewUrls = reactive<Record<string, string>>({});
+const selectedPreviewUrl = ref("");
+const selectedPreviewTitle = ref("");
 let releases: Array<() => void> = [];
 let previewVersion = 0;
 const batchNodeIds = computed(() => props.shots.filter(shot => !shot.output && shot.prompt.trim() && drafts[shot.nodeId] === shot.prompt && !isGenerating(shot)).map(shot => shot.nodeId));
@@ -98,8 +116,9 @@ watch(() => props.shots, shots => {
   }
 }, { immediate: true });
 
-watch(() => [props.projectId, ...props.shots.map(shot => `${shot.nodeId}:${shot.output?.path ?? ""}:${shot.output?.mimeType ?? ""}`)], async () => {
+watch(() => JSON.stringify([props.projectId, ...props.shots.map(shot => [shot.nodeId, shot.output?.path ?? "", shot.output?.mimeType ?? ""])]), async () => {
   const version = ++previewVersion;
+  closePreview();
   releasePreviews();
   for (const key of Object.keys(previewUrls)) delete previewUrls[key];
   const files = useWorkspaceFiles(props.projectId);
@@ -124,6 +143,20 @@ onBeforeUnmount(() => {
 function releasePreviews() {
   releases.forEach(release => release());
   releases = [];
+}
+
+function openPreview(url: string, title: string) {
+  selectedPreviewUrl.value = url;
+  selectedPreviewTitle.value = title;
+}
+
+function closePreview() {
+  selectedPreviewUrl.value = "";
+  selectedPreviewTitle.value = "";
+}
+
+function handlePreviewVisibility(visible: boolean) {
+  if (!visible) closePreview();
 }
 
 function statusText(shot: CreativeMediaCard) {
@@ -170,9 +203,35 @@ function generateHint(shot: CreativeMediaCard) {
   .stageTools { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
   .modelChoice { display: grid; width: min(420px, 100%); gap: 7px; label { color: var(--studioText); font-size: 13px; font-weight: 650; } }
   .shotList { display: grid; gap: 15px; }
-  .shotCard { display: grid; grid-template-columns: 220px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--studioBorder); border-radius: 16px; background: var(--studioSurface); }
-  .shotPreview { display: grid; min-height: 230px; place-items: center; overflow: hidden; background: var(--studioSurfaceMuted); color: var(--studioMuted); img { width: 100%; height: 100%; object-fit: cover; } }
+  .shotCard { display: grid; grid-template-columns: minmax(300px, 36%) minmax(0, 1fr); overflow: hidden; border: 1px solid var(--studioBorder); border-radius: 16px; background: var(--studioSurface); }
+  .shotPreview {
+    display: grid;
+    min-height: 230px;
+    place-items: center;
+    background: var(--studioSurfaceMuted);
+    color: var(--studioMuted);
+    button {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-height: 230px;
+      padding: 8px;
+      place-items: center;
+      border: 0;
+      background: transparent;
+      cursor: zoom-in;
+      img { display: block; width: 100%; max-height: 300px; object-fit: contain; }
+      &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: -4px; }
+    }
+  }
   .shotBody { display: grid; align-content: start; gap: 13px; padding: 18px; header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; h3 { margin: 4px 0 0; color: var(--studioText); } } footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; .orderButtons { margin-right: auto; } } :deep(.el-textarea__inner) { border-radius: 12px; line-height: 1.65; } }
+  .dialogPreviewImage { display: block; max-width: 100%; max-height: calc(100dvh - 180px); margin: 0 auto; object-fit: contain; }
 }
-@media (max-width: 720px) { .storyboardStage { .stageTools { align-items: stretch; flex-direction: column; } .shotCard { grid-template-columns: minmax(0, 1fr); } .shotPreview { min-height: 180px; max-height: 300px; } } }
+@media (max-width: 720px) {
+  .storyboardStage {
+    .stageTools { align-items: stretch; flex-direction: column; }
+    .shotCard { grid-template-columns: minmax(0, 1fr); }
+    .shotPreview { min-height: 180px; button { min-height: 180px; img { max-height: 300px; } } }
+  }
+}
 </style>

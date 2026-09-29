@@ -771,15 +771,13 @@ async function openAdvanced() {
 
   .projectShell {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr) 360px;
-    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    align-items: start;
     gap: 20px;
     margin-top: 22px;
 
     .stageNavigation {
-      position: sticky;
-      top: 22px;
-      align-self: start;
+      grid-column: 1 / -1;
       width: 100%;
       min-width: 0;
       max-width: 100%;
@@ -824,9 +822,8 @@ async function openAdvanced() {
 
 @media (max-width: 1360px) {
   .projectPage .projectShell {
-    grid-template-columns: 210px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     .projectAside {
-      grid-column: 1 / -1;
       grid-template-columns: 1fr 1fr;
       .directorPanel { grid-column: 1 / -1; }
     }
@@ -837,9 +834,7 @@ async function openAdvanced() {
   .projectPage {
     .projectShell {
       grid-template-columns: minmax(0, 1fr);
-      .stageNavigation { position: static; }
       .projectAside {
-        grid-column: auto;
         grid-template-columns: minmax(0, 1fr);
         .directorPanel { grid-column: auto; }
       }

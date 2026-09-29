@@ -38,7 +38,7 @@ const statusLabels: Record<ProjectStageStatus, string> = {
 <style scoped lang="scss">
 .projectStages {
   display: grid;
-  align-content: start;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 9px;
 
   button {

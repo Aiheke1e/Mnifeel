@@ -18,7 +18,13 @@
       <div class="characterGrid">
         <article v-for="character in characters" :key="character.nodeId" class="characterCard">
           <div class="characterPreview">
-            <img v-if="previewUrls[character.nodeId]" :src="previewUrls[character.nodeId]" :alt="`${character.title} 角色参考图`" />
+            <button
+              v-if="previewUrls[character.nodeId]"
+              type="button"
+              :aria-label="`放大查看${character.title}角色参考图`"
+              @click="openPreview(previewUrls[character.nodeId], `${character.title}角色参考图`)">
+              <img :src="previewUrls[character.nodeId]" :alt="`${character.title} 角色参考图`" />
+            </button>
             <icon-user-square v-else :size="44" aria-hidden="true" />
           </div>
           <div class="characterBody">
@@ -43,11 +49,21 @@
         </article>
       </div>
     </template>
+    <el-dialog
+      :modelValue="Boolean(selectedPreviewUrl)"
+      :title="selectedPreviewTitle"
+      width="min(1100px, 92vw)"
+      appendToBody
+      alignCenter
+      destroyOnClose
+      @update:modelValue="handlePreviewVisibility">
+      <img v-if="selectedPreviewUrl" class="dialogPreviewImage" :src="selectedPreviewUrl" :alt="selectedPreviewTitle" />
+    </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, reactive, watch } from "vue";
+import { onBeforeUnmount, reactive, ref, watch } from "vue";
 import { IconUsersMinus, IconUserSquare } from "@tabler/icons-vue";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import type { PublicModel } from "@/stores/userApp";
@@ -73,6 +89,8 @@ const emit = defineEmits<{
 const drafts = reactive<Record<string, string>>({});
 const sourcePrompts = reactive<Record<string, string>>({});
 const previewUrls = reactive<Record<string, string>>({});
+const selectedPreviewUrl = ref("");
+const selectedPreviewTitle = ref("");
 let releases: Array<() => void> = [];
 let previewVersion = 0;
 
@@ -91,8 +109,9 @@ watch(() => props.characters, characters => {
   }
 }, { immediate: true });
 
-watch(() => [props.projectId, ...props.characters.map(character => `${character.nodeId}:${character.output?.path ?? ""}:${character.output?.mimeType ?? ""}`)], async () => {
+watch(() => JSON.stringify([props.projectId, ...props.characters.map(character => [character.nodeId, character.output?.path ?? "", character.output?.mimeType ?? ""])]), async () => {
   const version = ++previewVersion;
+  closePreview();
   releasePreviews();
   for (const key of Object.keys(previewUrls)) delete previewUrls[key];
   const files = useWorkspaceFiles(props.projectId);
@@ -117,6 +136,20 @@ onBeforeUnmount(() => {
 function releasePreviews() {
   releases.forEach(release => release());
   releases = [];
+}
+
+function openPreview(url: string, title: string) {
+  selectedPreviewUrl.value = url;
+  selectedPreviewTitle.value = title;
+}
+
+function closePreview() {
+  selectedPreviewUrl.value = "";
+  selectedPreviewTitle.value = "";
+}
+
+function handlePreviewVisibility(visible: boolean) {
+  if (!visible) closePreview();
 }
 
 function statusText(character: CreativeMediaCard) {
@@ -174,7 +207,7 @@ function generateHint(character: CreativeMediaCard) {
   .characterGrid { display: grid; gap: 15px; }
   .characterCard {
     display: grid;
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: minmax(280px, 34%) minmax(0, 1fr);
     overflow: hidden;
     border: 1px solid var(--studioBorder);
     border-radius: 16px;
@@ -184,10 +217,21 @@ function generateHint(character: CreativeMediaCard) {
     display: grid;
     min-height: 220px;
     place-items: center;
-    overflow: hidden;
     background: var(--studioSurfaceMuted);
     color: var(--studioMuted);
-    img { width: 100%; height: 100%; object-fit: cover; }
+    button {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-height: 220px;
+      padding: 8px;
+      place-items: center;
+      border: 0;
+      background: transparent;
+      cursor: zoom-in;
+      img { display: block; width: 100%; max-height: 300px; object-fit: contain; }
+      &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: -4px; }
+    }
   }
   .characterBody {
     display: grid;
@@ -198,9 +242,13 @@ function generateHint(character: CreativeMediaCard) {
     footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
     :deep(.el-textarea__inner) { border-radius: 12px; line-height: 1.65; }
   }
+  .dialogPreviewImage { display: block; max-width: 100%; max-height: calc(100dvh - 180px); margin: 0 auto; object-fit: contain; }
 }
 
 @media (max-width: 720px) {
-  .characterStage .characterCard { grid-template-columns: minmax(0, 1fr); .characterPreview { min-height: 180px; max-height: 280px; } }
+  .characterStage .characterCard {
+    grid-template-columns: minmax(0, 1fr);
+    .characterPreview { min-height: 180px; button { min-height: 180px; img { max-height: 280px; } } }
+  }
 }
 </style>
