@@ -35,9 +35,18 @@ const router = createRouter({
       meta: { role: "user" },
     },
     {
-      path: "/admin/dashboard",
-      component: () => import("@/pages/home/index.vue"),
+      path: "/admin",
+      component: () => import("@/pages/admin/index.vue"),
       meta: { role: "admin" },
+      children: [
+        { path: "", redirect: "/admin/dashboard" },
+        { path: "dashboard", component: () => import("@/pages/admin/dashboard.vue") },
+        { path: "users", component: () => import("@/pages/admin/users.vue") },
+        { path: "providers", component: () => import("@/pages/admin/providers.vue") },
+        { path: "models", component: () => import("@/pages/admin/models.vue") },
+        { path: "tasks", component: () => import("@/pages/admin/tasks.vue") },
+        { path: "audit", component: () => import("@/pages/admin/audit.vue") },
+      ],
     },
     {
       path: "/admin/projects/:projectId/advanced",
