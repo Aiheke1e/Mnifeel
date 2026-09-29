@@ -121,7 +121,7 @@ async function createFromIdea() {
       projectId: project.id,
       model: modelChoices.value[0]?.value ?? "",
       reasoningEffort: "",
-      prompt: `/skill:workflow\n\n用户的创作需求：${prompt}\n\n直接在当前空画布开始创作，建立需要的剧本、角色、分镜和生成节点。生成角色参考图后，将它保存到“我的资产”供后续各集和镜头复用；再次生成同一角色时优先引用已有角色资产，保持脸部、发型、服装和主色一致。需要调用图片或视频模型前，先明确本次生成数量并让用户确认。`,
+      prompt: `/skill:workflow\n\n用户的创作需求：${prompt}\n\n直接在当前空画布建立一份可编辑的故事与剧本草案，并整理当前剧情确实需要的角色、场景和道具资产清单。首轮不要一次询问交付范围、总时长、画幅、视觉风格和模型；能从创意合理推断的先形成草案。不得展示未从 listMediaModels 或节点 getConfig 实时读取的模型选项。只有用户明确要求进入媒体生成时，才读取真实可用模型，提出一个最小可行方案，并一次说明生成数量、实际模型、规格、参考资产和算力消耗等待确认。生成角色参考图后，将它保存到“我的资产”供后续各集和镜头复用；再次生成同一角色时优先引用已有角色资产。`,
     };
     setProjectMode("advanced");
     await router.push(`/app/projects/${project.id}/advanced`);
