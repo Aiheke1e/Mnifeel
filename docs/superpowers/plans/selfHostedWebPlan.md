@@ -694,6 +694,7 @@
 
 - Ubuntu 24.04.2 服务器已安装 Docker 29.1.3 和 Docker Compose 2.40.3，部署目录为 `/opt/minifeel`。
 - PostgreSQL、Minifeel 和 Caddy 容器健康运行；数据库完成两次迁移并创建 14 张业务表，PostgreSQL、应用数据和 Caddy 使用 4 个具名卷持久化。
+- 迁移前分别备份服务器数据库和应用数据卷，再将本地数据库、`data/` 工作区及匹配的加密主密钥同步到生产环境；服务器现有 1 个管理员、3 个普通用户、3 个项目、6 个生成任务、3 个供应商和 9 个模型配置。
 - 更新脚本已实际完成数据库备份、拉取 `origin/dev`、生产镜像构建、容器替换和健康检查；服务器访问 GitHub 失败时使用 Git bundle 同步同一提交，不改动业务数据卷。
 - `http://117.72.202.33` 返回 Minifeel 首页；模拟验证码登录返回管理员信息，携带会话 Cookie 再请求 `/api/auth/me` 返回 200。
 - 本地执行 `bun run typecheck`、`bun run build:server` 和 `git diff --check` 通过；服务器执行 Compose 配置解析、容器健康检查、数据库表查询和备份文件检查通过。
