@@ -36,12 +36,12 @@ const { tool, projectId } = defineProps<{ tool: AgentToolCall; projectId?: strin
 const emit = defineEmits<{ copy: [content: string] }>();
 const renderer = shallowRef<Component>();
 const rendererError = ref("");
-watch(() => [tool.name, tool.question?.callId] as const, async ([name], _previous, onCleanup) => {
+watch(() => [tool.name, tool.question?.callId, tool.status] as const, async ([name, _callId, status], _previous, onCleanup) => {
   let active = true;
   onCleanup(() => { active = false; });
   renderer.value = undefined;
   rendererError.value = "";
-  if (name === "subAgent") return;
+  if (name === "subAgent" || status === "error") return;
   try {
     const component = await loadToolComponent(name);
     if (active) {

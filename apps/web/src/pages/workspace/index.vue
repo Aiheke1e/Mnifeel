@@ -77,7 +77,7 @@ const agentWidth = ref(0);
 const settingsVisible = ref(false);
 const canvasPanelRef = ref<InstanceType<typeof canvasPanel>>();
 const documentPanelRef = ref<InstanceType<typeof documentPanel>>();
-provide("canvas", () => canvasPanelRef.value?.getCanvasContext());
+provide("canvas", () => canvasPanelRef.value?.canvasReady ? canvasPanelRef.value.getCanvasContext() : undefined);
 provide("activateCanvasPanel", () => switchPanel("canvas"));
 
 onBeforeMount(async () => {
