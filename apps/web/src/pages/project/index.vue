@@ -51,28 +51,42 @@
           :modelsLoading="modelsLoading"
           :loading="creativeLoading"
           :errorMessage="creativeError"
-          :busy="creativeBusy || !!taskDiscovery"
+          :busy="generationBusy"
           @saveContent="saveCharacter"
           @confirmContent="confirmNode"
           @requestRepair="fillRepairPrompt('characters')"
           @requestGenerate="prepareCharacterGeneration" />
 
-        <template v-else>
-          <ol class="stageChecklist">
-            <li v-for="item in stageContent.checklist" :key="item"><icon-circle-check :size="18" aria-hidden="true" />{{ item }}</li>
-          </ol>
+        <storyboardStage
+          v-else-if="activeStage === 'storyboard'"
+          v-model="selectedModelId"
+          :projectId="workspaceStore.project.id"
+          :shots="creativeView?.storyboard ?? []"
+          :models="stageModels"
+          :modelsLoading="modelsLoading"
+          :loading="creativeLoading"
+          :errorMessage="creativeError"
+          :generationErrors="generationErrors"
+          :busy="generationBusy"
+          @saveContent="saveStoryboard"
+          @confirmContent="confirmNode"
+          @reorder="reorderStoryboard"
+          @requestGenerate="prepareStoryboardGeneration"
+          @requestGenerateAll="prepareStoryboardBatch" />
 
-          <div class="modelChoice">
-            <label for="stageModel">本步骤使用的模型</label>
-            <el-select id="stageModel" v-model="selectedModelId" :loading="modelsLoading" placeholder="暂无可用模型" size="large">
-              <el-option v-for="model in stageModels" :key="model.id" :label="model.displayName" :value="model.id">
-                <span>{{ model.displayName }}</span>
-                <small v-if="model.isDefault">推荐</small>
-              </el-option>
-            </el-select>
-            <p>{{ modelHint }}</p>
-          </div>
-        </template>
+        <filmStage
+          v-else
+          v-model="selectedModelId"
+          :projectId="workspaceStore.project.id"
+          :storyboard="creativeView?.storyboard ?? []"
+          :films="creativeView?.films ?? []"
+          :models="stageModels"
+          :modelsLoading="modelsLoading"
+          :loading="creativeLoading"
+          :errorMessage="creativeError"
+          :generationErrors="generationErrors"
+          :busy="generationBusy"
+          @requestGenerate="prepareVideoGeneration" />
       </main>
 
       <aside class="projectAside" aria-label="项目状态">
@@ -101,9 +115,9 @@
     <generationConfirm
       :visible="generationDialogVisible"
       :modelName="pendingGeneration?.modelName ?? ''"
-      generationType="角色图片"
-      :count="pendingGeneration?.estimate.estimatedUsage.imageCount ?? 1"
-      :estimatedCredits="pendingGeneration?.estimate.estimatedCredits ?? 0"
+      :generationType="pendingGeneration?.generationType ?? '媒体内容'"
+      :count="pendingGeneration?.items.length ?? 1"
+      :estimatedCredits="pendingEstimatedCredits"
       :availableCredits="userAppStore.availableCredits"
       :loading="generationLoading"
       @confirm="confirmGeneration"
@@ -112,10 +126,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-import { IconCircleCheck, IconFileText, IconPhoto, IconVideo } from "@tabler/icons-vue";
+import { IconFileText, IconPhoto, IconVideo } from "@tabler/icons-vue";
 import type { CanvasContext } from "@minifeel/tool-canvas/runtime";
 import { apiErrorMessage } from "@/lib/api";
 import { getProjectModel, setProjectMode, setProjectModel } from "@/lib/projectMode";
@@ -129,20 +143,29 @@ import projectRuntime from "./components/projectRuntime.vue";
 import directorPanel from "./components/directorPanel.vue";
 import scriptStage from "./components/scriptStage.vue";
 import characterStage from "./components/characterStage.vue";
+import storyboardStage from "./components/storyboardStage.vue";
+import filmStage from "./components/filmStage.vue";
 import generationConfirm from "./components/generationConfirm.vue";
-import { readCreativeView, type CreativeView } from "./creativeViewAdapter";
+import { creativeLabels, readCreativeView, type CreativeMediaCard, type CreativeView } from "./creativeViewAdapter";
 
-type PendingGeneration = {
+type PreparedGeneration = {
   nodeId: string;
   modelId: string;
-  modelName: string;
+  taskType: "image" | "video";
   request: Record<string, unknown>;
   estimate: GenerationEstimate;
+};
+
+type PendingGeneration = {
+  generationType: string;
+  modelName: string;
+  items: PreparedGeneration[];
 };
 
 type TaskDiscovery = {
   nodeId: string;
   modelId: string;
+  taskType: "image" | "video";
   outputDirectory: string;
   previousTaskIds: Set<string>;
   discoveryDeadline: number;
@@ -164,6 +187,7 @@ const creativeView = ref<CreativeView>();
 const generationDialogVisible = ref(false);
 const generationLoading = ref(false);
 const pendingGeneration = ref<PendingGeneration>();
+const generationErrors = reactive<Record<string, string>>({});
 const activeStage = ref<ProjectStage>("script");
 const selectedModelId = ref("");
 const runtimeRef = ref<InstanceType<typeof projectRuntime>>();
@@ -171,7 +195,7 @@ const directorRef = ref<InstanceType<typeof directorPanel>>();
 let creativeRefreshVersion = 0;
 let taskPollTimer: number | undefined;
 let taskPolling = false;
-const taskDiscovery = ref<TaskDiscovery>();
+const taskDiscoveries = ref<TaskDiscovery[]>([]);
 let disposed = false;
 const runtimeReady = computed(() => runtimeRef.value?.canvasReady ?? false);
 provide("canvas", () => runtimeReady.value ? runtimeRef.value?.getCanvasContext() : undefined);
@@ -181,10 +205,10 @@ useProjectSaveGuard({
   cancelSave: () => runtimeRef.value?.cancelSave(),
 });
 const stageContents = {
-  script: { number: 1, title: "把灵感变成完整剧本", description: "先确定人物、冲突和结局，再补充场景与对白。", checklist: ["写下一句话故事梗概", "整理主要人物和人物关系", "按场景完善对白与行动"], icon: IconFileText, mediaType: "text" },
-  characters: { number: 2, title: "建立统一的角色形象", description: "为主要人物确定外貌、服装和情绪，让前后画面保持一致。", checklist: ["选择角色的年龄和气质", "补充服装与外貌特征", "生成并确认角色参考图"], icon: IconPhoto, mediaType: "image" },
-  storyboard: { number: 3, title: "把剧本拆成连续画面", description: "逐镜确认景别、构图和人物动作，提前看清故事节奏。", checklist: ["按剧情拆分镜头", "描述每个镜头的主体与环境", "生成并调整分镜画面"], icon: IconPhoto, mediaType: "image" },
-  video: { number: 4, title: "生成可以剪辑的视频片段", description: "选择确认过的分镜，生成镜头片段并查看任务进度。", checklist: ["选择需要生成的分镜", "确认画面比例与时长", "生成视频并下载成片"], icon: IconVideo, mediaType: "video" },
+  script: { number: 1, title: "把灵感变成完整剧本", description: "先确定人物、冲突和结局，再补充场景与对白。", icon: IconFileText, mediaType: "text" },
+  characters: { number: 2, title: "建立统一的角色形象", description: "为主要人物确定外貌、服装和情绪，让前后画面保持一致。", icon: IconPhoto, mediaType: "image" },
+  storyboard: { number: 3, title: "把剧本拆成连续画面", description: "逐镜确认景别、构图和人物动作，提前看清故事节奏。", icon: IconPhoto, mediaType: "image" },
+  video: { number: 4, title: "生成可以剪辑的视频片段", description: "选择确认过的分镜，生成镜头片段并查看任务进度。", icon: IconVideo, mediaType: "video" },
 } as const;
 const stageContent = computed(() => stageContents[activeStage.value]);
 const stageModels = computed(() => userAppStore.models.filter(model => model.mediaType === stageContent.value.mediaType));
@@ -197,7 +221,8 @@ const stageStatuses = computed<Record<ProjectStage, ProjectStageStatus>>(() => c
   video: "notStarted",
 }));
 const completedStageCount = computed(() => Object.values(stageStatuses.value).filter(status => status === "complete").length);
-const modelHint = computed(() => stageModels.value.length ? "可用模型由管理员统一配置，你只需选择适合当前步骤的模型。" : "管理员暂未启用此类模型。" );
+const generationBusy = computed(() => creativeBusy.value || taskDiscoveries.value.length > 0);
+const pendingEstimatedCredits = computed(() => pendingGeneration.value?.items.reduce((total, item) => total + item.estimate.estimatedCredits, 0) ?? 0);
 
 function savedModelId(projectId: string) {
   try {
@@ -225,6 +250,7 @@ watch([runtimeReady, () => workspaceStore.project?.id], ([, projectId]) => {
 }, { immediate: true });
 
 onMounted(async () => {
+  document.addEventListener("visibilitychange", handleVisibilityChange);
   const projectId = String(route.params.projectId || "");
   if (!projectId) return;
   loading.value = true;
@@ -249,8 +275,18 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposed = true;
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
   if (taskPollTimer !== undefined) window.clearTimeout(taskPollTimer);
 });
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    if (taskPollTimer !== undefined) window.clearTimeout(taskPollTimer);
+    taskPollTimer = undefined;
+    return;
+  }
+  if (activeTasks.value.length || taskDiscoveries.value.length) scheduleTaskPoll(0);
+}
 
 function getCanvas(): CanvasContext {
   const canvas = runtimeRef.value?.getCanvasContext();
@@ -266,7 +302,13 @@ async function refreshCreativeView() {
   creativeError.value = "";
   try {
     await runtimeRef.value?.flushSave();
-    const view = await readCreativeView(projectId, userAppStore.tasks.filter(task => task.projectId === projectId));
+    let view = await readCreativeView(projectId, userAppStore.tasks.filter(task => task.projectId === projectId));
+    if (runtimeReady.value && await restoreTaskOutputs(view)) {
+      view = await readCreativeView(projectId, userAppStore.tasks.filter(task => task.projectId === projectId));
+    }
+    for (const card of [...view.characters, ...view.storyboard, ...view.films]) {
+      if (card.outputPersisted) delete generationErrors[card.nodeId];
+    }
     if (version !== creativeRefreshVersion || projectId !== workspaceStore.project?.id) return;
     creativeView.value = view;
   } catch (error) {
@@ -277,6 +319,24 @@ async function refreshCreativeView() {
   } finally {
     if (version === creativeRefreshVersion && projectId === workspaceStore.project?.id) creativeLoading.value = false;
   }
+}
+
+async function restoreTaskOutputs(view: CreativeView) {
+  let restored = false;
+  for (const card of [...view.characters, ...view.storyboard, ...view.films]) {
+    if (!card.output || card.outputPersisted || taskDiscoveries.value.some(item => item.nodeId === card.nodeId)) continue;
+    try {
+      await getCanvas().call({
+        name: "nodeTools",
+        args: { nodeId: card.nodeId, name: "node:restoreOutput", args: card.output },
+      });
+      restored = true;
+      delete generationErrors[card.nodeId];
+    } catch (error) {
+      generationErrors[card.nodeId] = apiErrorMessage(error, "已完成任务的结果回填失败，请刷新后重试");
+    }
+  }
+  return restored;
 }
 
 async function updateNode(nodeId: string, label: string, tool?: { name: string; args: Record<string, unknown> }) {
@@ -302,6 +362,10 @@ function saveCharacter(nodeId: string, prompt: string, draftLabel: string) {
   return updateNode(nodeId, draftLabel, { name: "node:setPrompt", args: { prompt } });
 }
 
+function saveStoryboard(nodeId: string, prompt: string, draftLabel: string) {
+  return updateNode(nodeId, draftLabel, { name: "node:setPrompt", args: { prompt } });
+}
+
 function confirmNode(nodeId: string, confirmedLabel: string) {
   return updateNode(nodeId, confirmedLabel);
 }
@@ -314,19 +378,40 @@ function fillRepairPrompt(type: "script" | "characters") {
 }
 
 async function prepareCharacterGeneration(nodeId: string) {
-  const projectId = workspaceStore.project?.id;
   const character = creativeView.value?.characters.find(item => item.nodeId === nodeId);
+  if (character) await prepareImageGenerations([character], "角色图片");
+}
+
+async function prepareStoryboardGeneration(nodeId: string) {
+  const shot = creativeView.value?.storyboard.find(item => item.nodeId === nodeId);
+  if (shot) await prepareImageGenerations([shot], "分镜图片");
+}
+
+async function prepareStoryboardBatch(nodeIds: string[]) {
+  if (new Set(nodeIds).size !== nodeIds.length) return void ElMessage.error("批量分镜列表无效，请刷新后重试");
+  const shots = nodeIds.flatMap(nodeId => {
+    const shot = creativeView.value?.storyboard.find(item => item.nodeId === nodeId);
+    return shot && !shot.output && shot.prompt.trim() && shot.task?.status !== "pending" && shot.task?.status !== "running" ? [shot] : [];
+  });
+  if (shots.length !== nodeIds.length) return void ElMessage.error("分镜内容已经变化，请确认保存后重试");
+  if (shots.length) await prepareImageGenerations(shots, "分镜图片");
+}
+
+async function prepareImageGenerations(cards: CreativeMediaCard[], generationType: string) {
+  const projectId = workspaceStore.project?.id;
   const model = userAppStore.models.find(item => item.id === selectedModelId.value && item.mediaType === "image");
-  if (!projectId || !character || !model || creativeBusy.value || taskDiscovery.value) return;
+  if (!projectId || !model || generationBusy.value) return;
   creativeBusy.value = true;
   try {
-    const request = await configureCharacterGeneration(nodeId, model.id, character.prompt);
-    const [estimate] = await Promise.all([
-      userAppStore.estimateGeneration({ projectId, modelId: model.id, request }),
-      userAppStore.loadAccount(),
-    ]);
-    if (estimate.taskType !== "image") throw new Error("所选模型已不再是图片模型，请重新选择");
-    pendingGeneration.value = { nodeId, modelId: model.id, modelName: model.displayName, request, estimate };
+    const items: PreparedGeneration[] = [];
+    for (const card of cards) {
+      const request = await configureImageGeneration(card.nodeId, model.id, card.prompt);
+      const estimate = await userAppStore.estimateGeneration({ projectId, modelId: model.id, request });
+      if (estimate.taskType !== "image") throw new Error("所选模型已不再是图片模型，请重新选择");
+      items.push({ nodeId: card.nodeId, modelId: model.id, taskType: "image", request, estimate });
+    }
+    await userAppStore.loadAccount();
+    pendingGeneration.value = { generationType, modelName: model.displayName, items };
     generationDialogVisible.value = true;
   } catch (error) {
     ElMessage.error(apiErrorMessage(error, "生成估价失败，请稍后重试"));
@@ -336,7 +421,7 @@ async function prepareCharacterGeneration(nodeId: string) {
   }
 }
 
-async function configureCharacterGeneration(nodeId: string, modelId: string, prompt: string) {
+async function configureImageGeneration(nodeId: string, modelId: string, prompt: string) {
   const canvas = getCanvas();
   const available = readImageNodeConfig(await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:getConfig", args: {} } }));
   if (!available.models.some(model => model.providerId === "managed" && model.modelId === modelId)) {
@@ -358,6 +443,140 @@ async function configureCharacterGeneration(nodeId: string, modelId: string, pro
   return request;
 }
 
+async function reorderStoryboard(nodeId: string, direction: -1 | 1) {
+  if (creativeBusy.value) return;
+  const shots = [...(creativeView.value?.storyboard ?? [])];
+  const index = shots.findIndex(shot => shot.nodeId === nodeId);
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= shots.length) return;
+  [shots[index], shots[target]] = [shots[target], shots[index]];
+  const films = creativeView.value?.films ?? [];
+  const filmsByOrder = new Map(films.map(film => [film.order, film]));
+  if (filmsByOrder.size !== films.length) return void ElMessage.error("成片编号存在重复，请进入高级画布整理后重试");
+  const renames = shots.flatMap((shot, shotIndex) => {
+    const film = filmsByOrder.get(shot.order);
+    const order = String(shotIndex + 1).padStart(3, "0");
+    return [
+      { nodeId: shot.nodeId, label: `${creativeLabels.storyboard}${order}${shot.confirmed ? "/已确认" : ""}` },
+      ...(film ? [{ nodeId: film.nodeId, label: `${creativeLabels.film}${order}${film.confirmed ? "/已确认" : ""}` }] : []),
+    ];
+  });
+  if (new Set(renames.map(item => item.nodeId)).size !== renames.length) {
+    ElMessage.error("分镜节点存在重复，无法调整顺序");
+    return;
+  }
+  creativeBusy.value = true;
+  try {
+    await getCanvas().call({ name: "renameNodes", args: { renames } });
+    await refreshCreativeView();
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, "分镜顺序调整失败"));
+  } finally {
+    creativeBusy.value = false;
+  }
+}
+
+async function prepareVideoGeneration(storyboardNodeId: string) {
+  const projectId = workspaceStore.project?.id;
+  const shot = creativeView.value?.storyboard.find(item => item.nodeId === storyboardNodeId);
+  const model = userAppStore.models.find(item => item.id === selectedModelId.value && item.mediaType === "video");
+  if (!projectId || !shot || !shot.output || !shot.confirmed || !model || generationBusy.value) return;
+  creativeBusy.value = true;
+  try {
+    const filmNodeId = await ensureFilmNode(shot);
+    const request = await configureVideoGeneration(filmNodeId, model.id, shot.prompt, shot.output, shot.nodeId);
+    const [estimate] = await Promise.all([
+      userAppStore.estimateGeneration({ projectId, modelId: model.id, request }),
+      userAppStore.loadAccount(),
+    ]);
+    if (estimate.taskType !== "video") throw new Error("所选模型已不再是视频模型，请重新选择");
+    pendingGeneration.value = {
+      generationType: "视频片段",
+      modelName: model.displayName,
+      items: [{ nodeId: filmNodeId, modelId: model.id, taskType: "video", request, estimate }],
+    };
+    generationDialogVisible.value = true;
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, "视频估价失败，请稍后重试"));
+    await Promise.allSettled([userAppStore.loadAccount(), userAppStore.loadModels()]);
+  } finally {
+    creativeBusy.value = false;
+  }
+}
+
+async function ensureFilmNode(shot: CreativeMediaCard) {
+  const canvas = getCanvas();
+  let filmNodeId = creativeView.value?.films.find(film => film.order === shot.order)?.nodeId;
+  if (!filmNodeId) {
+    const created = await canvas.call({
+      name: "addNode",
+      args: { type: "remote-videoGenerationNode", position: { x: 720, y: Math.max(0, (shot.order - 1) * 300) }, label: `${creativeLabels.film}${String(shot.order).padStart(3, "0")}` },
+    });
+    if (!isRecord(created) || !isRecord(created.node) || typeof created.node.id !== "string") throw new Error("视频节点创建失败");
+    filmNodeId = created.node.id;
+  }
+  await refreshCreativeView();
+  return filmNodeId;
+}
+
+async function configureVideoGeneration(nodeId: string, modelId: string, prompt: string, image: { path: string; mimeType: string }, sourceNodeId: string) {
+  const canvas = getCanvas();
+  const available = readVideoNodeConfig(await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:getConfig", args: {} } }), false);
+  const model = available.models.find(item => item.providerId === "managed" && item.modelId === modelId);
+  if (!model) throw new Error("所选视频模型已不可用，请重新选择");
+  const mode = model.mode.find(item => Array.isArray(item) && item.some(value => value.startsWith("imageReference:") && Number(value.split(":")[1]) > 0))
+    ?? model.mode.find(item => item === "singleImage")
+    ?? model.mode.find(item => item === "endFrameOptional")
+    ?? model.mode.find(item => item === "startFrameOptional")
+    ?? model.mode.find(item => item === "text");
+  if (!mode) throw new Error("当前视频模型需要两张参考图，导演工作台暂不支持，请更换模型");
+  const useImage = mode !== "text";
+  const canvasState = await canvas.call({ name: "getCanvas", args: {} });
+  const inputEdges = readInputEdges(canvasState, nodeId);
+  const retainedEdge = inputEdges.find(edge => edge.source === sourceNodeId && edge.sourceHandle === "image");
+  const removedEdgeIds = inputEdges.filter(edge => !useImage || edge !== retainedEdge).map(edge => edge.id);
+  if (removedEdgeIds.length) await canvas.call({ name: "deleteEdges", args: { edgeIds: removedEdgeIds } });
+  if (useImage && !retainedEdge) {
+    await canvas.call({
+      name: "connectNodes",
+      args: { connections: [{ source: sourceNodeId, sourceHandle: "image", target: nodeId, targetHandle: "in" }] },
+    });
+  }
+  const configured = readVideoNodeConfig(await canvas.call({
+    name: "nodeTools",
+    args: { nodeId, name: "node:setConfig", args: { providerId: "managed", modelId, mode } },
+  }));
+  await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:setPrompt", args: { prompt } } });
+  const request: Record<string, unknown> = {
+    providerId: "managed",
+    modelId,
+    prompt,
+    mode: configured.config.mode,
+    duration: configured.config.duration,
+    ratio: configured.config.ratio,
+    generateAudio: configured.config.generateAudio,
+    outputDirectory: `assets/${nodeId}`,
+  };
+  if (configured.config.resolution) request.resolution = configured.config.resolution;
+  const reference = { path: image.path, mimeType: image.mimeType };
+  if (useImage && ["startEndRequired", "endFrameOptional"].includes(String(configured.config.mode))) request.firstFrame = reference;
+  else if (useImage && configured.config.mode === "startFrameOptional") request.lastFrame = reference;
+  else if (useImage) request.images = [reference];
+  return request;
+}
+
+function readInputEdges(value: unknown, nodeId: string) {
+  if (!isRecord(value) || !Array.isArray(value.edges)) throw new Error("画布连接读取失败");
+  return value.edges.flatMap(edge => isRecord(edge)
+    && typeof edge.id === "string"
+    && typeof edge.source === "string"
+    && typeof edge.sourceHandle === "string"
+    && edge.target === nodeId
+    && edge.targetHandle === "in"
+    ? [{ id: edge.id, source: edge.source, sourceHandle: edge.sourceHandle }]
+    : []);
+}
+
 function readImageNodeConfig(value: unknown) {
   if (!isRecord(value) || !isRecord(value.config) || !Array.isArray(value.models)) throw new Error("图片节点配置读取失败");
   const models = value.models.flatMap(model => isRecord(model) && typeof model.providerId === "string" && typeof model.modelId === "string"
@@ -372,44 +591,87 @@ function readImageNodeConfig(value: unknown) {
   };
 }
 
+function readVideoNodeConfig(value: unknown, requireRunnable = true) {
+  if (!isRecord(value) || !isRecord(value.config) || !Array.isArray(value.models)) throw new Error("视频节点配置读取失败");
+  const models = value.models.flatMap(model => isRecord(model) && typeof model.providerId === "string" && typeof model.modelId === "string"
+    ? [{ providerId: model.providerId, modelId: model.modelId, mode: Array.isArray(model.mode) ? model.mode.filter(mode => typeof mode === "string" || Array.isArray(mode) && mode.every(item => typeof item === "string")) as Array<string | string[]> : [] }]
+    : []);
+  const mode = typeof value.config.mode === "string" || Array.isArray(value.config.mode) && value.config.mode.every(item => typeof item === "string")
+    ? value.config.mode
+    : undefined;
+  const matchingModes = Array.isArray(value.matchingModes)
+    ? value.matchingModes.filter(item => typeof item === "string" || Array.isArray(item) && item.every(part => typeof part === "string")) as Array<string | string[]>
+    : [];
+  const modeMatches = mode !== undefined && matchingModes.some(item => JSON.stringify(item) === JSON.stringify(mode));
+  if (requireRunnable && (!modeMatches || typeof value.config.duration !== "number" || !value.config.duration || typeof value.config.ratio !== "string")) throw new Error("视频节点没有适用于当前分镜的配置");
+  return {
+    config: {
+      duration: typeof value.config.duration === "number" ? value.config.duration : 0,
+      resolution: typeof value.config.resolution === "string" ? value.config.resolution : "",
+      ratio: typeof value.config.ratio === "string" ? value.config.ratio : "",
+      mode,
+      generateAudio: value.config.generateAudio === true,
+    },
+    models,
+    matchingModes,
+  };
+}
+
 async function confirmGeneration() {
   const projectId = workspaceStore.project?.id;
   const pending = pendingGeneration.value;
-  const character = creativeView.value?.characters.find(item => item.nodeId === pending?.nodeId);
-  if (!projectId || !pending || !character || generationLoading.value || taskDiscovery.value) return;
+  if (!projectId || !pending || generationLoading.value || taskDiscoveries.value.length) return;
   generationLoading.value = true;
   creativeBusy.value = true;
   try {
-    const request = await configureCharacterGeneration(pending.nodeId, pending.modelId, character.prompt);
-    const [estimate] = await Promise.all([
-      userAppStore.estimateGeneration({ projectId, modelId: pending.modelId, request }),
-      userAppStore.loadAccount(),
-    ]);
-    if (estimate.taskType !== "image") throw new Error("所选模型已不再是图片模型，请重新选择");
-    if (estimate.estimatedCredits !== pending.estimate.estimatedCredits || JSON.stringify(request) !== JSON.stringify(pending.request)) {
-      pendingGeneration.value = { ...pending, request, estimate };
+    const items: PreparedGeneration[] = [];
+    for (const item of pending.items) {
+      const request = await reconfigureGeneration(item);
+      const estimate = await userAppStore.estimateGeneration({ projectId, modelId: item.modelId, request });
+      if (estimate.taskType !== item.taskType) throw new Error("模型类型已经变化，请重新选择");
+      items.push({ ...item, request, estimate });
+    }
+    await userAppStore.loadAccount();
+    if (JSON.stringify(items.map(item => ({ request: item.request, credits: item.estimate.estimatedCredits }))) !== JSON.stringify(pending.items.map(item => ({ request: item.request, credits: item.estimate.estimatedCredits })))) {
+      pendingGeneration.value = { ...pending, items };
       ElMessage.warning("模型配置或估价已更新，请重新确认");
       return;
     }
-    if (estimate.estimatedCredits > userAppStore.availableCredits) {
-      pendingGeneration.value = { ...pending, request, estimate };
-      ElMessage.error(`积分不足，还需要 ${estimate.estimatedCredits - userAppStore.availableCredits} 积分`);
+    const totalCredits = items.reduce((total, item) => total + item.estimate.estimatedCredits, 0);
+    if (totalCredits > userAppStore.availableCredits) {
+      pendingGeneration.value = { ...pending, items };
+      ElMessage.error(`积分不足，还需要 ${totalCredits - userAppStore.availableCredits} 积分`);
       return;
     }
-    taskDiscovery.value = {
-      nodeId: pending.nodeId,
-      modelId: pending.modelId,
-      outputDirectory: `assets/${pending.nodeId}`,
-      previousTaskIds: new Set(projectTasks.value.map(task => task.id)),
-      discoveryDeadline: Date.now() + 10_000,
-    };
-    await getCanvas().call({ name: "nodeTools", args: { nodeId: pending.nodeId, name: "node:generateImage", args: {} } });
+    const previousTaskIds = new Set(projectTasks.value.map(task => task.id));
+    let startedCount = 0;
+    for (const item of items) {
+      delete generationErrors[item.nodeId];
+      const discovery: TaskDiscovery = {
+        nodeId: item.nodeId,
+        modelId: item.modelId,
+        taskType: item.taskType,
+        outputDirectory: `assets/${item.nodeId}`,
+        previousTaskIds,
+        discoveryDeadline: Date.now() + 10_000,
+      };
+      taskDiscoveries.value.push(discovery);
+      try {
+        await getCanvas().call({ name: "nodeTools", args: { nodeId: item.nodeId, name: item.taskType === "video" ? "node:generateVideo" : "node:generateImage", args: {} } });
+        startedCount++;
+      } catch (error) {
+        generationErrors[item.nodeId] = apiErrorMessage(error, `${item.taskType === "video" ? "视频" : "图片"}生成未能启动`);
+        taskDiscoveries.value = taskDiscoveries.value.filter(value => value !== discovery);
+      }
+    }
     generationDialogVisible.value = false;
     pendingGeneration.value = undefined;
-    scheduleTaskPoll(300);
+    if (startedCount) {
+      ElMessage.success(`${startedCount} 个生成任务正在创建`);
+      scheduleTaskPoll(300);
+    } else ElMessage.error("生成任务均未能启动，请检查模型配置后重试");
   } catch (error) {
-    taskDiscovery.value = undefined;
-    ElMessage.error(apiErrorMessage(error, "图片生成未能启动"));
+    ElMessage.error(apiErrorMessage(error, "生成任务未能启动"));
     await Promise.allSettled([userAppStore.loadAccount(), userAppStore.loadModels(), userAppStore.loadTasks()]);
     await refreshCreativeView();
     if (activeTasks.value.length) scheduleTaskPoll();
@@ -419,6 +681,18 @@ async function confirmGeneration() {
   }
 }
 
+async function reconfigureGeneration(item: PreparedGeneration) {
+  if (item.taskType === "image") {
+    const card = [...(creativeView.value?.characters ?? []), ...(creativeView.value?.storyboard ?? [])].find(value => value.nodeId === item.nodeId);
+    if (!card) throw new Error("待生成内容已经变化，请关闭确认框后重试");
+    return configureImageGeneration(item.nodeId, item.modelId, card.prompt);
+  }
+  const film = creativeView.value?.films.find(value => value.nodeId === item.nodeId);
+  const shot = creativeView.value?.storyboard.find(value => value.order === film?.order);
+  if (!shot?.output) throw new Error("分镜图片已经变化，请关闭确认框后重试");
+  return configureVideoGeneration(item.nodeId, item.modelId, shot.prompt, shot.output, shot.nodeId);
+}
+
 function cancelGeneration() {
   if (generationLoading.value) return;
   generationDialogVisible.value = false;
@@ -426,7 +700,7 @@ function cancelGeneration() {
 }
 
 function scheduleTaskPoll(delay = 2_000) {
-  if (disposed || taskPollTimer !== undefined || taskPolling) return;
+  if (disposed || document.hidden || taskPollTimer !== undefined || taskPolling) return;
   taskPollTimer = window.setTimeout(() => {
     taskPollTimer = undefined;
     void pollGenerationTasks();
@@ -439,40 +713,43 @@ async function pollGenerationTasks() {
   try {
     await Promise.all([userAppStore.loadTasks(), userAppStore.loadAccount()]);
     await refreshCreativeView();
-    const discovery = taskDiscovery.value;
-    if (discovery && !discovery.taskId) {
-      const created = projectTasks.value.find(task =>
-        !discovery.previousTaskIds.has(task.id)
-        && task.taskType === "image"
-        && task.modelId === discovery.modelId
-        && task.requestSummary.input.outputDirectory === discovery.outputDirectory,
-      );
-      if (created) {
-        discovery.taskId = created.id;
-        ElMessage.success("生成任务已创建");
-      } else if (Date.now() >= discovery.discoveryDeadline) {
-        taskDiscovery.value = undefined;
-        ElMessage.error("生成任务未能启动，请检查模型和积分后重试");
-        await userAppStore.loadModels();
+    const remaining: TaskDiscovery[] = [];
+    for (const discovery of taskDiscoveries.value) {
+      if (!discovery.taskId) {
+        const created = projectTasks.value.find(task =>
+          !discovery.previousTaskIds.has(task.id)
+          && task.taskType === discovery.taskType
+          && task.modelId === discovery.modelId
+          && task.requestSummary?.input?.outputDirectory === discovery.outputDirectory,
+        );
+        if (created) discovery.taskId = created.id;
+        else if (Date.now() >= discovery.discoveryDeadline) {
+          generationErrors[discovery.nodeId] = "生成任务未能创建，请检查模型和积分后重试";
+          continue;
+        }
       }
-    }
-    if (discovery?.taskId) {
+      if (!discovery.taskId) {
+        remaining.push(discovery);
+        continue;
+      }
       const task = projectTasks.value.find(item => item.id === discovery.taskId);
-      const outputReady = !!creativeView.value?.characters.find(item => item.nodeId === discovery.nodeId)?.output;
+      const outputReady = [...(creativeView.value?.characters ?? []), ...(creativeView.value?.storyboard ?? []), ...(creativeView.value?.films ?? [])]
+        .some(item => item.nodeId === discovery.nodeId && item.output);
       const terminal = !!task && ["succeeded", "failed", "cancelled"].includes(task.status);
-      if (outputReady || (terminal && task.status !== "succeeded")) {
-        taskDiscovery.value = undefined;
-      } else if (task?.status === "succeeded") {
+      if (outputReady || terminal && task.status !== "succeeded") continue;
+      if (task?.status === "succeeded") {
         discovery.settleDeadline ??= Date.now() + 5_000;
-        if (Date.now() >= discovery.settleDeadline) taskDiscovery.value = undefined;
+        if (Date.now() >= discovery.settleDeadline) continue;
       }
+      remaining.push(discovery);
     }
+    taskDiscoveries.value = remaining;
   } catch (error) {
     ElMessage.error(apiErrorMessage(error, "生成任务状态刷新失败"));
   } finally {
     taskPolling = false;
   }
-  if (activeTasks.value.length || taskDiscovery.value) scheduleTaskPoll();
+  if (activeTasks.value.length || taskDiscoveries.value.length) scheduleTaskPoll();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -513,7 +790,9 @@ async function openAdvanced() {
 
     .creativeWarning { margin-top: 18px; }
     :deep(.scriptStage),
-    :deep(.characterStage) { margin-top: 24px; }
+    :deep(.characterStage),
+    :deep(.storyboardStage),
+    :deep(.filmStage) { margin-top: 24px; }
 
     .stageHeading {
       display: flex;
@@ -524,26 +803,6 @@ async function openAdvanced() {
       p:last-child { margin: 0; color: var(--studioMuted); line-height: 1.6; }
     }
 
-    .stageChecklist {
-      display: grid;
-      gap: 11px;
-      margin: 30px 0;
-      padding: 20px;
-      border-radius: 14px;
-      background: var(--studioSurfaceMuted);
-      list-style: none;
-      li { display: flex; align-items: center; gap: 9px; color: var(--studioText); font-size: 13px; svg { flex-shrink: 0; color: var(--studioAccent); } }
-    }
-
-    .modelChoice {
-      display: grid;
-      max-width: 460px;
-      gap: 8px;
-      label { color: var(--studioText); font-size: 13px; font-weight: 650; }
-      p { margin: 0; color: var(--studioMuted); font-size: 11px; line-height: 1.55; }
-      :deep(.el-select__wrapper) { border-radius: 12px; }
-      :deep(.el-select-dropdown__item small) { float: right; color: var(--studioAccent); }
-    }
   }
 
   .projectAside { display: grid; gap: 14px; }

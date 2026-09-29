@@ -21,16 +21,6 @@ export default Router().post("/", validateFields({
     return;
   }
   const auth = getAuth(res);
-  const controller = new AbortController();
-  let taskId: string | undefined;
-  const close = () => controller.abort();
-  const cancel = () => {
-    if (taskId) void u.generation.cancelGenerationTask(auth.user.id, auth.user.role, taskId).catch(() => undefined);
-  };
-  res.once("close", close);
-  req.once("aborted", close);
-  req.socket.once("close", close);
-  controller.signal.addEventListener("abort", cancel, { once: true });
   try {
     const created = await u.generation.createGenerationTask(auth.user.id, {
       projectId,
@@ -38,7 +28,6 @@ export default Router().post("/", validateFields({
       request: parsed.data,
       idempotencyKey: requestId ? `media:${requestId}` : crypto.randomUUID(),
     }, { external: true, expectedTaskType: mediaType });
-    taskId = created.task.id;
     res.set({
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
@@ -46,9 +35,9 @@ export default Router().post("/", validateFields({
       "X-Minifeel-Task-Id": created.task.id,
     });
     res.flushHeaders();
-    if (controller.signal.aborted) await u.generation.cancelGenerationTask(auth.user.id, auth.user.role, created.task.id);
-    else if (created.created) await u.generation.executeGenerationTask(created.task.id, controller.signal);
-    const task = await u.generation.waitGenerationTask(auth.user.id, auth.user.role, created.task.id, controller.signal);
+    // ACT: 浏览器刷新只断开等待连接，后台任务继续；用户主动停止由取消接口处理。
+    if (created.created) await u.generation.executeGenerationTask(created.task.id);
+    const task = await u.generation.waitGenerationTask(auth.user.id, auth.user.role, created.task.id);
     if (task.status !== "succeeded") {
       throw Object.assign(new Error(task.errorMessage || (task.status === "cancelled" ? "生成已取消" : "生成失败")), { status: 409 });
     }
@@ -61,10 +50,5 @@ export default Router().post("/", validateFields({
       const status = (reason as { status?: number } | null)?.status ?? 500;
       res.end(JSON.stringify(error(redactErrorMessage(reason, "生成失败"), null, status)));
     }
-  } finally {
-    res.off("close", close);
-    req.off("aborted", close);
-    req.socket.off("close", close);
-    controller.signal.removeEventListener("abort", cancel);
   }
 });

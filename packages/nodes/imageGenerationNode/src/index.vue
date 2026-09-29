@@ -154,7 +154,6 @@ const previewUrl = files.useFileUrl(
 onMounted(() => loadModels().catch((error) => showError(error, "模型读取失败")));
 onScopeDispose(() => {
   disposed = true;
-  generationController?.abort();
 });
 
 async function replaceOutput(event: Event) {
@@ -219,7 +218,7 @@ async function startGeneration() {
     images: refList.value.flatMap((item) => (item.dataType === "IMAGE" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : [])),
   };
   generationController = controller;
-  // ACT: 工具立即返回，任务由节点持有，停止或卸载时取消。
+  // ACT: 工具立即返回，任务由节点持有；仅用户停止或删除节点时取消。
   generation = generationState.run(() => workspace
     .list()
     .then(({ projectId }) => {
@@ -247,6 +246,8 @@ nodeEvent.on("delete", async () => {
   generationController?.abort();
   try {
     await generation;
+    const { projectId } = await files.getWorkspaceFiles().list();
+    await ai.cancelMedia(projectId, `assets/${id}`);
     await files.removeNodeFiles();
   } finally {
     deleting.value = false;
@@ -329,6 +330,18 @@ nodeTools.register({
     data.value.prompt = value;
     data.value.promptModel = value.split("\n").map((text) => [{ type: "Write", text }]);
     return { prompt: value };
+  },
+});
+
+nodeTools.register({
+  name: "restoreOutput",
+  description: "把本节点已完成的后台任务结果恢复到画布；仅接受本节点素材目录中的图片文件，不启动生成",
+  parameters: z.strictObject({ path: z.string().min(1), mimeType: z.string().startsWith("image/") }),
+  execute({ path, mimeType }) {
+    if (generating.value || deleting.value || uploading.value) throw new Error("节点正在处理，请稍后恢复结果");
+    if (!path.startsWith(`assets/${id}/`) || path.includes("\0") || path.split(/[\\/]/).includes("..")) throw new Error("任务结果不属于当前节点");
+    outputs.value.image = { dataType: "IMAGE", value: { url: path, mimeType } };
+    return { path, mimeType };
   },
 });
 

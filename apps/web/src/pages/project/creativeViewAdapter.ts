@@ -27,6 +27,7 @@ export type CreativeMediaCard = {
   draftLabel: string;
   confirmedLabel: string;
   output?: { path: string; mimeType: string };
+  outputPersisted: boolean;
   task?: GenerationTask;
 };
 
@@ -51,10 +52,6 @@ type CanvasNode = {
   id: string;
   type: string;
   data: Record<string, unknown>;
-};
-
-type GenerationTaskWithSummary = GenerationTask & {
-  requestSummary?: { input?: Record<string, unknown> };
 };
 
 export function parseCreativeLabel(label: unknown): CreativeLabel | undefined {
@@ -113,6 +110,7 @@ export async function readCreativeView(projectId: string, tasks: GenerationTask[
     }
     const expectedType = parsed.type === "video" ? "remote-videoGenerationNode" : "remote-imageGenerationNode";
     if (node.type !== expectedType) throw new Error(`项目画布读取失败：${String(node.data.label)} 的节点类型无效`);
+    const persistedOutput = readMediaOutput(node.data.outputs, parsed.type === "video" ? "VIDEO" : "IMAGE");
     const card: CreativeMediaCard = {
       nodeId: node.id,
       title: parsed.title,
@@ -121,9 +119,10 @@ export async function readCreativeView(projectId: string, tasks: GenerationTask[
       confirmed: parsed.confirmed,
       draftLabel: parsed.draftLabel,
       confirmedLabel: parsed.confirmedLabel,
-      output: readMediaOutput(node.data.outputs, parsed.type === "video" ? "VIDEO" : "IMAGE"),
+      outputPersisted: !!persistedOutput,
       task: findNodeTask(tasks, node.id),
     };
+    card.output = persistedOutput ?? readTaskOutput(card.task, parsed.type === "video" ? "video" : "image");
     if (parsed.type === "characters") characters.push(card);
     else if (parsed.type === "storyboard") storyboard.push(card);
     else films.push(card);
@@ -139,7 +138,7 @@ export async function readCreativeView(projectId: string, tasks: GenerationTask[
       script: script ? script.confirmed ? "complete" : "review" : "notStarted",
       characters: mediaStatus(characters),
       storyboard: mediaStatus(storyboard),
-      video: mediaStatus(films),
+      video: filmStatus(storyboard, films),
     },
     warnings,
   };
@@ -170,15 +169,29 @@ function readMediaOutput(value: unknown, dataType: "IMAGE" | "VIDEO") {
 
 function findNodeTask(tasks: GenerationTask[], nodeId: string) {
   return tasks
-    .filter(task => (task as GenerationTaskWithSummary).requestSummary?.input?.outputDirectory === `assets/${nodeId}`)
+    .filter(task => task.requestSummary?.input?.outputDirectory === `assets/${nodeId}`)
     .toSorted((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
 }
 
-function mediaStatus(cards: CreativeMediaCard[]): ProjectStageStatus {
+function readTaskOutput(task: GenerationTask | undefined, mediaType: "image" | "video") {
+  const file = task?.status === "succeeded" ? task.result?.files?.find(item => item.mimeType.startsWith(`${mediaType}/`)) : undefined;
+  const path = safeWorkspacePath(file?.path);
+  return path && file?.mimeType ? { path, mimeType: file.mimeType } : undefined;
+}
+
+function mediaStatus(cards: CreativeMediaCard[], requireConfirmation = true): ProjectStageStatus {
   if (!cards.length) return "notStarted";
   if (cards.some(card => card.task?.status === "pending" || card.task?.status === "running")) return "running";
   if (cards.some(card => card.task?.status === "failed")) return "failed";
-  if (cards.every(card => card.confirmed && card.output)) return "complete";
+  if (cards.every(card => (!requireConfirmation || card.confirmed) && card.output)) return "complete";
+  return "review";
+}
+
+function filmStatus(storyboard: CreativeMediaCard[], films: CreativeMediaCard[]): ProjectStageStatus {
+  if (!films.length) return "notStarted";
+  if (films.some(card => card.task?.status === "pending" || card.task?.status === "running")) return "running";
+  if (films.some(card => card.task?.status === "failed")) return "failed";
+  if (storyboard.length && storyboard.every(shot => films.some(film => film.order === shot.order && film.output))) return "complete";
   return "review";
 }
 

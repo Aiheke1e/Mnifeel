@@ -39,7 +39,7 @@
 | 2. 共享画布运行层与导演助手 | 已完成 | 普通页复用固定尺寸隐藏画布运行层；普通与高级模式共用保存拦截；Agent 增加导演模式并隐藏技术入口；启动时补齐缺失的内置工具 | Web、Server 类型检查与构建通过；浏览器验证新项目首条消息只发送一次并创建真实文本节点、刷新不重复、普通模式隐藏技术卡片、高级模式保持完整、窄屏折叠无溢出；断开 Server 后保存失败会拦截退出，恢复后可保存 | — |
 | 3. 创作视图适配、剧本与角色 | 已完成 | 新增画布标签适配器、剧本编辑确认、角色设定编辑锁定与已有预览；收紧首轮 Agent 指令，并让导演助手工具成功后刷新创作视图；并发刷新只提交最新结果且保留未保存输入 | Web 类型检查和生产构建通过；浏览器验证新项目只创建文本草稿节点，剧本与角色修改刷新后保留，保存一个角色不会覆盖另一个角色的未保存输入，高级画布读取同一数据；旧项目显示兼容提示且修复操作只填入 Agent；损坏 JSON 显示明确错误且原文件哈希恢复一致；干净页面无控制台错误 | — |
 | 4. 生成估价与确认 | 已完成 | 新增只读生成估价接口并让估价与任务创建共用模型、项目、供应商、白名单及计费校验；角色阶段加入真实模型估价、积分确认、图片生成、账户与任务轮询 | Server 路由生成、类型检查和生产构建通过；Web 类型检查和生产构建通过；HTTP 验证估价无任务、流水或余额副作用，无权项目返回 404、停用模型返回 409、白名单视频估价为 0；浏览器验证取消无副作用，真实图片任务完成后扣除 1 积分、冻结归零、预览回填且刷新后保留，控制台无业务错误；已有失败任务记录确认冻结积分全额退回 | — |
-| 5. 分镜、成片与任务恢复 | 未开始 | — | — | — |
+| 5. 分镜、成片与任务恢复 | 已完成 | 新增分镜编辑、确认、排序、批量估价生成与成片预览下载；按模型能力选择图生或文生视频；浏览器刷新不再取消后台任务，完成结果可恢复到原节点 | Web、Server、节点脚手架及图片/视频节点类型检查通过，Web 与 Server 生产构建通过；浏览器验证 3 个分镜的批量确认、取消无副作用、排序刷新后保留及成片入口；遵守共享视频密钥限频，本轮未发起真实视频请求 | 待 Task 6 在无并发窗口完成单条视频真实生成和服务重启恢复验收 |
 | 6. 全流程验收与生产部署 | 未开始 | — | — | — |
 
 ---
@@ -494,6 +494,12 @@ git push origin dev
 - Modify: `apps/web/src/pages/project/index.vue`
 - Modify: `apps/web/src/stores/userApp.ts`
 - Modify: `apps/web/src/pages/app/appFormat.ts`
+- Modify: `apps/server/src/routes/ai/media/generate.ts`
+- Modify: `apps/server/src/routes/generation/cancel.ts`
+- Modify: `apps/server/src/utils/generation/index.ts`
+- Modify: `packages/nodeScaffold/src/nodeAi.ts`
+- Modify: `packages/nodes/imageGenerationNode/src/index.vue`
+- Modify: `packages/nodes/videoGenerationNode/src/index.vue`
 - Modify: `docs/productExperienceIssues.md`
 - Modify: `docs/superpowers/plans/guidedStudioPlan.md`
 
@@ -502,7 +508,7 @@ git push origin dev
 - Consumes: `CreativeView`、`GenerationEstimate`、统一确认组件、节点 `setPrompt`/`setConfig`/`generateImage`/`generateVideo`、任务列表和工作区文件 URL。
 - Produces: 可编辑和排序的分镜卡、视频任务与成片预览、刷新后可恢复的阶段状态。
 
-- [ ] **Step 1: 补全生成任务公开类型**
+- [x] **Step 1: 补全生成任务公开类型**
 
 `GenerationTask` 增加服务端已经返回的字段：
 
@@ -518,25 +524,25 @@ heartbeatAt?: string | null;
 
 不在前端推测供应商任务 ID，也不展示原始请求中的敏感字段。
 
-- [ ] **Step 2: 实现分镜阶段**
+- [x] **Step 2: 实现分镜阶段**
 
 `storyboardStage.vue` 展示顺序、镜头描述、图片预览、模型、任务状态、编辑、单个生成和批量生成。调整顺序时批量调用 `renameNodes`，把标签重新编号为连续三位编号；任一节点校验失败时整批不提交。修改镜头描述时去掉 `/已确认`，用户确认镜头后再增加该后缀。
 
 批量生成使用用户在分镜阶段选择的同一个管理员公开模型。先为所有待生成节点读取并设置实际配置，按各节点请求分别估价，确认框展示模型、总数量和总预计积分；用户确认后顺序触发节点生成，单个失败记录在对应卡片，不覆盖已经成功的镜头。
 
-- [ ] **Step 3: 实现视频生成入口**
+- [x] **Step 3: 实现视频生成入口**
 
-对已经确认图片的分镜创建或复用 `remote-videoGenerationNode`，标签使用相同顺序的 `Minifeel/成片/<编号>`。通过现有画布工具连接分镜图片输出与视频节点输入，调用视频节点 `getConfig`、`setConfig` 和 `setPrompt`，估价确认后调用 `generateVideo`。
+对已经确认图片的分镜创建或复用 `remote-videoGenerationNode`，标签使用相同顺序的 `Minifeel/成片/<编号>`。调用视频节点 `getConfig` 读取模型能力：支持参考图时通过现有画布工具连接分镜图片输出与视频节点输入；仅支持文生视频时移除不兼容引用并使用分镜提示词。随后调用 `setConfig`、`setPrompt`，估价确认后调用 `generateVideo`。
 
 视频模型时长、分辨率、模式和引用数量全部使用 `getConfig` 返回的能力，不写死供应商不支持的选项。当前视频分钟限频由后端错误显示在对应镜头，不做无限自动重试。
 
-- [ ] **Step 4: 实现成片阶段**
+- [x] **Step 4: 实现成片阶段**
 
 `filmStage.vue` 按镜头展示视频任务进度、失败原因、退款、预览和下载。预览通过 `useWorkspaceFiles(projectId).acquireUrl` 获取；下载复用 `downloadFile` 与 `files.read(path)`，不暴露服务器真实路径。
 
 第一版把各镜头视频片段作为“成片结果”展示，不新增时间线拼接、字幕、配音和转场。
 
-- [ ] **Step 5: 实现任务轮询与阶段恢复**
+- [x] **Step 5: 实现任务轮询与阶段恢复**
 
 项目页首次加载并行读取项目、模型、账户、任务和创作视图。存在当前项目的 `pending`/`running` 任务时每 2 秒刷新任务和账户；页面隐藏时暂停轮询，重新可见后立即刷新；组件卸载时清理定时器。
 
@@ -548,13 +554,13 @@ heartbeatAt?: string | null;
 - 已有草稿、未确认节点或未完成生成为 `review`。
 - 剧本标签带 `/已确认` 时剧本阶段为 `complete`；角色和分镜节点全部带 `/已确认` 且所需图片已有结果时对应阶段为 `complete`；成片节点全部有成功视频结果时成片阶段为 `complete`。
 
-- [ ] **Step 6: 统一用户可读错误**
+- [x] **Step 6: 统一用户可读错误**
 
 扩展 `friendlyTaskError`，把限频、积分不足、模型停用、供应商连接失败、任务取消和服务重启恢复映射为用户可执行的提示；保留未知错误的服务端脱敏消息，不显示堆栈、请求体或 API Key。
 
 把测试中发现的问题记录到 `docs/productExperienceIssues.md`，已修复项写明提交，不删除仍需后续处理的历史记录。
 
-- [ ] **Step 7: 验证分镜到成片流程**
+- [x] **Step 7: 验证分镜到成片流程**
 
 Run:
 
@@ -569,10 +575,12 @@ Expected: 分镜编辑和重新排序刷新后保持；取消批量确认不产�
 
 视频真实调用遵守一分钟一次限制：先与其他调用者错开，只提交一个最短镜头；返回限频时记录问题并验证错误展示，不重复抢占额度。
 
-- [ ] **Step 8: 更新进度并提交推送**
+实际验证（2026-09-29）：项目 `7827953c-6f80-4a8e-90ff-a38795a392b7` 展示 3 个分镜；批量确认准确显示 3 项、预计 3 积分，取消后任务和积分不变；调整分镜顺序后刷新仍保持，并已恢复原顺序；成片阶段显示 3 个镜头和管理员启用的 Agnes 模型。媒体任务按项目与输出目录互斥，刷新后重复生成会复用活动任务，删除节点先取消同目录活动任务；主动停止使用请求发出前生成的 requestId 消除响应头竞态。Web、Server、节点脚手架、图片节点和视频节点类型检查通过，Web 与 Server 生产构建通过。本轮按用户要求不调用共享视频接口，真实视频输出、服务重启中断与退款留到 Task 6 的无并发窗口验收。
+
+- [x] **Step 8: 更新进度并提交推送**
 
 ```powershell
-git add apps/web/src/pages/project/components/storyboardStage.vue apps/web/src/pages/project/components/filmStage.vue apps/web/src/pages/project/creativeViewAdapter.ts apps/web/src/pages/project/index.vue apps/web/src/stores/userApp.ts apps/web/src/pages/app/appFormat.ts docs/productExperienceIssues.md docs/superpowers/plans/guidedStudioPlan.md
+git add apps/web/src/pages/project/components/storyboardStage.vue apps/web/src/pages/project/components/filmStage.vue apps/web/src/pages/project/creativeViewAdapter.ts apps/web/src/pages/project/index.vue apps/web/src/stores/userApp.ts apps/web/src/pages/app/appFormat.ts apps/server/src/routes/ai/media/generate.ts apps/server/src/routes/generation/cancel.ts apps/server/src/utils/generation/index.ts packages/nodeScaffold/src/nodeAi.ts packages/nodes/imageGenerationNode/src/index.vue packages/nodes/videoGenerationNode/src/index.vue docs/productExperienceIssues.md docs/superpowers/plans/guidedStudioPlan.md
 git commit -m "feat(web): 完成分镜与成片创作流程"
 git pull --rebase origin dev
 git push origin dev

@@ -69,6 +69,27 @@ type GenerationOptions = {
   expectedTaskType?: MediaType;
 };
 
+const pendingTaskCancellations = new Map<string, number>();
+const taskCancellationTtl = 60_000;
+
+function taskCancellationKey(userId: string, kind: "request" | "output", value: string) {
+  return `${userId}:${kind}:${value}`;
+}
+
+function markTaskCancellation(key: string) {
+  const now = Date.now();
+  for (const [candidate, expiresAt] of pendingTaskCancellations) {
+    if (expiresAt <= now) pendingTaskCancellations.delete(candidate);
+  }
+  pendingTaskCancellations.set(key, now + taskCancellationTtl);
+}
+
+function takeTaskCancellation(key: string) {
+  const expiresAt = pendingTaskCancellations.get(key);
+  pendingTaskCancellations.delete(key);
+  return expiresAt !== undefined && expiresAt > Date.now();
+}
+
 function invalid(message: string, status = 400): never {
   throw Object.assign(new Error(message), { status });
 }
@@ -167,13 +188,32 @@ export async function createGenerationTask(userId: string, input: {
   request: Record<string, unknown>;
 }, options: GenerationOptions = {}) {
   const result = await getDatabase().begin(async transaction => {
-    await transaction`select pg_advisory_xact_lock(hashtext(${`${userId}:${input.idempotencyKey}`}))`;
+    const requestLock = `${userId}:request:${input.idempotencyKey}`;
+    await transaction`select pg_advisory_xact_lock(hashtext(${requestLock}))`;
     const existing = await transaction<GenerationTaskRow[]>`
       select * from "generationTasks"
       where "userId" = ${userId} and "idempotencyKey" = ${input.idempotencyKey}
       limit 1
     `;
     if (existing[0]) return { task: existing[0], created: false };
+    const outputDirectory = typeof input.request.outputDirectory === "string" && input.request.outputDirectory
+      ? input.request.outputDirectory
+      : undefined;
+    if (outputDirectory) {
+      const outputLock = `${userId}:output:${input.projectId}:${outputDirectory}`;
+      await transaction`select pg_advisory_xact_lock(hashtext(${outputLock}))`;
+      const active = await transaction<GenerationTaskRow[]>`
+        select * from "generationTasks"
+        where "userId" = ${userId} and "projectId" = ${input.projectId}
+          and "status" in ('pending', 'running')
+          and "requestSummary"->'input'->>'outputDirectory' = ${outputDirectory}
+        order by "createdAt" desc
+        limit 1
+      `;
+      if (active[0]) return { task: active[0], created: false };
+      if (takeTaskCancellation(taskCancellationKey(userId, "output", `${input.projectId}:${outputDirectory}`))) invalid("生成已取消", 409);
+    }
+    if (takeTaskCancellation(taskCancellationKey(userId, "request", input.idempotencyKey))) invalid("生成已取消", 409);
     const estimate = await prepareGeneration(transaction, userId, input, options);
     const { taskType, request, pricing, estimatedUsage, billable, estimatedCredits } = estimate;
     const taskId = randomUUID();
@@ -255,6 +295,50 @@ export async function cancelGenerationTask(userId: string, role: UserRole, taskI
   abortGenerationTask(taskId);
   publishGenerationEvent(eventFromTask(task));
   return publicGenerationTask(task);
+}
+
+export async function cancelGenerationTaskByIdempotencyKey(userId: string, role: UserRole, idempotencyKey: string) {
+  const cancellationKey = taskCancellationKey(userId, "request", idempotencyKey);
+  markTaskCancellation(cancellationKey);
+  const taskId = await getDatabase().begin(async transaction => {
+    await transaction`select pg_advisory_xact_lock(hashtext(${`${userId}:request:${idempotencyKey}`}))`;
+    const rows = await transaction<Array<{ id: string }>>`
+      select "id" from "generationTasks"
+      where "userId" = ${userId} and "idempotencyKey" = ${idempotencyKey}
+      limit 1
+    `;
+    return rows[0]?.id;
+  });
+  if (!taskId) return null;
+  try {
+    return await cancelGenerationTask(userId, role, taskId);
+  } finally {
+    pendingTaskCancellations.delete(cancellationKey);
+  }
+}
+
+export async function cancelActiveGenerationTask(userId: string, role: UserRole, projectId: string, outputDirectory: string) {
+  const outputValue = `${projectId}:${outputDirectory}`;
+  const cancellationKey = taskCancellationKey(userId, "output", outputValue);
+  markTaskCancellation(cancellationKey);
+  const taskId = await getDatabase().begin(async transaction => {
+    await transaction`select pg_advisory_xact_lock(hashtext(${`${userId}:output:${outputValue}`}))`;
+    const rows = await transaction<Array<{ id: string }>>`
+      select "id" from "generationTasks"
+      where "userId" = ${userId} and "projectId" = ${projectId}
+        and "status" in ('pending', 'running')
+        and "requestSummary"->'input'->>'outputDirectory' = ${outputDirectory}
+      order by "createdAt" desc
+      limit 1
+    `;
+    return rows[0]?.id;
+  });
+  if (!taskId) return null;
+  try {
+    return await cancelGenerationTask(userId, role, taskId);
+  } finally {
+    pendingTaskCancellations.delete(cancellationKey);
+  }
 }
 
 export async function waitGenerationTask(

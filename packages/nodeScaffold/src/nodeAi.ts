@@ -163,11 +163,38 @@ export function useNodeAi() {
   }
 
   async function generateMedia<T extends "image" | "video">(mediaType: T, input: NodeImageRequest | NodeVideoRequest, signal?: AbortSignal) {
-    return readResult<{ path: string; mimeType: string; mediaType: T }[]>(await fetch("/api/ai/media/generate", {
+    const requestId = crypto.randomUUID();
+    let taskId: string | null = null;
+    const cancel = () => {
+      void fetch("/api/generation/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId: taskId ?? undefined, requestId, projectId: input.projectId, outputDirectory: input.outputDirectory }),
+        keepalive: true,
+      }).catch(() => undefined);
+    };
+    if (signal?.aborted) cancel();
+    else signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      const response = await fetch("/api/ai/media/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-minifeel-workspace": "1" },
+        body: JSON.stringify({ ...input, mediaType, requestId }),
+        signal: requestSignal(signal),
+      });
+      taskId = response.headers.get("X-Minifeel-Task-Id");
+      if (signal?.aborted) cancel();
+      return await readResult<{ path: string; mimeType: string; mediaType: T }[]>(response);
+    } finally {
+      signal?.removeEventListener("abort", cancel);
+    }
+  }
+
+  async function cancelMedia(projectId: string, outputDirectory: string) {
+    return readResult<unknown>(await fetch("/api/generation/cancel", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-minifeel-workspace": "1" },
-      body: JSON.stringify({ ...input, mediaType, requestId: crypto.randomUUID() }),
-      signal: requestSignal(signal),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, outputDirectory }),
     }));
   }
 
@@ -229,5 +256,5 @@ export function useNodeAi() {
     return { text, ...(reasoning ? { reasoning } : {}) };
   }
 
-  return { getModels, getMediaModels, generateImage, generateVideo, generate };
+  return { getModels, getMediaModels, cancelMedia, generateImage, generateVideo, generate };
 }

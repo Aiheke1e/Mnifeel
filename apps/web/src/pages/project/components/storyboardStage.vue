@@ -1,0 +1,178 @@
+<template>
+  <section class="storyboardStage">
+    <el-alert v-if="errorMessage" :title="errorMessage" type="error" showIcon :closable="false" />
+    <div v-else-if="loading" class="stageLoading" v-loading="true" aria-label="正在读取分镜" />
+    <div v-else-if="!shots.length" class="missingContent">
+      <icon-photo-off :size="34" aria-hidden="true" />
+      <h3>还没有分镜草稿</h3>
+      <p>请让导演助手先把剧本拆成连续镜头。</p>
+    </div>
+    <template v-else>
+      <div class="stageTools">
+        <div class="modelChoice">
+          <label for="storyboardModel">分镜图片模型</label>
+          <el-select id="storyboardModel" :modelValue="modelValue" :loading="modelsLoading" placeholder="暂无可用模型" @update:modelValue="emit('update:modelValue', String($event))">
+            <el-option v-for="model in models" :key="model.id" :label="model.displayName" :value="model.id" />
+          </el-select>
+        </div>
+        <el-button type="primary" :disabled="batchDisabled" @click="emit('requestGenerateAll', batchNodeIds)">批量生成 {{ batchCount }} 个分镜</el-button>
+      </div>
+
+      <div class="shotList">
+        <article v-for="(shot, index) in shots" :key="shot.nodeId" class="shotCard">
+          <div class="shotPreview">
+            <img v-if="previewUrls[shot.nodeId]" :src="previewUrls[shot.nodeId]" :alt="`镜头 ${shot.title} 预览`" />
+            <icon-photo v-else :size="42" aria-hidden="true" />
+          </div>
+          <div class="shotBody">
+            <header>
+              <div><p class="eyebrow">镜头 {{ shot.title }}</p><h3>分镜画面</h3></div>
+              <el-tag :type="statusType(shot)" effect="light" round>{{ statusText(shot) }}</el-tag>
+            </header>
+            <el-alert v-if="cardError(shot)" :title="cardError(shot)" type="error" showIcon :closable="false" />
+            <el-input v-model="drafts[shot.nodeId]" type="textarea" :autosize="{ minRows: 4, maxRows: 8 }" :disabled="busy" aria-label="分镜生成提示词" />
+            <footer>
+              <span class="orderButtons">
+                <el-button circle :disabled="busy || index === 0" aria-label="向前移动镜头" @click="emit('reorder', shot.nodeId, -1)"><icon-arrow-up :size="16" /></el-button>
+                <el-button circle :disabled="busy || index === shots.length - 1" aria-label="向后移动镜头" @click="emit('reorder', shot.nodeId, 1)"><icon-arrow-down :size="16" /></el-button>
+              </span>
+              <el-button :disabled="busy || drafts[shot.nodeId] === shot.prompt" @click="emit('saveContent', shot.nodeId, drafts[shot.nodeId] || '', shot.draftLabel)">保存描述</el-button>
+              <el-button type="success" plain :disabled="busy || shot.confirmed || drafts[shot.nodeId] !== shot.prompt" @click="emit('confirmContent', shot.nodeId, shot.confirmedLabel)">确认镜头</el-button>
+              <el-button type="primary" :loading="isGenerating(shot)" :disabled="generateDisabled(shot)" :title="generateHint(shot)" @click="emit('requestGenerate', shot.nodeId)">{{ shot.output ? "重新生成" : "生成分镜" }}</el-button>
+            </footer>
+          </div>
+        </article>
+      </div>
+    </template>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, onBeforeUnmount, reactive, watch } from "vue";
+import { IconArrowDown, IconArrowUp, IconPhoto, IconPhotoOff } from "@tabler/icons-vue";
+import useWorkspaceFiles from "@/lib/workspaceFiles";
+import { friendlyTaskError } from "@/pages/app/appFormat";
+import type { PublicModel } from "@/stores/userApp";
+import type { CreativeMediaCard } from "../creativeViewAdapter";
+
+const props = defineProps<{
+  projectId: string;
+  shots: CreativeMediaCard[];
+  models: PublicModel[];
+  modelValue: string;
+  modelsLoading: boolean;
+  loading: boolean;
+  errorMessage: string;
+  generationErrors: Record<string, string>;
+  busy: boolean;
+}>();
+const emit = defineEmits<{
+  "update:modelValue": [value: string];
+  saveContent: [nodeId: string, prompt: string, draftLabel: string];
+  confirmContent: [nodeId: string, confirmedLabel: string];
+  reorder: [nodeId: string, direction: -1 | 1];
+  requestGenerate: [nodeId: string];
+  requestGenerateAll: [nodeIds: string[]];
+}>();
+const drafts = reactive<Record<string, string>>({});
+const sourcePrompts = reactive<Record<string, string>>({});
+const previewUrls = reactive<Record<string, string>>({});
+let releases: Array<() => void> = [];
+let previewVersion = 0;
+const batchNodeIds = computed(() => props.shots.filter(shot => !shot.output && shot.prompt.trim() && drafts[shot.nodeId] === shot.prompt && !isGenerating(shot)).map(shot => shot.nodeId));
+const batchCount = computed(() => batchNodeIds.value.length);
+const batchDisabled = computed(() => props.busy || !props.modelValue || batchCount.value === 0);
+
+watch(() => props.shots, shots => {
+  const nodeIds = new Set(shots.map(shot => shot.nodeId));
+  for (const nodeId of Object.keys(drafts)) {
+    if (nodeIds.has(nodeId)) continue;
+    delete drafts[nodeId];
+    delete sourcePrompts[nodeId];
+  }
+  for (const shot of shots) {
+    const sourcePrompt = sourcePrompts[shot.nodeId];
+    const dirty = sourcePrompt !== undefined && drafts[shot.nodeId] !== sourcePrompt;
+    sourcePrompts[shot.nodeId] = shot.prompt;
+    if (!dirty) drafts[shot.nodeId] = shot.prompt;
+  }
+}, { immediate: true });
+
+watch(() => [props.projectId, ...props.shots.map(shot => `${shot.nodeId}:${shot.output?.path ?? ""}:${shot.output?.mimeType ?? ""}`)], async () => {
+  const version = ++previewVersion;
+  releasePreviews();
+  for (const key of Object.keys(previewUrls)) delete previewUrls[key];
+  const files = useWorkspaceFiles(props.projectId);
+  for (const shot of props.shots) {
+    if (!shot.output) continue;
+    const acquired = files.acquireUrl(shot.output.path, shot.output.mimeType);
+    releases.push(acquired.release);
+    try {
+      const url = await acquired.url;
+      if (version === previewVersion) previewUrls[shot.nodeId] = url;
+    } catch {
+      if (version === previewVersion) previewUrls[shot.nodeId] = "";
+    }
+  }
+}, { immediate: true });
+
+onBeforeUnmount(() => {
+  previewVersion++;
+  releasePreviews();
+});
+
+function releasePreviews() {
+  releases.forEach(release => release());
+  releases = [];
+}
+
+function statusText(shot: CreativeMediaCard) {
+  if (shot.task?.status === "pending" || shot.task?.status === "running") return `生成中 ${shot.task.progress}%`;
+  if (shot.task?.status === "failed") return "生成失败";
+  if (shot.task?.status === "cancelled") return "已取消";
+  if (shot.output) return shot.confirmed ? "已确认" : "已有预览";
+  return shot.confirmed ? "已确认" : "待确认";
+}
+
+function statusType(shot: CreativeMediaCard) {
+  if (shot.task?.status === "failed") return "danger";
+  if (shot.task?.status === "cancelled") return "warning";
+  if (shot.confirmed && shot.output) return "success";
+  return "warning";
+}
+
+function cardError(shot: CreativeMediaCard) {
+  return props.generationErrors[shot.nodeId] || friendlyTaskError(shot.task?.errorMessage ?? null);
+}
+
+function isGenerating(shot: CreativeMediaCard) {
+  return shot.task?.status === "pending" || shot.task?.status === "running";
+}
+
+function generateDisabled(shot: CreativeMediaCard) {
+  return props.busy || isGenerating(shot) || !props.modelValue || !shot.prompt.trim() || drafts[shot.nodeId] !== shot.prompt;
+}
+
+function generateHint(shot: CreativeMediaCard) {
+  if (!props.modelValue) return "管理员暂未启用图片模型";
+  if (drafts[shot.nodeId] !== shot.prompt) return "请先保存镜头描述";
+  if (isGenerating(shot)) return "分镜图片正在生成";
+  return "查看预计积分并确认生成";
+}
+</script>
+
+<style scoped lang="scss">
+.storyboardStage {
+  display: grid;
+  gap: 18px;
+  .stageLoading { min-height: 320px; }
+  .missingContent { display: grid; min-height: 320px; place-items: center; align-content: center; gap: 10px; color: var(--studioMuted); text-align: center; h3, p { margin: 0; } h3 { color: var(--studioText); } }
+  .stageTools { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+  .modelChoice { display: grid; width: min(420px, 100%); gap: 7px; label { color: var(--studioText); font-size: 13px; font-weight: 650; } }
+  .shotList { display: grid; gap: 15px; }
+  .shotCard { display: grid; grid-template-columns: 220px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--studioBorder); border-radius: 16px; background: var(--studioSurface); }
+  .shotPreview { display: grid; min-height: 230px; place-items: center; overflow: hidden; background: var(--studioSurfaceMuted); color: var(--studioMuted); img { width: 100%; height: 100%; object-fit: cover; } }
+  .shotBody { display: grid; align-content: start; gap: 13px; padding: 18px; header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; h3 { margin: 4px 0 0; color: var(--studioText); } } footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; .orderButtons { margin-right: auto; } } :deep(.el-textarea__inner) { border-radius: 12px; line-height: 1.65; } }
+}
+@media (max-width: 720px) { .storyboardStage { .stageTools { align-items: stretch; flex-direction: column; } .shotCard { grid-template-columns: minmax(0, 1fr); } .shotPreview { min-height: 180px; max-height: 300px; } } }
+</style>

@@ -13,13 +13,19 @@ export type GenerationTask = {
   modelId: string;
   taskType: "text" | "image" | "video";
   status: GenerationStatus;
-  requestSummary: { input: Record<string, unknown> };
+  requestSummary?: {
+    input?: Record<string, unknown>;
+    billing?: { billable?: boolean; estimatedUsage?: Record<string, number> };
+  };
+  result?: { files?: Array<{ path: string; mimeType: string }> } | null;
   progress: number;
   frozenCredits: number;
   actualCredits: number;
   refundedCredits: number;
   errorMessage: string | null;
   createdAt: string;
+  startedAt?: string | null;
+  heartbeatAt?: string | null;
   completedAt: string | null;
 };
 
