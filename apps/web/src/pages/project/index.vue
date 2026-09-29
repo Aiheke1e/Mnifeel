@@ -765,16 +765,21 @@ async function openAdvanced() {
 
 <style scoped lang="scss">
 .projectPage {
+  width: 100%;
+  margin: 0;
+  padding: 32px clamp(20px, 2.5vw, 48px) 48px;
+
   .projectShell {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr) 340px;
-    align-items: start;
-    gap: 18px;
+    grid-template-columns: 220px minmax(0, 1fr) 360px;
+    align-items: stretch;
+    gap: 20px;
     margin-top: 22px;
 
     .stageNavigation {
       position: sticky;
       top: 22px;
+      align-self: start;
       width: 100%;
       min-width: 0;
       max-width: 100%;
@@ -805,7 +810,7 @@ async function openAdvanced() {
 
   }
 
-  .projectAside { display: grid; gap: 14px; }
+  .projectAside { display: grid; align-content: start; gap: 14px; }
   .progressCard {
     strong { display: block; margin: 13px 0 10px; color: var(--studioText); font-size: 30px; }
     > p:last-child { margin: 11px 0 0; color: var(--studioMuted); font-size: 12px; }
@@ -817,10 +822,14 @@ async function openAdvanced() {
   }
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1360px) {
   .projectPage .projectShell {
     grid-template-columns: 210px minmax(0, 1fr);
-    .projectAside { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; }
+    .projectAside {
+      grid-column: 1 / -1;
+      grid-template-columns: 1fr 1fr;
+      .directorPanel { grid-column: 1 / -1; }
+    }
   }
 }
 
@@ -829,7 +838,11 @@ async function openAdvanced() {
     .projectShell {
       grid-template-columns: minmax(0, 1fr);
       .stageNavigation { position: static; }
-      .projectAside { grid-column: auto; grid-template-columns: minmax(0, 1fr); }
+      .projectAside {
+        grid-column: auto;
+        grid-template-columns: minmax(0, 1fr);
+        .directorPanel { grid-column: auto; }
+      }
     }
     .stageWorkspace { min-height: 0; padding: 20px; }
   }
