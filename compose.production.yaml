@@ -64,6 +64,7 @@ services:
         condition: service_healthy
     environment:
       MINIFEEL_DOMAIN: ${MINIFEEL_DOMAIN}
+      MINIFEEL_PUBLIC_IP: ${MINIFEEL_PUBLIC_IP}
     ports:
       - "80:80"
       - "443:443"

@@ -39,6 +39,7 @@ Minifeel 的前端构建结果由 Express 直接提供，不需要单独启动�
 - Docker Compose 插件；
 - Git；
 - 一个解析到服务器公网 IP 的域名；
+- 服务器公网 IP，用于域名生效前通过 HTTP 临时访问；
 - 开放 TCP `22`、`80`、`443`；
 - 能访问模型供应商和软件包下载地址的出站网络。
 
@@ -104,7 +105,7 @@ git clone <仓库地址> /opt/minifeel
 cd /opt/minifeel
 ```
 
-复制环境模板，填写域名、数据库密码、主密钥和初始化管理员账号：
+复制环境模板，填写域名、公网 IP、数据库密码、主密钥和初始化管理员账号：
 
 ```sh
 cp productionEnvironment.example .env.production
