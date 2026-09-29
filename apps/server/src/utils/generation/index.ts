@@ -61,8 +61,10 @@ function dateValue(value: Date | null) {
 }
 
 export function publicGenerationTask(task: GenerationTaskRow) {
+  const batchId = typeof task.requestSummary.input.batchId === "string" ? task.requestSummary.input.batchId : task.id;
   return {
     ...task,
+    batchId,
     frozenCredits: numberValue(task.frozenCredits),
     actualCredits: numberValue(task.actualCredits),
     refundedCredits: numberValue(task.refundedCredits),
@@ -100,7 +102,7 @@ export async function createGenerationTask(userId: string, input: {
   modelId: string;
   idempotencyKey: string;
   request: Record<string, unknown>;
-}, options: { wakeWorker?: boolean; external?: boolean; estimatedUsage?: GenerationUsage } = {}) {
+}, options: { wakeWorker?: boolean; external?: boolean; estimatedUsage?: GenerationUsage; billable?: boolean } = {}) {
   const result = await getDatabase().begin(async transaction => {
     await transaction`select pg_advisory_xact_lock(hashtext(${`${userId}:${input.idempotencyKey}`}))`;
     const existing = await transaction<GenerationTaskRow[]>`
@@ -127,7 +129,7 @@ export async function createGenerationTask(userId: string, input: {
     const pricing = parsePricing(model.mediaType, model.pricing);
     const request = safeInput(input.request);
     const estimatedUsage = options.estimatedUsage ?? estimateUsage(model.mediaType, request, model.capabilities);
-    const billable = !(model.mediaType === "video" && model.isWhitelist);
+    const billable = options.billable ?? !(model.mediaType === "video" && model.isWhitelist);
     const frozenCredits = billable ? calculateCredits(model.mediaType, pricing, estimatedUsage) : 0;
     const taskId = randomUUID();
     const status = options.external ? "running" : "pending";

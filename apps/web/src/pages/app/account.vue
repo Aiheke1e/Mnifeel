@@ -76,17 +76,17 @@
         </div>
         <span>流水仅供查看，不可修改</span>
       </div>
-      <div v-if="userAppStore.transactions.length" class="transactionList panelCard">
-        <article v-for="transaction in userAppStore.transactions" :key="transaction.id" class="transactionRow">
-          <span class="transactionIcon" :class="{ positive: transaction.availableDelta > 0 }">
-            <component :is="transaction.availableDelta > 0 ? IconArrowUpRight : IconArrowDownRight" :size="19" aria-hidden="true" />
+      <div v-if="transactionGroups.length" class="transactionList panelCard">
+        <article v-for="transaction in transactionGroups" :key="transaction.id" class="transactionRow">
+          <span class="transactionIcon" :class="{ positive: transaction.amount > 0 }">
+            <component :is="transaction.amount > 0 ? IconArrowUpRight : IconArrowDownRight" :size="19" aria-hidden="true" />
           </span>
           <span class="transactionInfo">
-            <strong>{{ transactionLabels[transaction.type] }}</strong>
-            <small>{{ formatDate(transaction.createdAt) }}</small>
+            <strong>{{ transaction.label }}</strong>
+            <small>{{ transaction.projectName }} · {{ formatDate(transaction.createdAt) }}<template v-if="transaction.taskCount > 1"> · {{ transaction.taskCount }} 次调用</template></small>
           </span>
-          <span class="transactionAmount" :class="{ positive: transaction.availableDelta > 0 }">
-            {{ transaction.availableDelta > 0 ? "+" : "" }}{{ transaction.availableDelta }}
+          <span class="transactionAmount" :class="{ positive: transaction.amount > 0 }">
+            {{ transaction.amount > 0 ? "+" : "" }}{{ transaction.amount }}
             <small>余额 {{ transaction.availableAfter }}</small>
           </span>
         </article>
@@ -121,7 +121,8 @@ import {
 } from "@tabler/icons-vue";
 import api, { apiErrorMessage } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
-import { useUserAppStore, type CreditTransaction } from "@/stores/userApp";
+import { useUserAppStore } from "@/stores/userApp";
+import { useWorkspaceStore } from "@/stores/workspace";
 import { formatDate } from "./appFormat";
 
 type Session = {
@@ -138,6 +139,7 @@ type ApiResponse<T> = { code: number; data: T; message: string };
 const router = useRouter();
 const authStore = useAuthStore();
 const userAppStore = useUserAppStore();
+const workspaceStore = useWorkspaceStore();
 const loading = ref(false);
 const errorMessage = ref("");
 const sessions = ref<Session[]>([]);
@@ -146,12 +148,29 @@ const passwordVisible = ref(false);
 const savingPassword = ref(false);
 const passwordForm = reactive({ password: "", confirm: "" });
 const identity = computed(() => authStore.user?.phone || authStore.user?.email || "创作者");
-const transactionLabels: Record<CreditTransaction["type"], string> = {
-  adminGrant: "积分到账",
-  taskFreeze: "任务冻结",
-  taskSettle: "任务结算",
-  taskRefund: "任务退款",
-};
+const transactionGroups = computed(() => {
+  const taskMap = new Map(userAppStore.tasks.map(task => [task.id, task]));
+  const groups = new Map<string, typeof userAppStore.transactions>();
+  for (const transaction of userAppStore.transactions) {
+    const task = transaction.taskId ? taskMap.get(transaction.taskId) : undefined;
+    const key = task?.batchId ?? transaction.taskId ?? transaction.id;
+    groups.set(key, [...(groups.get(key) ?? []), transaction]);
+  }
+  return [...groups.entries()].map(([id, transactions]) => {
+    const taskIds = [...new Set(transactions.map(item => item.taskId).filter((item): item is string => !!item))];
+    const task = taskIds.map(taskId => taskMap.get(taskId)).find(Boolean);
+    const amount = transactions.reduce((total, item) => total + item.availableDelta, 0);
+    return {
+      id,
+      amount,
+      availableAfter: transactions[0]!.availableAfter,
+      createdAt: transactions[0]!.createdAt,
+      taskCount: taskIds.length,
+      projectName: task ? workspaceStore.projectList.find(project => project.id === task.projectId)?.name ?? "已归档项目" : "账户",
+      label: task ? amount < 0 ? "创作消费" : amount > 0 ? "创作退款" : "创作结算" : "积分到账",
+    };
+  });
+});
 
 function sessionName(userAgent: string | null) {
   if (!userAgent) return "未知设备";
@@ -168,8 +187,10 @@ async function load() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const [, response] = await Promise.all([
+    const [, , , response] = await Promise.all([
       userAppStore.loadAccount(),
+      userAppStore.loadTasks(),
+      workspaceStore.loadProjects(),
       api.get<ApiResponse<Session[]>>("/auth/sessions/get"),
     ]);
     sessions.value = response.data.data;

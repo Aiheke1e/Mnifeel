@@ -1,9 +1,7 @@
 <template>
   <el-config-provider :locale="zhCn">
     <router-view v-slot="{ Component: currentComponent }">
-      <transition name="el-fade-in">
-        <component :is="currentComponent" />
-      </transition>
+      <component :is="currentComponent" />
     </router-view>
   </el-config-provider>
 </template>

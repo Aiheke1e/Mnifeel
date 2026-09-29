@@ -18,42 +18,42 @@
       </button>
     </div>
 
-    <section v-if="filteredTasks.length" class="taskList" aria-label="生成任务列表">
-      <article v-for="task in filteredTasks" :key="task.id" class="taskCard">
+    <section v-if="filteredGroups.length" class="taskList" aria-label="生成任务列表">
+      <article v-for="group in filteredGroups" :key="group.id" class="taskCard">
         <div class="taskMain">
-          <span class="taskIcon"><component :is="taskIcons[task.taskType]" :size="21" aria-hidden="true" /></span>
+          <span class="taskIcon"><component :is="taskIcons[group.taskType]" :size="21" aria-hidden="true" /></span>
           <div class="taskIdentity">
             <div class="taskTitle">
-              <strong>{{ taskTypeLabels[task.taskType] }}</strong>
-              <el-tag :type="taskStatusTypes[task.status]" effect="light" round>{{ taskStatusLabels[task.status] }}</el-tag>
+              <strong>{{ group.tasks.length > 1 ? "一轮文本创作" : taskTypeLabels[group.taskType] }}</strong>
+              <el-tag :type="taskStatusTypes[group.status]" effect="light" round>{{ taskStatusLabels[group.status] }}</el-tag>
             </div>
-            <span>{{ projectName(task.projectId) }} · {{ formatDate(task.createdAt) }}</span>
+            <span>{{ projectName(group.projectId) }} · {{ formatDate(group.createdAt) }}<template v-if="group.tasks.length > 1"> · {{ group.tasks.length }} 次模型调用</template></span>
           </div>
           <div class="taskCredits">
-            <strong>{{ taskCreditText(task) }}</strong>
-            <span v-if="task.refundedCredits">本次费用已退回</span>
-            <span v-else-if="task.status === 'succeeded'">已完成结算</span>
+            <strong>{{ groupCreditText(group) }}</strong>
+            <span v-if="group.refundedCredits">已退回 {{ group.refundedCredits }} 积分</span>
+            <span v-else-if="group.status === 'succeeded'">已完成结算</span>
             <span v-else>按完成结果结算</span>
           </div>
           <el-button
-            v-if="task.status === 'pending' || task.status === 'running'"
+            v-if="group.tasks.length === 1 && (group.status === 'pending' || group.status === 'running')"
             type="danger"
             plain
             round
-            :loading="cancellingId === task.id"
-            :aria-label="`取消${taskTypeLabels[task.taskType]}任务`"
-            @click="cancel(task)">
+            :loading="cancellingId === group.tasks[0]!.id"
+            :aria-label="`取消${taskTypeLabels[group.taskType]}任务`"
+            @click="cancel(group.tasks[0]!)">
             取消
           </el-button>
         </div>
         <el-progress
-          v-if="task.status === 'pending' || task.status === 'running'"
+          v-if="group.status === 'pending' || group.status === 'running'"
           class="taskProgress"
-          :percentage="task.progress"
+          :percentage="group.progress"
           :strokeWidth="5"
           :showText="false"
-          :indeterminate="task.status === 'pending'" />
-        <p v-if="task.errorMessage" class="taskError" role="alert">{{ task.errorMessage }}</p>
+          :indeterminate="group.status === 'pending'" />
+        <p v-if="group.errorMessage" class="taskError" role="alert">{{ group.errorMessage }}</p>
       </article>
     </section>
     <div v-else class="emptyPanel">
@@ -72,9 +72,22 @@ import { IconFileText, IconListCheck, IconPhoto, IconRefresh, IconVideo } from "
 import { apiErrorMessage } from "@/lib/api";
 import { useUserAppStore, type GenerationStatus, type GenerationTask } from "@/stores/userApp";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { formatDate, taskCreditText, taskStatusLabels, taskStatusTypes, taskTypeLabels } from "./appFormat";
+import { formatDate, friendlyTaskError, taskStatusLabels, taskStatusTypes, taskTypeLabels } from "./appFormat";
 
 type TaskFilter = "all" | GenerationStatus;
+type TaskGroup = {
+  id: string;
+  projectId: string;
+  taskType: GenerationTask["taskType"];
+  status: GenerationStatus;
+  progress: number;
+  actualCredits: number;
+  frozenCredits: number;
+  refundedCredits: number;
+  errorMessage: string;
+  createdAt: string;
+  tasks: GenerationTask[];
+};
 
 const userAppStore = useUserAppStore();
 const workspaceStore = useWorkspaceStore();
@@ -91,11 +104,44 @@ const filters: Array<{ label: string; value: TaskFilter }> = [
   { label: "失败", value: "failed" },
   { label: "已取消", value: "cancelled" },
 ];
-const filteredTasks = computed(() => filter.value === "all" ? userAppStore.tasks : userAppStore.tasks.filter(task => task.status === filter.value));
+const taskGroups = computed<TaskGroup[]>(() => {
+  const groups = new Map<string, GenerationTask[]>();
+  for (const task of userAppStore.tasks) {
+    const key = task.taskType === "text" ? task.batchId : task.id;
+    groups.set(key, [...(groups.get(key) ?? []), task]);
+  }
+  return [...groups.entries()].map(([id, tasks]) => {
+    const status = tasks.some(task => task.status === "running") ? "running"
+      : tasks.some(task => task.status === "pending") ? "pending"
+      : tasks.some(task => task.status === "failed") ? "failed"
+      : tasks.every(task => task.status === "cancelled") ? "cancelled" : "succeeded";
+    return {
+      id,
+      projectId: tasks[0]!.projectId,
+      taskType: tasks[0]!.taskType,
+      status,
+      progress: Math.round(tasks.reduce((total, task) => total + task.progress, 0) / tasks.length),
+      actualCredits: tasks.reduce((total, task) => total + task.actualCredits, 0),
+      frozenCredits: tasks.reduce((total, task) => total + task.frozenCredits, 0),
+      refundedCredits: tasks.reduce((total, task) => total + task.refundedCredits, 0),
+      errorMessage: [...new Set(tasks.map(task => friendlyTaskError(task.errorMessage)).filter(Boolean))].join("；"),
+      createdAt: tasks[0]!.createdAt,
+      tasks,
+    };
+  });
+});
+const filteredGroups = computed(() => filter.value === "all" ? taskGroups.value : taskGroups.value.filter(group => group.status === filter.value));
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
 function taskCount(value: TaskFilter) {
-  return value === "all" ? userAppStore.tasks.length : userAppStore.tasks.filter(task => task.status === value).length;
+  return value === "all" ? taskGroups.value.length : taskGroups.value.filter(group => group.status === value).length;
+}
+
+function groupCreditText(group: TaskGroup) {
+  if (group.actualCredits) return `消耗 ${group.actualCredits} 积分`;
+  if (group.refundedCredits) return `已退回 ${group.refundedCredits} 积分`;
+  if (group.frozenCredits) return `冻结 ${group.frozenCredits} 积分`;
+  return "0 积分";
 }
 
 function projectName(projectId: string) {

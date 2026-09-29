@@ -9,7 +9,7 @@ type AssetEntry = { name: string; path: string; type: "file" | "directory"; chil
 
 async function listEntries(root: string, directory: string): Promise<AssetEntry[]> {
   const entries = await readdir(directory, { withFileTypes: true });
-  return Promise.all(entries.filter(entry => entry.isFile() || entry.isDirectory())
+  return Promise.all(entries.filter(entry => entry.name !== ".metadata.json" && (entry.isFile() || entry.isDirectory()))
     .sort((left, right) => left.name.localeCompare(right.name, "zh-CN", { numeric: true }))
     .map(async entry => {
       const path = join(directory, entry.name);

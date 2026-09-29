@@ -2,7 +2,7 @@
   <div class="workspaceMenu">
     <el-card shadow="never" :bodyStyle="{ padding: '5px 10px' }">
       <div class="menuContent">
-        <el-button class="toolButton" text :aria-label="returnTitle" :title="returnTitle" @click="exitVisible = true">
+        <el-button class="toolButton" text :loading="leaving" :aria-label="returnTitle" :title="returnTitle" @click="exitProject">
           <icon-arrow-left :size="17" aria-hidden="true" />
         </el-button>
         <el-button class="toolButton" text aria-label="设置" title="设置" @click="emit('openSettings')">
@@ -10,13 +10,6 @@
         </el-button>
       </div>
     </el-card>
-    <el-dialog v-model="exitVisible" :title="returnTitle" width="360px" alignCenter appendToBody>
-      <span>{{ returnDescription }}</span>
-      <template #footer>
-        <el-button @click="exitVisible = false">取消</el-button>
-        <el-button type="primary" :loading="leaving" @click="exitProject">保存并返回</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -29,12 +22,8 @@ const props = defineProps<{ returnPath: string }>();
 
 const emit = defineEmits<{ openSettings: [] }>();
 const router = useRouter();
-const exitVisible = ref(false);
 const leaving = ref(false);
 const returnTitle = computed(() => props.returnPath.startsWith("/admin/") ? "返回项目列表" : "返回首页");
-const returnDescription = computed(() => props.returnPath.startsWith("/admin/")
-  ? "返回前会保存当前修改，然后回到项目列表。"
-  : "返回前会保存当前修改，然后回到创作首页。");
 
 async function exitProject() {
   if (leaving.value) return;

@@ -18,13 +18,20 @@
           @keydown.ctrl.enter.prevent="createFromIdea"
           @keydown.meta.enter.prevent="createFromIdea" />
         <div class="creationActions">
-          <span>生成的角色图片会自动保存到“我的资产”，可在后续每一集继续使用</span>
+          <span>每轮草案最多收取一次文字模型费用；图片和视频确认预计积分后再生成</span>
           <el-button nativeType="submit" type="primary" size="large" :loading="creating" :disabled="!idea.trim()" round>
             开始创作
             <icon-arrow-up-right :size="18" aria-hidden="true" />
           </el-button>
         </div>
       </form>
+
+      <ol class="creationSteps" aria-label="创作流程">
+        <li><strong>1</strong>剧本草案</li>
+        <li><strong>2</strong>角色资产</li>
+        <li><strong>3</strong>镜头分段</li>
+        <li><strong>4</strong>确认生成</li>
+      </ol>
 
       <div class="ideaExamples" aria-label="创作示例">
         <span>试试：</span>
@@ -64,6 +71,7 @@ import { useRoute, useRouter } from "vue-router";
 import { ElInput } from "element-plus";
 import { IconArrowUpRight, IconChevronRight, IconMovie } from "@tabler/icons-vue";
 import { apiErrorMessage } from "@/lib/api";
+import { clearPendingIdea, readPendingIdea, savePendingIdea } from "@/lib/pendingIdea";
 import { setProjectMode } from "@/lib/projectMode";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { modelChoices } from "@/stores/settings";
@@ -90,7 +98,11 @@ onMounted(async () => {
   loading.value = true;
   try {
     await Promise.all([workspaceStore.loadProjects(), userAppStore.loadAccount()]);
-    if (route.query.create) await nextTick(() => ideaInput.value?.focus());
+    const pendingIdea = readPendingIdea();
+    if (pendingIdea) {
+      idea.value = pendingIdea;
+      await createFromIdea();
+    } else if (route.query.create) await nextTick(() => ideaInput.value?.focus());
   } catch (error) {
     errorMessage.value = apiErrorMessage(error, "首页信息加载失败");
   } finally {
@@ -99,7 +111,7 @@ onMounted(async () => {
 });
 
 function projectName(prompt: string) {
-  return prompt.split(/[。！？!?\n]/)[0]!.trim().replace(/^[：:，,\s]+|[：:，,\s]+$/g, "").slice(0, 32) || "未命名故事";
+  return prompt.split(/[。！？!?\n]/)[0]!.trim().replace(/^[：:，,\s]+|[：:，,\s]+$/g, "").slice(0, 16) || "未命名故事";
 }
 
 async function createFromIdea() {
@@ -109,6 +121,7 @@ async function createFromIdea() {
   errorMessage.value = "";
   let projectId = "";
   try {
+    clearPendingIdea();
     const project = await workspaceStore.createProject(projectName(prompt), prompt, "freeStory");
     projectId = project.id;
     await useWorkspaceFiles(project.id).writeJson("画布1.json", {
@@ -121,11 +134,13 @@ async function createFromIdea() {
       projectId: project.id,
       model: modelChoices.value[0]?.value ?? "",
       reasoningEffort: "",
-      prompt: `/skill:workflow\n\n用户的创作需求：${prompt}\n\n直接在当前空画布建立一份可编辑的故事与剧本草案，并整理当前剧情确实需要的角色、场景和道具资产清单。首轮不要一次询问交付范围、总时长、画幅、视觉风格和模型；能从创意合理推断的先形成草案。不得展示未从 listMediaModels 或节点 getConfig 实时读取的模型选项。只有用户明确要求进入媒体生成时，才读取真实可用模型，提出一个最小可行方案，并一次说明生成数量、实际模型、规格、参考资产和算力消耗等待确认。生成角色参考图后，将它保存到“我的资产”供后续各集和镜头复用；再次生成同一角色时优先引用已有角色资产。`,
+      displayPrompt: prompt,
+      prompt: `/skill:workflow\n\n用户的创作需求：${prompt}\n\n直接在当前空画布建立一份可编辑的故事与剧本草案，并整理当前剧情确实需要的角色、场景和道具资产清单。首轮使用尽可能少的模型调用，不要一次询问交付范围、总时长、画幅、视觉风格和模型；能从创意合理推断的先形成草案。剧本中注明自然时长；进入视频制作前必须按实时读取到的模型时长限制给出分段数量和预计积分，再等待用户确认。不得展示未从 listMediaModels 或节点 getConfig 实时读取的模型选项。只有用户明确要求进入媒体生成时，才读取真实可用模型，提出一个最小可行方案，并一次说明生成数量、实际模型、规格、参考资产和算力消耗等待确认。生成角色参考图后，将它保存到“我的资产”供后续各集和镜头复用；再次生成同一角色时优先引用已有角色资产。`,
     };
     setProjectMode("advanced");
     await router.push(`/app/projects/${project.id}/advanced`);
   } catch (error) {
+    savePendingIdea(prompt);
     if (projectId) await workspaceStore.removeProject(projectId).catch(() => undefined);
     errorMessage.value = apiErrorMessage(error, "项目创建失败，请稍后重试");
   } finally {
@@ -233,6 +248,20 @@ async function openProject(project: Project) {
         &:hover { border-color: var(--studioAccent); color: var(--studioAccent); }
         &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: 2px; }
       }
+    }
+
+    .creationSteps {
+      display: flex;
+      width: min(760px, 100%);
+      justify-content: center;
+      gap: 18px;
+      margin: 16px 0 0;
+      padding: 0;
+      color: var(--studioMuted);
+      font-size: 12px;
+      list-style: none;
+      li { display: flex; align-items: center; gap: 6px; }
+      strong { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: var(--studioAccentSoft); color: var(--studioAccent); }
     }
   }
 

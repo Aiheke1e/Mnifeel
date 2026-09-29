@@ -28,8 +28,11 @@ export async function createAgentModel(
   });
   await runtime.setRuntimeApiKey(configured.providerId, provider.apiKey);
   const settlements = new Set<Promise<void>>();
+  const batchId = crypto.randomUUID();
+  let billed = false;
   let settlementError: unknown;
   const billStream = (streamFunction: StreamFn): StreamFn => async (requestModel, context, options) => {
+    const billable = !billed;
     const created = await createGenerationTask(userId, {
       projectId,
       modelId,
@@ -37,14 +40,17 @@ export async function createAgentModel(
       request: {
         providerId,
         maxTokens: requestModel.maxTokens,
+        batchId,
       },
     }, {
       external: true,
+      billable,
       estimatedUsage: {
         inputTokens: new TextEncoder().encode(JSON.stringify(context)).byteLength,
         outputTokens: requestModel.maxTokens,
       },
     });
+    billed = true;
     let execution: Awaited<ReturnType<typeof beginExternalGenerationTask>>;
     try {
       execution = await beginExternalGenerationTask(created.task.id, options?.signal);

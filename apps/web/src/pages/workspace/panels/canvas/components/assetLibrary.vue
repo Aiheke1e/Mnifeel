@@ -5,6 +5,7 @@
       <el-button class="toolbarButton" text :icon="IconFolderPlus" title="新建分组" aria-label="新建分组" :disabled="newFolderParent !== undefined" @click="startFolder" />
       <el-button class="toolbarButton" text :icon="IconX" title="关闭我的资产" aria-label="关闭我的资产" @click="visible = false" />
     </div>
+    <p class="dragHint">拖动素材到画布，即可复制并继续使用</p>
     <el-scrollbar class="libraryScroll" maxHeight="min(440px, calc(100dvh - 198px))">
       <el-tree ref="assetTree" class="assetTree" :data="displayEntries" nodeKey="path" :props="{ label: 'name' }" :currentNodeKey="folder || undefined" :filterNodeMethod="filterEntry" defaultExpandAll highlightCurrent emptyText="" @nodeClick="selectFolder">
         <template #default="{ data }">
@@ -20,6 +21,9 @@
             </span>
             <el-input v-if="data.draft" ref="folderInput" v-model="newFolderName" class="folderNameInput" size="small" aria-label="文件夹名称" :disabled="folderSaving" @click.stop @keydown.stop @keydown.enter.prevent="saveFolder" @keydown.esc.prevent="cancelFolder" @blur="saveFolder" />
             <span v-else class="assetName">{{ data.name }}</span>
+            <span v-if="data.type === 'file' && (metadata[data.path]?.characterName || metadata[data.path]?.version)" class="assetMeta">
+              {{ [metadata[data.path]?.characterName, metadata[data.path]?.version].filter(Boolean).join(" · ") }}
+            </span>
             <el-button v-if="mediaKind(data)" class="moreButton" text :icon="IconEye" :aria-label="'预览 ' + data.name" title="预览（也可双击素材）" @click.stop="openPreview(data)" />
             <el-button v-if="!data.draft" class="moreButton" text :icon="IconDots" :aria-label="'更多 ' + data.name" title="更多" @click.stop="openItemMenu($event, data)" />
           </div>
@@ -97,12 +101,14 @@ import assetMenu from "./assetMenu.vue";
 
 type AssetEntry = { name: string; path: string; type: "file" | "directory"; children?: AssetEntry[]; draft?: boolean };
 type AssetOutput = { label: string; output: NodeOutput };
+type AssetMetadata = { characterName: string; version: string; status: "selected" | "alternative" | "unset"; appearance: string; episodes: string };
 
 const props = defineProps<{ projectId?: string }>();
 const visible = defineModel<boolean>({ default: false });
 const saveVisible = ref(false);
 const saving = ref(false);
 const entries = ref<AssetEntry[]>([]);
+const metadata = ref<Record<string, AssetMetadata>>({});
 const folder = ref("");
 const assetName = ref("");
 const assetNameInput = ref<InputInstance>();
@@ -224,9 +230,13 @@ function directoryEntries(items: AssetEntry[]): AssetEntry[] {
 async function loadEntries() {
   const request = ++loadRequest;
   try {
-    const { data } = await api.get<{ data: { entries: AssetEntry[] } }>("/myAssets/list");
+    const [listResponse, metadataResponse] = await Promise.all([
+      api.get<{ data: { entries: AssetEntry[] } }>("/myAssets/list"),
+      api.get<{ data: Record<string, AssetMetadata> }>("/myAssets/metadata/get"),
+    ]);
     if (request !== loadRequest) return;
-    entries.value = data.data.entries;
+    entries.value = listResponse.data.data.entries;
+    metadata.value = metadataResponse.data.data;
     await nextTick();
     if (request === loadRequest) assetTree.value?.filter(searchQuery.value);
   } catch (error) {
@@ -365,6 +375,12 @@ defineExpose({ openSave });
     max-height: 440px;
   }
 
+  .dragHint {
+    margin: 0 4px 8px;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+
   .audioPreview {
     flex-shrink: 0;
     margin-top: 8px;
@@ -438,6 +454,15 @@ defineExpose({ openSave });
         text-overflow: ellipsis;
         white-space: nowrap;
         font-size: var(--el-font-size-base);
+      }
+
+      .assetMeta {
+        max-width: 92px;
+        overflow: hidden;
+        color: var(--el-text-color-secondary);
+        font-size: 10px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .folderNameInput {

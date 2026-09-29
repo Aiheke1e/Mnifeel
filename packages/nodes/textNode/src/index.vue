@@ -7,10 +7,10 @@
     :downloadUrl="downloadUrl"
     :downloadName="`${nodeProps.label || '文本'}.txt`"
     :bottomWidth="660"
-    @fullscreen="fullscreen = true; editing = true">
+    @fullscreen="openEditor(true)">
     <div class="textContent" :class="{ empty: !outputs.text.value.trim() }">
       <div v-if="outputs.text.value.trim()" class="textPreview nopan nowheel" aria-label="文本内容">{{ outputs.text.value }}</div>
-      <el-button class="editButton nodrag nopan" :icon="IconEdit" :disabled="generating || !textReady" text @dblclick.stop @click.stop="editing = true">编辑</el-button>
+      <el-button class="editButton nodrag nopan" :icon="IconEdit" :disabled="generating || !textReady" text @dblclick.stop @click.stop="openEditor()">编辑</el-button>
     </div>
     <template #bottom>
       <el-card class="promptCard" shadow="never" :bodyStyle="{ padding: '14px 16px 12px' }">
@@ -35,8 +35,12 @@
       </el-card>
     </template>
   </nodeSkeleton>
-  <el-dialog v-model="editing" title="编辑文本" width="min(860px, calc(100vw - 32px))" :fullscreen="fullscreen" alignCenter appendToBody @closed="fullscreen = false">
-    <el-input class="textEditor" :class="{ fullscreen }" v-model="outputs.text.value" type="textarea" :rows="1" :disabled="generating" resize="none" aria-label="编辑文本内容" />
+  <el-dialog v-model="editing" title="编辑文本" width="min(860px, calc(100vw - 32px))" :fullscreen="fullscreen" :closeOnClickModal="false" alignCenter appendToBody @closed="fullscreen = false">
+    <el-input class="textEditor" :class="{ fullscreen }" v-model="editText" type="textarea" :rows="1" :disabled="generating" resize="none" aria-label="编辑文本内容" />
+    <template #footer>
+      <el-button @click="cancelEditor">取消</el-button>
+      <el-button type="primary" :disabled="generating" @click="saveEditor">保存</el-button>
+    </template>
   </el-dialog>
 </template>
 
@@ -65,6 +69,21 @@ const { node, nodeProps, outputs, ai, files, nodeEvent } = useNode({
 const { refList, referenceMentions, setReferencePreview, removeReference } = useNodeReferences();
 const editing = ref(false);
 const fullscreen = ref(false);
+const editText = ref("");
+function openEditor(useFullscreen = false) {
+  editText.value = outputs.value.text.value;
+  fullscreen.value = useFullscreen;
+  editing.value = true;
+}
+function cancelEditor() {
+  editing.value = false;
+  fullscreen.value = false;
+}
+function saveEditor() {
+  outputs.value.text.value = editText.value;
+  editing.value = false;
+  fullscreen.value = false;
+}
 const downloadUrl = ref("");
 watch([() => outputs.value.text.value, () => node.selected], ([text, selected], _previous, onCleanup) => {
   downloadUrl.value = "";

@@ -29,16 +29,9 @@
             <div class="messageContent">
               <div v-if="item.report" class="reportHeader"><icon-users-group :size="14" />{{ item.report.name }} 上报</div>
               <template v-for="part in item.parts" :key="part.id">
-                <chat-reasoning v-if="part.type === 'thinking' && part.content" class="messageReasoning" :collapsed="part.collapsed ?? true" expandIconPlacement="left" @update:collapsed="part.collapsed = $event">
-                  <template #header>
-                    <span class="reasoningHeader">
-                      <icon-atom :size="14" />
-                      <span>思考</span>
-                      <span v-if="part.duration !== undefined" class="thinkingDuration">{{ part.duration.toFixed(1) }} 秒</span>
-                    </span>
-                  </template>
-                  <messageMarkdown v-if="!(part.collapsed ?? true)" :content="part.content" :streaming="!!item.streaming" :projectId="projectId" />
-                </chat-reasoning>
+                <div v-if="part.type === 'thinking' && part.content" class="messageReasoning" role="status">
+                  {{ item.streaming ? "正在整理创作内容…" : `已完成思考${part.duration !== undefined ? ` · ${part.duration.toFixed(1)} 秒` : ""}` }}
+                </div>
                 <toolMessage v-else-if="part.type === 'tool'" :tool="part.tool" :projectId="projectId" @copy="copyMessage" />
                 <messageMarkdown v-else-if="part.type === 'text' && part.content" :content="part.content" :streaming="!!item.streaming" :projectId="projectId" />
               </template>
@@ -59,6 +52,7 @@
             <template v-if="item.role === 'user'">
               <el-button class="messageAction" text circle :disabled="locked || remoteRunning" aria-label="编辑消息" title="编辑消息" @click="editMessage(item)"><icon-pencil :size="14" /></el-button>
             </template>
+            <el-button v-if="item.role === 'assistant' && item.error" type="primary" text size="small" :disabled="locked || remoteRunning" @click="retryMessage(item)">重试</el-button>
             <el-button v-if="!item.report" class="messageAction" text circle :loading="deletingId === item.id" :disabled="locked || remoteRunning" aria-label="删除消息" title="删除消息" @click="deleteMessage(item)"><icon-trash v-if="deletingId !== item.id" :size="14" /></el-button>
           </template>
         </div>
@@ -137,7 +131,7 @@
 import { computed, inject, reactive, ref, watch } from "vue";
 import axios from "axios";
 import {
-  IconArrowUp, IconAtom, IconCopy,
+  IconArrowUp, IconCopy,
   IconCircleDashed, IconPencil, IconPlayerStopFilled, IconX, IconLoader2,
   IconTrash, IconLayoutGrid, IconMovie, IconPhoto, IconArrowUpRight, IconUsersGroup,
 } from "@tabler/icons-vue";
@@ -158,7 +152,6 @@ import { createConversationStream, readAgentEvents } from "./replyStream";
 import type { CanvasContext } from "@minifeel/tool-canvas/runtime";
 import chatList from "@tdesign-vue-next/chat/es/chat-list";
 import chatItem from "@tdesign-vue-next/chat/es/chat-item";
-import chatReasoning from "@tdesign-vue-next/chat/es/chat-reasoning";
 import messageMarkdown from "@/components/messageMarkdown.vue";
 import xSender from "x-sender";
 import "tdesign-vue-next/es/style/index.css";
@@ -330,7 +323,13 @@ function stopSenderResize(event: PointerEvent) {
 }
 
 function stopMessage() {
-  controller?.abort();
+  controller?.abort(new DOMException("用户已停止生成", "AbortError"));
+}
+
+function retryMessage(item: AgentMessage) {
+  const index = messages.value.findIndex(message => message.id === item.id);
+  const source = messages.value.slice(0, index).findLast(message => message.role === "user");
+  if (source) void sendMessage(source);
 }
 
 async function uploadAttachments(attachments: AgentAttachment[], projectId: string, signal: AbortSignal) {
@@ -377,10 +376,10 @@ async function sendCanvasResult(event: Extract<AgentEvent, { type: "canvasCall" 
   }
 }
 
-async function sendMessage(source?: AgentMessage) {
+async function sendMessage(source?: AgentMessage, direct?: { prompt: string; displayPrompt: string }) {
   const instance = sender;
-  const prompt = (source ? editingId.value === source.id ? editingText.value : source.content : instance?.getText())?.trim() ?? "";
-  const attachments = reactive((source ? source.attachments ?? [] : draftAttachments.value).map(item => ({ ...item })));
+  const prompt = (direct?.prompt ?? (source ? editingId.value === source.id ? editingText.value : source.content : instance?.getText()))?.trim() ?? "";
+  const attachments = reactive((source ? source.attachments ?? [] : direct ? [] : draftAttachments.value).map(item => ({ ...item })));
   if (!source && editingId.value !== undefined) return;
   const resendIndex = source ? messages.value.findIndex(item => item.id === source.id) : -1;
   if (source && (source.role !== "user" || resendIndex < 0)) return;
@@ -397,7 +396,7 @@ async function sendMessage(source?: AgentMessage) {
   compacting.value = false;
   instance.disable();
   const reply = reactive<AgentMessage>({ id: crypto.randomUUID(), role: "assistant", content: "", parts: [], streaming: true });
-  const userMessage = reactive<AgentMessage>({ id: crypto.randomUUID(), role: "user", content: prompt, attachments });
+  const userMessage = reactive<AgentMessage>({ id: crypto.randomUUID(), role: "user", content: direct?.displayPrompt ?? prompt, attachments });
   let ownsStream = !remoteRunning.value;
   let forwarded = false;
   if (!source) {
@@ -411,7 +410,7 @@ async function sendMessage(source?: AgentMessage) {
   const pendingQuestions = new Map<string, string>();
   const activeChildFiles = new Set<string>();
   try {
-    if (!source) await instance.reset();
+    if (!source && !direct) await instance.reset();
     requestController.signal.throwIfAborted();
     await uploadAttachments(attachments, projectId, requestController.signal);
     const response = await fetch("/api/agent", {
@@ -472,10 +471,12 @@ async function sendMessage(source?: AgentMessage) {
       }
     }
     if (source && !accepted) throw new Error("服务端未确认重发，请重新打开对话后重试");
-    emit("sent", prompt || attachments[0]?.name || "新对话");
+    emit("sent", direct?.displayPrompt || prompt || attachments[0]?.name || "新对话");
   } catch (error) {
     const responseMessage = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-    const message = requestController.signal.aborted ? "已停止生成" : responseMessage || (error instanceof Error ? error.message : "发送失败，请重试");
+    const message = requestController.signal.aborted
+      ? requestController.signal.reason instanceof Error ? requestController.signal.reason.message : "生成已停止"
+      : responseMessage || (error instanceof Error ? error.message : "发送失败，请重试");
     if ((source && !accepted) || !ownsStream) { userMessage.error = message; ElMessage.error(message); }
     else reply.error = message;
     if (ownsStream && props.initialSession?.parentFile && props.sessionFile) {
@@ -549,13 +550,12 @@ watch(senderElement, (element, _previous, onCleanup) => {
   });
 });
 
-watch(() => !props.initialSession?.parentFile && !!workspaceStore.pendingAgentMessage && props.active && !locked.value && !!senderElement.value && !!createCanvasContext?.(), async ready => {
+watch(() => !props.initialSession?.parentFile && !!workspaceStore.pendingAgentMessage && props.active && !locked.value && !!senderElement.value && !!createCanvasContext?.(), ready => {
   const message = workspaceStore.pendingAgentMessage;
   const instance = sender;
   if (!ready || !message || !instance || message.projectId !== projectId) return;
   workspaceStore.pendingAgentMessage = null;
-  await fillPrompt(message.prompt);
-  if (sender === instance && props.active) void sendMessage();
+  if (sender === instance && props.active) void sendMessage(undefined, { prompt: message.prompt, displayPrompt: message.displayPrompt });
 }, { flush: "post" });
 </script>
 

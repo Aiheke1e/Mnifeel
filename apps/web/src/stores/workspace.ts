@@ -15,7 +15,7 @@ type ApiResponse<T> = { code: number; data: T; message: string };
 export const useWorkspaceStore = defineStore("workspace", () => {
   const project = ref<Project | null>(null);
   const projectList = ref<Project[]>([]);
-  const pendingAgentMessage = ref<{ projectId: string; prompt: string; model: string; reasoningEffort: string } | null>(null);
+  const pendingAgentMessage = ref<{ projectId: string; prompt: string; displayPrompt: string; model: string; reasoningEffort: string } | null>(null);
 
   async function loadProjects(signal?: AbortSignal) {
     const { data } = await api.get<ApiResponse<Project[]>>("/projects/list", { signal });

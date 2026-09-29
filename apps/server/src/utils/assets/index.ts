@@ -1,4 +1,4 @@
-import { copyFile, mkdir, realpath, unlink } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import conf from "@/utils/conf";
 import { resolveWorkspacePath } from "@/utils/workspace/files";
@@ -29,4 +29,44 @@ export async function removeUserAsset(userId: string, relativePath: string) {
   const root = await getUserAssetsDirectory(userId);
   const asset = await resolveWorkspacePath(root, relativePath);
   await unlink(asset.path);
+}
+
+export type AssetMetadata = {
+  characterName: string;
+  version: string;
+  status: "selected" | "alternative" | "unset";
+  appearance: string;
+  episodes: string;
+};
+
+const metadataFileName = ".metadata.json";
+
+export async function readAssetMetadata(userId: string) {
+  const root = await getUserAssetsDirectory(userId);
+  try {
+    return JSON.parse(await readFile(join(root, metadataFileName), "utf8")) as Record<string, AssetMetadata>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+}
+
+export async function writeAssetMetadata(userId: string, metadata: Record<string, AssetMetadata>) {
+  const root = await getUserAssetsDirectory(userId);
+  const path = join(root, metadataFileName);
+  const temporaryPath = `${path}.${crypto.randomUUID()}.tmp`;
+  await writeFile(temporaryPath, JSON.stringify(metadata, null, 2), { encoding: "utf8", mode: 0o600 });
+  await rename(temporaryPath, path);
+}
+
+export async function moveAssetMetadata(userId: string, path: string, target?: string) {
+  const metadata = await readAssetMetadata(userId);
+  let changed = false;
+  for (const [key, value] of Object.entries(metadata)) {
+    if (key !== path && !key.startsWith(`${path}/`)) continue;
+    delete metadata[key];
+    if (target) metadata[`${target}${key.slice(path.length)}`] = value;
+    changed = true;
+  }
+  if (changed) await writeAssetMetadata(userId, metadata);
 }

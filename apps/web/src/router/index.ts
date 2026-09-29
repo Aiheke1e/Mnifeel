@@ -10,12 +10,13 @@ const router = createRouter({
   routes: [
     {
       path: "/",
-      redirect: "/login",
+      component: () => import("@/pages/welcome/index.vue"),
+      meta: { public: true },
     },
     {
       path: "/login",
       component: () => import("@/pages/login/index.vue"),
-      meta: { public: true },
+      meta: { public: true, guestOnly: true },
     },
     {
       path: "/app",
@@ -57,7 +58,7 @@ const router = createRouter({
     },
     {
       path: "/hello",
-      redirect: "/login",
+      redirect: "/",
     },
     {
       path: "/home",
@@ -82,7 +83,7 @@ router.beforeEach(async to => {
   const auth = useAuthStore();
   await auth.load();
   if (to.meta.public) {
-    if (!auth.user) return true;
+    if (!auth.user || !to.meta.guestOnly) return true;
     return auth.user.role === "admin" ? "/admin/dashboard" : "/app";
   }
   if (!auth.user) return { path: "/login", query: { redirect: to.fullPath } };

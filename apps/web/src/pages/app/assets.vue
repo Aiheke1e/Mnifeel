@@ -55,6 +55,12 @@
               </div>
               <el-button text :icon="IconEdit" :aria-label="`编辑 ${asset.name}`" @click="editAsset(asset)" />
             </div>
+            <div v-if="metadata[asset.path]?.characterName || metadata[asset.path]?.version" class="assetMeta">
+              <el-tag v-if="metadata[asset.path]?.characterName" size="small" round>{{ metadata[asset.path]?.characterName }}</el-tag>
+              <el-tag v-if="metadata[asset.path]?.version" size="small" type="info" round>{{ metadata[asset.path]?.version }}</el-tag>
+              <el-tag v-if="metadata[asset.path]?.status === 'selected'" size="small" type="success" round>正选</el-tag>
+              <el-tag v-else-if="metadata[asset.path]?.status === 'alternative'" size="small" type="warning" round>备选</el-tag>
+            </div>
           </article>
         </div>
         <div v-else class="emptyAssets">
@@ -81,6 +87,25 @@
             <el-option v-for="group in groups" :key="group.path" :label="group.label" :value="group.path" />
           </el-select>
         </el-form-item>
+        <el-form-item label="角色名">
+          <el-input v-model="editMetadata.characterName" maxlength="80" placeholder="例如：小雨" />
+        </el-form-item>
+        <el-form-item label="造型版本">
+          <el-input v-model="editMetadata.version" maxlength="40" placeholder="例如：校园装 v1" />
+        </el-form-item>
+        <el-form-item label="采用状态">
+          <el-radio-group v-model="editMetadata.status">
+            <el-radio-button value="unset">未设置</el-radio-button>
+            <el-radio-button value="selected">正选</el-radio-button>
+            <el-radio-button value="alternative">备选</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="外观锚点">
+          <el-input v-model="editMetadata.appearance" type="textarea" :rows="2" maxlength="1000" placeholder="固定发型、服装、配色等特征" />
+        </el-form-item>
+        <el-form-item label="适用剧集 / 项目">
+          <el-input v-model="editMetadata.episodes" maxlength="200" placeholder="例如：第一季 1–12 集" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button :disabled="saving" @click="editVisible = false">取消</el-button>
@@ -91,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { IconEdit, IconFile, IconFolder, IconFolderPlus, IconLayoutGrid, IconMusic, IconPhoto, IconSearch, IconVideo } from "@tabler/icons-vue";
 import api, { apiErrorMessage } from "@/lib/api";
@@ -99,6 +124,7 @@ import api, { apiErrorMessage } from "@/lib/api";
 type AssetEntry = { name: string; path: string; type: "file" | "directory"; children?: AssetEntry[] };
 type AssetFile = AssetEntry & { group: string };
 type AssetGroup = AssetEntry & { depth: number; label: string; files: AssetFile[] };
+type AssetMetadata = { characterName: string; version: string; status: "selected" | "alternative" | "unset"; appearance: string; episodes: string };
 
 const entries = ref<AssetEntry[]>([]);
 const loading = ref(false);
@@ -111,6 +137,8 @@ const editName = ref("");
 const editGroup = ref("");
 const editingAsset = ref<AssetFile>();
 const preview = ref<{ name: string; url: string; kind: "image" | "video" }>();
+const metadata = ref<Record<string, AssetMetadata>>({});
+const editMetadata = reactive<AssetMetadata>({ characterName: "", version: "", status: "unset", appearance: "", episodes: "" });
 
 const rootFiles = computed(() => entries.value.filter(entry => entry.type === "file").map(entry => ({ ...entry, group: "" })));
 const groups = computed<AssetGroup[]>(() => {
@@ -156,8 +184,12 @@ async function loadAssets() {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const { data } = await api.get<{ data: { entries: AssetEntry[] } }>("/myAssets/list");
-    entries.value = data.data.entries;
+    const [listResponse, metadataResponse] = await Promise.all([
+      api.get<{ data: { entries: AssetEntry[] } }>("/myAssets/list"),
+      api.get<{ data: Record<string, AssetMetadata> }>("/myAssets/metadata/get"),
+    ]);
+    entries.value = listResponse.data.data.entries;
+    metadata.value = metadataResponse.data.data;
   } catch (error) {
     errorMessage.value = apiErrorMessage(error, "资产加载失败");
   } finally {
@@ -207,6 +239,7 @@ function editAsset(asset: AssetFile) {
   editingAsset.value = asset;
   editName.value = displayName(asset.name);
   editGroup.value = asset.group;
+  Object.assign(editMetadata, metadata.value[asset.path] ?? { characterName: "", version: "", status: "unset", appearance: "", episodes: "" });
   editVisible.value = true;
 }
 
@@ -219,6 +252,7 @@ async function saveAsset() {
   saving.value = true;
   try {
     await api.post("/myAssets/rename", { path: asset.path, target });
+    await api.put("/myAssets/metadata/save", { path: target, metadata: editMetadata });
     editVisible.value = false;
     ElMessage.success("资产已更新");
     await loadAssets();
@@ -327,6 +361,7 @@ function previewAsset(asset: AssetFile) {
     .el-image, .filePreview { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; color: var(--studioMuted); }
     .assetInfo { display: flex; align-items: center; gap: 6px; padding: 10px; }
     .assetInfo > div { display: grid; flex: 1; min-width: 0; gap: 3px; }
+    .assetMeta { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 10px 10px; }
     strong, span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     strong { color: var(--studioText); font-size: 13px; }
     span { color: var(--studioMuted); font-size: 11px; }

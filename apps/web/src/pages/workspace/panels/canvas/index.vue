@@ -395,7 +395,7 @@ function selectFiles(position: { x: number; y: number }) {
     const files = Array.from(input.files ?? []);
     if (!files.length || context.signal.aborted) return;
     try {
-      await canvasHistory.batch(() => importCanvasFiles(files, position, context));
+      await canvasHistory.batch(async () => { await importCanvasFiles(files, position, context); });
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : "文件导入失败");
     }

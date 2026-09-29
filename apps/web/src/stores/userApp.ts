@@ -8,6 +8,7 @@ export type GenerationStatus = "pending" | "running" | "succeeded" | "failed" | 
 
 export type GenerationTask = {
   id: string;
+  batchId: string;
   projectId: string;
   modelId: string;
   taskType: "text" | "image" | "video";

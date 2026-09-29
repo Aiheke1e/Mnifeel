@@ -36,6 +36,7 @@ export async function dropCanvasFiles(event: DragEvent, context: CanvasFileConte
   const transfer = event.dataTransfer;
   if (!transfer) return;
   const asset = transfer.getData(assetDragType);
+  let assetSource: "workspace" | "myAssets" = "workspace";
   let droppedFiles = Array.from(transfer.files);
   const { signal, flow } = context;
   const position = flow.screenToFlowCoordinate({ x: event.clientX, y: event.clientY });
@@ -43,12 +44,14 @@ export async function dropCanvasFiles(event: DragEvent, context: CanvasFileConte
     signal.throwIfAborted();
     if (asset) {
       const parsed = asset.startsWith("{") ? JSON.parse(asset) as { path: string; source: "workspace" | "myAssets" } : { path: asset, source: "workspace" as const };
+      assetSource = parsed.source;
       const data = parsed.source === "myAssets"
         ? (await axios.get<ArrayBuffer>("/api/myAssets/read", { params: { path: parsed.path }, responseType: "arraybuffer" })).data
         : await useWorkspaceFiles(context.projectId).read(parsed.path);
       droppedFiles = [new File([data], parsed.path.split("/").pop()!)];
     }
-    await importCanvasFiles(droppedFiles, position, context);
+    const importedCount = await importCanvasFiles(droppedFiles, position, context);
+    if (assetSource === "myAssets" && importedCount) ElMessage.success("已复制到当前项目");
   } catch (error) {
     if (!signal.aborted) showError(error);
   }
@@ -57,6 +60,7 @@ export async function dropCanvasFiles(event: DragEvent, context: CanvasFileConte
 export async function importCanvasFiles(droppedFiles: File[], position: { x: number; y: number }, context: CanvasFileContext) {
   const { signal, flow, availableNodes } = context;
   const files = useWorkspaceFiles(context.projectId);
+  let importedCount = 0;
   for (const [index, file] of droppedFiles.entries()) {
     if (signal.aborted) break;
     const id = crypto.randomUUID();
@@ -81,11 +85,13 @@ export async function importCanvasFiles(droppedFiles: File[], position: { x: num
       signal.throwIfAborted();
       flow.addNodes({ id, type, position: { x: position.x + index * 32, y: position.y + index * 32 },
         data: kind === "text" ? { label: file.name, textSnapshot } : { label: file.name, outputs: { [kind]: output } } });
+      importedCount += 1;
     } catch (error) {
       if (copiedPath) await files.remove(copiedPath).catch(showError);
       if (!signal.aborted) showError(error);
     }
   }
+  return importedCount;
 }
 
 function showError(error: unknown) {
