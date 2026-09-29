@@ -43,11 +43,15 @@ function sessionDays() {
   return Number.isInteger(value) && value >= 1 && value <= 365 ? value : 30;
 }
 
+function usesSecureSessionCookie() {
+  return process.env.NODE_ENV === "production" && process.env.MINIFEEL_SECURE_COOKIES !== "false";
+}
+
 export function setSessionCookie(response: Response, token: string) {
   response.cookie(sessionCookieName, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: usesSecureSessionCookie(),
     maxAge: sessionDays() * 24 * 60 * 60 * 1000,
     path: "/",
   });
@@ -57,7 +61,7 @@ export function clearSessionCookie(response: Response) {
   response.clearCookie(sessionCookieName, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: usesSecureSessionCookie(),
     path: "/",
   });
 }

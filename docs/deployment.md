@@ -84,6 +84,8 @@ openssl rand -base64 32
 
 V1 演示环境暂时保留 `MINIFEEL_AUTH_MOCK_CODE=true` 和 `MINIFEEL_AUTH_MOCK_GOOGLE=true`。接入真实短信与 Google 登录后必须改为 `false`。生产环境始终不要启用 `MINIFEEL_ALLOW_INSECURE_PROVIDER_URLS`。
 
+域名 HTTPS 生效后保持 `MINIFEEL_SECURE_COOKIES=true`。仅在域名尚未解析、需要通过公网 IP 的 HTTP 地址临时演示时改为 `false`；切换到 HTTPS 时应立即恢复为 `true`。
+
 ## 5. Docker Compose 配置
 
 生产环境使用仓库内的 `compose.production.yaml`，一次启动三个容器：
