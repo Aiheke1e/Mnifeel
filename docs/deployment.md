@@ -166,15 +166,33 @@ git clone <仓库地址> /opt/minifeel
 cd /opt/minifeel
 ```
 
-放入 `.env.production` 和 `compose.production.yaml` 后执行：
+放入 `.env.production` 和 `compose.production.yaml` 后，先启动空的 PostgreSQL：
 
 ```sh
-docker compose --env-file .env.production -f compose.production.yaml up -d --build
+docker compose --env-file .env.production -f compose.production.yaml up -d postgres
+```
+
+首次上线的新数据库依次执行 DDL 和初始化 DML。DDL 会创建完整表结构、索引、约束、触发器以及中文表和字段注释；DML 会登记当前迁移版本。以下命令只用于空数据库，不要在已有业务数据的数据库上重复执行：
+
+```sh
+docker compose --env-file .env.production -f compose.production.yaml exec -T postgres \
+  sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < apps/server/sql/schema.sql
+
+docker compose --env-file .env.production -f compose.production.yaml exec -T postgres \
+  sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < apps/server/sql/initialData.sql
+```
+
+然后构建并启动 Minifeel：
+
+```sh
+docker compose --env-file .env.production -f compose.production.yaml up -d --build minifeel
 docker compose --env-file .env.production -f compose.production.yaml ps
 docker compose --env-file .env.production -f compose.production.yaml logs -f minifeel
 ```
 
-应用启动时会自动检查数据库、执行未完成的迁移、初始化管理员及内置插件。日志出现下面内容表示应用已经开始监听：
+应用启动时仍会检查数据库、执行后续新增的迁移、初始化管理员及内置插件。未手工初始化的开发数据库也会由应用自动建表。日志出现下面内容表示应用已经开始监听：
 
 ```text
 [服务启动成功]: http://localhost:3000
