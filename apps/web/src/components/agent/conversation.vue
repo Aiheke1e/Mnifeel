@@ -410,7 +410,11 @@ async function sendMessage(source?: AgentMessage, direct?: { prompt: string; dis
   const pendingQuestions = new Map<string, string>();
   const activeChildFiles = new Set<string>();
   try {
-    if (!source && !direct) await instance.reset();
+    // ACT: xSender 清空时等待浏览器绘制帧；后台页面可能暂停绘制，不能让它阻塞消息请求。
+    if (!source && !direct) void instance.reset().catch(error => {
+      console.error("清空消息输入框失败", error);
+      ElMessage.warning("输入框未能清空，消息已正常发送");
+    });
     requestController.signal.throwIfAborted();
     await uploadAttachments(attachments, projectId, requestController.signal);
     const response = await fetch("/api/agent", {
