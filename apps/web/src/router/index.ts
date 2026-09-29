@@ -29,7 +29,7 @@ const router = createRouter({
         { path: "account", component: () => import("@/pages/app/account.vue") },
         { path: "projects/new", redirect: { path: "/app", query: { create: "1" } } },
         { path: "projects/import", component: () => import("@/pages/app/legacyImport.vue") },
-        { path: "projects/:projectId", redirect: to => `/app/projects/${String(to.params.projectId)}/advanced` },
+        { path: "projects/:projectId", component: () => import("@/pages/project/index.vue") },
       ],
     },
     {

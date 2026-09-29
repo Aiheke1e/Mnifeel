@@ -3,14 +3,15 @@
     <projectHeader
       :projectName="workspaceStore.project?.name || '加载中…'"
       :description="workspaceStore.project?.description"
+      :currentStage="stageContent.title"
       @openAdvanced="openAdvanced" />
 
     <el-alert v-if="errorMessage" class="pageAlert" :title="errorMessage" type="error" showIcon :closable="false" />
 
-    <projectStages v-model="activeStage" />
+    <div v-if="workspaceStore.project" class="projectShell">
+      <projectStages v-model="activeStage" class="stageNavigation" :statuses="stageStatuses" />
 
-    <div v-if="workspaceStore.project" class="stageLayout">
-      <section class="stageWorkspace panelCard" aria-labelledby="stageTitle">
+      <main class="stageWorkspace panelCard" aria-labelledby="stageTitle">
         <div class="stageHeading">
           <span class="stageIcon"><component :is="stageContent.icon" :size="25" aria-hidden="true" /></span>
           <div>
@@ -34,17 +35,9 @@
           </el-select>
           <p>{{ modelHint }}</p>
         </div>
+      </main>
 
-        <div class="stageActions">
-          <el-button type="primary" size="large" round @click="openAdvanced">
-            打开创作工作台
-            <icon-arrow-right :size="17" aria-hidden="true" />
-          </el-button>
-          <span>在工作台中编辑内容并发起生成。</span>
-        </div>
-      </section>
-
-      <aside class="projectAside">
+      <aside class="projectAside" aria-label="项目状态">
         <section class="panelCard progressCard">
           <p class="eyebrow">项目进度</p>
           <strong>{{ completedStageCount }} / 4</strong>
@@ -70,14 +63,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { IconArrowRight, IconCircleCheck, IconFileText, IconPhoto, IconVideo } from "@tabler/icons-vue";
+import { IconCircleCheck, IconFileText, IconPhoto, IconVideo } from "@tabler/icons-vue";
 import { apiErrorMessage } from "@/lib/api";
 import { getProjectModel, setProjectMode, setProjectModel } from "@/lib/projectMode";
 import { useUserAppStore } from "@/stores/userApp";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { formatDate, taskStatusLabels, taskStatusTypes, taskTypeLabels } from "@/pages/app/appFormat";
 import projectHeader from "./components/projectHeader.vue";
-import projectStages, { type ProjectStage } from "./components/projectStages.vue";
+import projectStages, { type ProjectStage, type ProjectStageStatus } from "./components/projectStages.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -98,8 +91,22 @@ const stageContent = computed(() => stageContents[activeStage.value]);
 const stageModels = computed(() => userAppStore.models.filter(model => model.mediaType === stageContent.value.mediaType));
 const projectTasks = computed(() => userAppStore.tasks.filter(task => task.projectId === workspaceStore.project?.id));
 const activeTasks = computed(() => projectTasks.value.filter(task => task.status === "pending" || task.status === "running"));
-const completedStageCount = computed(() => new Set(projectTasks.value.filter(task => task.status === "succeeded").map(task => task.taskType)).size);
+const stageStatuses = computed<Record<ProjectStage, ProjectStageStatus>>(() => ({
+  script: taskStageStatus("text"),
+  characters: taskStageStatus("image"),
+  storyboard: taskStageStatus("image"),
+  video: taskStageStatus("video"),
+}));
+const completedStageCount = computed(() => Object.values(stageStatuses.value).filter(status => status === "complete").length);
 const modelHint = computed(() => stageModels.value.length ? "可用模型由管理员统一配置，你只需选择适合当前步骤的模型。" : "管理员暂未启用此类模型。" );
+
+function taskStageStatus(taskType: "text" | "image" | "video"): ProjectStageStatus {
+  const tasks = projectTasks.value.filter(task => task.taskType === taskType);
+  if (tasks.some(task => task.status === "pending" || task.status === "running")) return "running";
+  if (tasks.some(task => task.status === "failed")) return "failed";
+  if (tasks.some(task => task.status === "succeeded")) return "complete";
+  return "notStarted";
+}
 
 function savedModelId(projectId: string) {
   try {
@@ -151,7 +158,24 @@ async function openAdvanced() {
 
 <style scoped lang="scss">
 .projectPage {
-  .stageLayout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; align-items: start; gap: 18px; }
+  .projectShell {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr) 300px;
+    align-items: start;
+    gap: 18px;
+    margin-top: 22px;
+
+    .stageNavigation {
+      position: sticky;
+      top: 22px;
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .stageWorkspace,
+    .projectAside { min-width: 0; }
+  }
 
   .stageWorkspace {
     min-height: 480px;
@@ -186,15 +210,6 @@ async function openAdvanced() {
       :deep(.el-select__wrapper) { border-radius: 12px; }
       :deep(.el-select-dropdown__item small) { float: right; color: var(--studioAccent); }
     }
-
-    .stageActions {
-      display: flex;
-      align-items: center;
-      gap: 13px;
-      margin-top: 30px;
-      :deep(.el-button > span) { gap: 8px; }
-      > span { color: var(--studioMuted); font-size: 12px; }
-    }
   }
 
   .projectAside { display: grid; gap: 14px; }
@@ -209,14 +224,21 @@ async function openAdvanced() {
   }
 }
 
-@media (max-width: 1000px) {
-  .projectPage .stageLayout { grid-template-columns: 1fr; .projectAside { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 1100px) {
+  .projectPage .projectShell {
+    grid-template-columns: 210px minmax(0, 1fr);
+    .projectAside { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; }
+  }
 }
 
-@media (max-width: 620px) {
+@media (max-width: 720px) {
   .projectPage {
-    .stageWorkspace { min-height: 0; padding: 20px; .stageActions { align-items: flex-start; flex-direction: column; } }
-    .stageLayout .projectAside { grid-template-columns: 1fr; }
+    .projectShell {
+      grid-template-columns: minmax(0, 1fr);
+      .stageNavigation { position: static; }
+      .projectAside { grid-column: auto; grid-template-columns: minmax(0, 1fr); }
+    }
+    .stageWorkspace { min-height: 0; padding: 20px; }
   }
 }
 </style>

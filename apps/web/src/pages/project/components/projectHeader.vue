@@ -10,21 +10,34 @@
         <p v-if="description">{{ description }}</p>
       </div>
     </div>
-    <div class="modeActions" aria-label="创作模式">
-      <span class="guidedMode"><icon-route :size="16" aria-hidden="true" />引导创作</span>
-      <el-button round @click="emit('openAdvanced')">
-        <icon-layout-dashboard :size="16" aria-hidden="true" />
-        高级创作
-      </el-button>
+    <div class="modeActions" aria-label="项目操作">
+      <span class="guidedMode"><icon-route :size="16" aria-hidden="true" />{{ currentStage }}</span>
+      <el-dropdown trigger="click" @command="handleCommand">
+        <el-button circle aria-label="项目更多操作">
+          <icon-dots :size="18" aria-hidden="true" />
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="advanced">
+              <icon-layout-dashboard :size="16" aria-hidden="true" />
+              高级画布
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
-import { IconArrowLeft, IconLayoutDashboard, IconRoute } from "@tabler/icons-vue";
+import { IconArrowLeft, IconDots, IconLayoutDashboard, IconRoute } from "@tabler/icons-vue";
 
-defineProps<{ projectName: string; description?: string }>();
+defineProps<{ projectName: string; description?: string; currentStage: string }>();
 const emit = defineEmits<{ openAdvanced: [] }>();
+
+function handleCommand(command: string) {
+  if (command === "advanced") emit("openAdvanced");
+}
 </script>
 
 <style scoped lang="scss">
@@ -40,7 +53,13 @@ const emit = defineEmits<{ openAdvanced: [] }>();
     display: flex;
     align-items: flex-start;
     gap: 14px;
+    max-width: 100%;
     min-width: 0;
+
+    > div {
+      min-width: 0;
+      overflow: hidden;
+    }
 
     .backLink {
       display: grid;
@@ -102,6 +121,7 @@ const emit = defineEmits<{ openAdvanced: [] }>();
 @media (max-width: 720px) {
   .projectHeader {
     flex-direction: column;
+    .projectIdentity { width: 100%; }
     .modeActions { width: 100%; .guidedMode, .el-button { flex: 1; justify-content: center; } }
   }
 }

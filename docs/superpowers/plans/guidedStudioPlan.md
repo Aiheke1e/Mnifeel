@@ -35,7 +35,7 @@
 
 | 任务 | 状态 | 实际改动 | 验证结果 | 剩余事项 |
 | --- | --- | --- | --- | --- |
-| 1. 工作台路由与三栏外壳 | 未开始 | — | — | — |
+| 1. 工作台路由与三栏外壳 | 已完成 | 默认项目路由和首页新建/打开进入导演式工作台；完成响应式三栏外壳、阶段状态与高级画布往返 | Web 类型检查和生产构建通过；浏览器验证首页打开、普通页刷新、高级画布往返、390px 窄屏无页面横向溢出，控制台无错误 | — |
 | 2. 共享画布运行层与导演助手 | 未开始 | — | — | — |
 | 3. 创作视图适配、剧本与角色 | 未开始 | — | — | — |
 | 4. 生成估价与确认 | 未开始 | — | — | — |
@@ -61,7 +61,7 @@
 - Consumes: `workspaceStore.createProject(...)`、`workspaceStore.openProject(projectId)`、`setProjectMode(mode)`。
 - Produces: `/app/projects/:projectId` 渲染 `pages/project/index.vue`；`projectStages` 接收 `statuses: Record<ProjectStage, ProjectStageStatus>`；高级画布返回同一项目的普通工作台。
 
-- [ ] **Step 1: 将普通项目路径改为真实页面**
+- [x] **Step 1: 将普通项目路径改为真实页面**
 
 在 `router/index.ts` 中把当前重定向替换为组件路由：
 
@@ -74,7 +74,7 @@
 
 保留 `/app/projects/:projectId/advanced` 指向原 `pages/workspace/index.vue`。
 
-- [ ] **Step 2: 修正首页的新建和打开行为**
+- [x] **Step 2: 修正首页的新建和打开行为**
 
 `dashboard.vue` 创建项目后继续写入空画布和 `pendingAgentMessage`，随后改为：
 
@@ -85,13 +85,13 @@ await router.push(`/app/projects/${project.id}`);
 
 `openProject(project)` 也设置 `guided` 并进入普通项目地址。创建失败仍保存 `pendingIdea` 并回滚刚创建的项目。
 
-- [ ] **Step 3: 将项目页改成三栏外壳**
+- [x] **Step 3: 将项目页改成三栏外壳**
 
 `project/index.vue` 只负责：加载项目、模型、账户和任务；持有当前阶段；组合顶部栏、左侧阶段导航、中央阶段内容和右侧导演面板插槽。第一步中央区保留现有阶段说明，不提前添加未接线的生成按钮。
 
 布局断点：桌面三栏；宽度小于 `1100px` 时导演面板移到内容下方；宽度小于 `720px` 时阶段导航横向滚动，避免四个阶段纵向占满首屏。
 
-- [ ] **Step 4: 给阶段导航加入状态接口**
+- [x] **Step 4: 给阶段导航加入状态接口**
 
 在 `projectStages.vue` 导出：
 
@@ -102,7 +102,7 @@ export type ProjectStageStatus = "notStarted" | "running" | "review" | "complete
 
 新增 `statuses` 属性，按钮显示当前阶段、已完成、处理中和失败状态；点击仍只发出 `update:modelValue`，不在组件内部改变业务状态。
 
-- [ ] **Step 5: 修正高级画布返回路径**
+- [x] **Step 5: 修正高级画布返回路径**
 
 `workspace/index.vue` 的普通用户返回路径改为当前项目：
 
@@ -114,7 +114,7 @@ const returnPath = computed(() => authStore.user?.role === "admin"
     : "/app");
 ```
 
-- [ ] **Step 6: 验证路由和响应式外壳**
+- [x] **Step 6: 验证路由和响应式外壳**
 
 Run:
 
@@ -125,7 +125,7 @@ bun run --cwd apps/web build
 
 Expected: 两个命令退出码均为 `0`。浏览器使用普通账号验证首页新建、项目列表打开、普通页进入高级画布、高级画布返回四条路径；刷新普通项目 URL 不跳转到高级画布；窄屏没有横向覆盖。
 
-- [ ] **Step 7: 更新进度并提交推送**
+- [x] **Step 7: 更新进度并提交推送**
 
 把执行状态 Task 1 改为“已完成”，填写实际验证结果，然后执行：
 
