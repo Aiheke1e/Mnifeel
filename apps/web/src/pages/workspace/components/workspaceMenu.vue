@@ -24,7 +24,6 @@
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { IconArrowLeft, IconSettings } from "@tabler/icons-vue";
-import { setProjectMode } from "@/lib/projectMode";
 
 const props = defineProps<{ returnPath: string }>();
 
@@ -32,16 +31,15 @@ const emit = defineEmits<{ openSettings: [] }>();
 const router = useRouter();
 const exitVisible = ref(false);
 const leaving = ref(false);
-const returnTitle = computed(() => props.returnPath.startsWith("/admin/") ? "返回项目列表" : "返回引导创作");
+const returnTitle = computed(() => props.returnPath.startsWith("/admin/") ? "返回项目列表" : "返回首页");
 const returnDescription = computed(() => props.returnPath.startsWith("/admin/")
   ? "返回前会保存当前修改，然后回到项目列表。"
-  : "返回前会保存当前修改，然后回到分步骤创作页面。");
+  : "返回前会保存当前修改，然后回到创作首页。");
 
 async function exitProject() {
   if (leaving.value) return;
   leaving.value = true;
   try {
-    if (!props.returnPath.startsWith("/admin/")) setProjectMode("guided");
     await router.push(props.returnPath);
   } finally {
     leaving.value = false;

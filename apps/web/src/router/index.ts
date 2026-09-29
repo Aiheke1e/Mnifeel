@@ -23,11 +23,12 @@ const router = createRouter({
       meta: { role: "user" },
       children: [
         { path: "", component: () => import("@/pages/app/dashboard.vue") },
+        { path: "assets", component: () => import("@/pages/app/assets.vue") },
         { path: "tasks", component: () => import("@/pages/app/tasks.vue") },
         { path: "account", component: () => import("@/pages/app/account.vue") },
-        { path: "projects/new", component: () => import("@/pages/app/projectCreate.vue") },
+        { path: "projects/new", redirect: { path: "/app", query: { create: "1" } } },
         { path: "projects/import", component: () => import("@/pages/app/legacyImport.vue") },
-        { path: "projects/:projectId", component: () => import("@/pages/project/index.vue") },
+        { path: "projects/:projectId", redirect: to => `/app/projects/${String(to.params.projectId)}/advanced` },
       ],
     },
     {

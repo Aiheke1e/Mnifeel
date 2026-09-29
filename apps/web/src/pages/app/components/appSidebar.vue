@@ -25,7 +25,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { IconHome, IconListCheck, IconUserCircle } from "@tabler/icons-vue";
+import { IconHome, IconListCheck, IconPhoto, IconUserCircle } from "@tabler/icons-vue";
 import logoUrl from "@minifeel/assets/logo.svg";
 import { useAuthStore } from "@/stores/auth";
 import { useUserAppStore } from "@/stores/userApp";
@@ -34,6 +34,7 @@ const authStore = useAuthStore();
 const userAppStore = useUserAppStore();
 const navItems = [
   { path: "/app", label: "创作首页", icon: IconHome },
+  { path: "/app/assets", label: "我的资产", icon: IconPhoto },
   { path: "/app/tasks", label: "生成任务", icon: IconListCheck },
   { path: "/app/account", label: "我的账户", icon: IconUserCircle },
 ];
@@ -176,7 +177,7 @@ const userInitial = computed(() => identity.value.slice(0, 1).toUpperCase());
 
     .primaryNav {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 4px;
       margin: 0;
 

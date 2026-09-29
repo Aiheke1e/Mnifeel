@@ -67,7 +67,7 @@ const activePanel = ref<"canvas" | "document">("canvas");
 const workspaceStore = useWorkspaceStore();
 const returnPath = computed(() => authStore.user?.role === "admin"
   ? "/admin/dashboard"
-  : workspaceStore.project?.id ? `/app/projects/${workspaceStore.project.id}` : "/app");
+  : "/app");
 const ready = ref(false);
 const panelOptions = [
   { label: "画布", value: "canvas", icon: IconLayoutDashboard },

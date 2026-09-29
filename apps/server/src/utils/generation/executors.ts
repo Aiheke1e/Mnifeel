@@ -3,6 +3,7 @@ import type { Context } from "@earendil-works/pi-ai";
 import { imageGenerationSchema, videoGenerationSchema } from "@minifeel/tool-media-generation/runtime";
 import { z } from "zod";
 import { aiReferenceSchema, getConfiguredModel, readAiReferences, streamAi } from "@/utils/ai";
+import { removeUserAsset, saveGeneratedImage } from "@/utils/assets";
 import { generateMedia } from "@/utils/media/generation";
 import { indexProjectAsset, removeProjectAssets, resolveProjectWorkspace } from "@/utils/projects";
 import { resolveWorkspacePath } from "@/utils/workspace/files";
@@ -47,17 +48,23 @@ export function registerGenerationExecutors() {
       if (request.providerId !== "managed") throw Object.assign(new Error("所选媒体模型与供应商不匹配"), { status: 400 });
       const cwd = await resolveProjectWorkspace(task.userId, task.projectId);
       let files: Awaited<ReturnType<typeof generateMedia>> = [];
+      const userAssets: string[] = [];
       let rolledBack = false;
       let rollbackPromise: Promise<void> | undefined;
       const rollback = async () => {
         if (rolledBack) return;
         rollbackPromise ??= (async () => {
-          const cleanup = await Promise.allSettled(files.flatMap(file => [
-            removeProjectAssets(task.projectId, file.path),
-            resolveWorkspacePath(cwd, file.path).then(value => unlink(value.path)).catch(error => {
+          const cleanup = await Promise.allSettled([
+            ...files.flatMap(file => [
+              removeProjectAssets(task.projectId, file.path),
+              resolveWorkspacePath(cwd, file.path).then(value => unlink(value.path)).catch(error => {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+              }),
+            ]),
+            ...userAssets.map(path => removeUserAsset(task.userId, path).catch(error => {
               if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-            }),
-          ]));
+            })),
+          ]);
           const failures = cleanup.filter(result => result.status === "rejected").map(result => result.reason);
           if (failures.length) throw new AggregateError(failures, "媒体文件回滚失败");
           rolledBack = true;
@@ -73,6 +80,7 @@ export function registerGenerationExecutors() {
         await Promise.all(files.map(async file => {
           const path = await resolveWorkspacePath(cwd, file.path);
           await indexProjectAsset(task.projectId, file.path, path.path);
+          if (mediaType === "image") userAssets.push(await saveGeneratedImage(task.userId, path.path, request.prompt));
         }));
         execution.signal.throwIfAborted();
         return {

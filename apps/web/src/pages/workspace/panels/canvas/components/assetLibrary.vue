@@ -1,14 +1,14 @@
 <template>
-  <el-card v-if="visible" class="assetLibrary" shadow="never" :bodyStyle="{ padding: '8px' }" role="region" aria-label="素材库" @dblclick.stop>
+  <el-card v-if="visible" class="assetLibrary" shadow="never" :bodyStyle="{ padding: '8px' }" role="region" aria-label="我的资产" @dblclick.stop>
     <div class="libraryToolbar">
       <el-input v-model="searchQuery" class="searchInput" :prefixIcon="IconSearch" placeholder="搜索素材" aria-label="搜索素材" clearable @keydown.esc.stop="searchQuery = ''" />
-      <el-button class="toolbarButton" text :icon="IconFolderPlus" title="新建文件夹" aria-label="新建文件夹" :disabled="newFolderParent !== undefined" @click="startFolder" />
-      <el-button class="toolbarButton" text :icon="IconX" title="关闭素材库" aria-label="关闭素材库" @click="visible = false" />
+      <el-button class="toolbarButton" text :icon="IconFolderPlus" title="新建分组" aria-label="新建分组" :disabled="newFolderParent !== undefined" @click="startFolder" />
+      <el-button class="toolbarButton" text :icon="IconX" title="关闭我的资产" aria-label="关闭我的资产" @click="visible = false" />
     </div>
     <el-scrollbar class="libraryScroll" maxHeight="min(440px, calc(100dvh - 198px))">
-      <el-tree ref="assetTree" class="assetTree" :data="displayEntries" nodeKey="path" :props="{ label: 'name' }" :currentNodeKey="folder === rootPath ? undefined : folder" :filterNodeMethod="filterEntry" defaultExpandAll highlightCurrent emptyText="" @nodeClick="selectFolder">
+      <el-tree ref="assetTree" class="assetTree" :data="displayEntries" nodeKey="path" :props="{ label: 'name' }" :currentNodeKey="folder || undefined" :filterNodeMethod="filterEntry" defaultExpandAll highlightCurrent emptyText="" @nodeClick="selectFolder">
         <template #default="{ data }">
-          <div class="assetEntry" :title="data.name" :draggable="data.type === 'file'" @dragstart.stop="startAssetDrag($event, data)" @dblclick.stop="openPreview(data)" @contextmenu="openItemMenu($event, data)">
+          <div class="assetEntry" :title="data.name" :draggable="data.type === 'file'" @dragstart.stop="startAssetDrag($event, data, 'myAssets')" @dblclick.stop="openPreview(data)" @contextmenu="openItemMenu($event, data)">
             <icon-folder-filled v-if="data.type === 'directory'" class="folderIcon" :size="30" />
             <el-image v-else-if="mediaKind(data) === 'image'" class="assetThumbnail" :src="assetUrl(data.path)" fit="cover" loading="lazy" draggable="false" @click.stop="openPreview(data)">
               <template #error><icon-photo :size="22" /></template>
@@ -36,7 +36,7 @@
     </div>
   </el-card>
 
-  <assetMenu v-if="visible && projectId" ref="assetMenuRef" :entries="entries" :projectId="projectId" :rootPath="rootPath" @changed="refreshAssets" />
+  <assetMenu v-if="visible" ref="assetMenuRef" :entries="entries" @changed="refreshAssets" />
 
   <el-image-viewer v-if="previewAsset?.kind === 'image'" :urlList="[previewAsset.url]" teleported @close="previewAsset = undefined" />
 
@@ -47,7 +47,7 @@
     </div>
   </el-dialog>
 
-  <el-dialog v-model="saveVisible" title="保存到素材库" width="460px" alignCenter appendToBody :closeOnClickModal="false" @opened="assetNameInput?.select()">
+  <el-dialog v-model="saveVisible" title="保存到我的资产" width="460px" alignCenter appendToBody :closeOnClickModal="false" @opened="assetNameInput?.select()">
     <el-form class="saveForm" labelPosition="top" @submit.prevent="saveAsset">
       <el-form-item label="素材名称">
         <el-input ref="assetNameInput" v-model="assetName" aria-label="素材名称" placeholder="输入完整文件名" :disabled="saving" @keydown.enter.prevent="saveAsset" />
@@ -60,7 +60,7 @@
       <div class="saveLocation">
         <div class="locationHeader">
           <span>保存位置</span>
-          <el-button text :icon="IconFolderPlus" :disabled="saving || saveFolderName !== undefined" @click="startSaveFolder">新建文件夹</el-button>
+          <el-button text :icon="IconFolderPlus" :disabled="saving || saveFolderName !== undefined" @click="startSaveFolder">新建分组</el-button>
         </div>
         <div class="locationPath" :title="saveLocationLabel">{{ saveLocationLabel }}</div>
         <el-scrollbar class="saveFolderScroll" maxHeight="220px">
@@ -91,6 +91,7 @@ import { ElMessage, ElTree, type InputInstance, type TreeNodeData } from "elemen
 import { IconDots, IconEye, IconFile, IconFolderFilled, IconFolderPlus, IconMusic, IconPhoto, IconSearch, IconVideo, IconX } from "@tabler/icons-vue";
 import type { NodeOutput } from "@minifeel/nodes-scaffold/values";
 import { startAssetDrag } from "../canvasDrop";
+import api from "@/lib/api";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import assetMenu from "./assetMenu.vue";
 
@@ -98,18 +99,17 @@ type AssetEntry = { name: string; path: string; type: "file" | "directory"; chil
 type AssetOutput = { label: string; output: NodeOutput };
 
 const props = defineProps<{ projectId?: string }>();
-const rootPath = "assets/library";
 const visible = defineModel<boolean>({ default: false });
 const saveVisible = ref(false);
 const saving = ref(false);
 const entries = ref<AssetEntry[]>([]);
-const folder = ref(rootPath);
+const folder = ref("");
 const assetName = ref("");
 const assetNameInput = ref<InputInstance>();
-const saveDirectory = ref(rootPath);
+const saveDirectory = ref("");
 const saveFolderName = ref<string>();
 const saveFolderInput = ref<InputInstance>();
-const saveLocationLabel = computed(() => saveDirectory.value === rootPath ? "素材库" : `素材库 / ${saveDirectory.value.slice(rootPath.length + 1).split("/").join(" / ")}`);
+const saveLocationLabel = computed(() => saveDirectory.value ? `我的资产 / ${saveDirectory.value.split("/").join(" / ")}` : "我的资产");
 const searchQuery = ref("");
 const assetTree = ref<InstanceType<typeof ElTree>>();
 const folderInput = ref<InputInstance>();
@@ -123,7 +123,11 @@ let loadRequest = 0;
 onBeforeUnmount(() => { loadRequest++; });
 
 function assetUrl(path: string) {
-  return props.projectId ? `/api/workspaces/files/read?projectId=${encodeURIComponent(props.projectId)}&path=${encodeURIComponent(path)}` : "";
+  return `/api/myAssets/read?path=${encodeURIComponent(path)}`;
+}
+
+function joinPath(directory: string, name: string) {
+  return directory ? `${directory}/${name}` : name;
 }
 
 function mediaKind(entry: AssetEntry) {
@@ -149,17 +153,17 @@ function openItemMenu(event: MouseEvent, entry: AssetEntry) {
 
 async function refreshAssets(path?: string, target?: string) {
   if (path && (folder.value === path || folder.value.startsWith(path + "/"))) {
-    folder.value = target ? target + folder.value.slice(path.length) : rootPath;
+    folder.value = target ? target + folder.value.slice(path.length) : "";
   }
   try { await loadEntries(); } catch (error) { showError(error); }
 }
 const displayEntries = computed(() => {
   function withDraft(items: AssetEntry[], parent: string): AssetEntry[] {
     const children = items.map(item => item.children ? { ...item, children: withDraft(item.children, item.path) } : item);
-    if (newFolderParent.value === parent) children.push({ name: "新建文件夹", path: `${parent}/:newFolder`, type: "directory", draft: true });
+    if (newFolderParent.value === parent) children.push({ name: "新建分组", path: joinPath(parent, ":newFolder"), type: "directory", draft: true });
     return children;
   }
-  return newFolderParent.value === undefined ? entries.value : withDraft(entries.value, rootPath);
+  return newFolderParent.value === undefined ? entries.value : withDraft(entries.value, "");
 });
 
 function filterEntry(query: string, entry: TreeNodeData) {
@@ -171,7 +175,7 @@ watch(searchQuery, query => assetTree.value?.filter(query));
 async function startFolder() {
   searchQuery.value = "";
   newFolderParent.value = folder.value;
-  newFolderName.value = "新建文件夹";
+  newFolderName.value = "新建分组";
   await nextTick();
   assetTree.value?.getNode(folder.value)?.expand();
   await nextTick();
@@ -220,25 +224,9 @@ function directoryEntries(items: AssetEntry[]): AssetEntry[] {
 async function loadEntries() {
   const request = ++loadRequest;
   try {
-    if (!props.projectId) {
-      entries.value = [];
-      return;
-    }
-    const files = useWorkspaceFiles(props.projectId);
-    for (const path of ["assets", rootPath]) {
-      await files.mkdir(path).catch((error: { response?: { data?: { data?: { code?: string } } } }) => {
-        if (error.response?.data?.data?.code !== "EEXIST") throw error;
-      });
-    }
-    async function readEntries(path: string): Promise<AssetEntry[]> {
-      return Promise.all((await files.list(path)).entries.map(async entry => ({
-        ...entry,
-        ...(entry.type === "directory" ? { children: await readEntries(entry.path) } : {}),
-      })));
-    }
-    const loaded = await readEntries(rootPath);
+    const { data } = await api.get<{ data: { entries: AssetEntry[] } }>("/myAssets/list");
     if (request !== loadRequest) return;
-    entries.value = loaded;
+    entries.value = data.data.entries;
     await nextTick();
     if (request === loadRequest) assetTree.value?.filter(searchQuery.value);
   } catch (error) {
@@ -250,7 +238,7 @@ function showError(error: unknown) {
   ElMessage.error(axios.isAxiosError<{ message: string }>(error) ? error.response?.data.message || error.message : (error as Error).message);
 }
 
-watch([visible, () => props.projectId], ([opened]) => {
+watch(visible, opened => {
   if (opened) loadEntries().catch(showError);
   else {
     cancelFolder();
@@ -260,12 +248,12 @@ watch([visible, () => props.projectId], ([opened]) => {
 
 function selectFolder(entry: AssetEntry) {
   if (entry.draft) return;
-  const path = entry.type === "directory" ? entry.path : entry.path.split("/").slice(0, -1).join("/") || ".";
-  folder.value = folder.value === path ? "." : path;
+  const path = entry.type === "directory" ? entry.path : entry.path.split("/").slice(0, -1).join("/");
+  folder.value = folder.value === path ? "" : path;
 }
 
 async function startSaveFolder() {
-  saveFolderName.value = "新建文件夹";
+  saveFolderName.value = "新建分组";
   await nextTick();
   saveFolderInput.value?.select();
 }
@@ -288,9 +276,8 @@ async function createFolder() {
 
 async function createAssetFolder(parent: string, name: string) {
   if (/[\\/]/.test(name)) throw new Error("文件夹名称不能包含斜杠");
-  if (!props.projectId) throw new Error("请先打开项目");
-  const path = `${parent}/${name}`;
-  await useWorkspaceFiles(props.projectId).mkdir(path);
+  const path = joinPath(parent, name);
+  await api.post("/myAssets/mkdir", { path });
   return path;
 }
 
@@ -313,7 +300,7 @@ async function saveAsset() {
   const output = outputs.value[selectedOutput.value]?.output;
   const name = assetName.value.trim();
   if (!output || !name || /[\\/]/.test(name) || saving.value || saveFolderName.value !== undefined) return;
-  const path = `${saveDirectory.value}/${name}`;
+  const path = joinPath(saveDirectory.value, name);
   saving.value = true;
   try {
     if (!sourceProjectId) throw new Error("项目已切换，请重新打开保存窗口");
@@ -321,9 +308,12 @@ async function saveAsset() {
     const content = typeof output.value === "object"
       ? await files.read(output.value.url)
       : new Blob([String(output.value)]);
-    await files.write(path, content, true);
+    await api.put("/myAssets/save", content instanceof Blob ? await content.arrayBuffer() : content, {
+      params: { path },
+      headers: { "Content-Type": "application/octet-stream" },
+    });
     saveVisible.value = false;
-    ElMessage.success("已保存到素材库");
+    ElMessage.success("已保存到我的资产");
     await loadEntries();
   } catch (error) {
     showError(error);

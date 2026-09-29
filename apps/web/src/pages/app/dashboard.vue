@@ -1,139 +1,96 @@
 <template>
-  <div class="dashboardPage studioPage" :aria-busy="loading">
-    <header class="pageTopbar">
-      <div>
-        <p class="eyebrow">创作中心</p>
-        <h1>{{ greeting }}，准备好讲一个新故事了吗？</h1>
-        <p>从一句灵感开始，按步骤完成短剧创作。</p>
+  <div class="dashboardPage studioPage" :aria-busy="creating || loading">
+    <section class="creationHero" aria-labelledby="creationTitle">
+      <p class="eyebrow">AI 短剧创作</p>
+      <h1 id="creationTitle">你想创作什么？</h1>
+      <p>写下故事、角色或一个画面，剩下的交给创作助手。</p>
+
+      <form class="creationBox" @submit.prevent="createFromIdea">
+        <el-input
+          ref="ideaInput"
+          v-model="idea"
+          type="textarea"
+          :autosize="{ minRows: 3, maxRows: 7 }"
+          maxlength="4000"
+          resize="none"
+          aria-label="创作需求"
+          placeholder="例如：做一部治愈系短剧，一只橘猫每天清晨去叫醒独居老人，角色形象需要每集保持一致。"
+          @keydown.ctrl.enter.prevent="createFromIdea"
+          @keydown.meta.enter.prevent="createFromIdea" />
+        <div class="creationActions">
+          <span>生成的角色图片会自动保存到“我的资产”，可在后续每一集继续使用</span>
+          <el-button nativeType="submit" type="primary" size="large" :loading="creating" :disabled="!idea.trim()" round>
+            开始创作
+            <icon-arrow-up-right :size="18" aria-hidden="true" />
+          </el-button>
+        </div>
+      </form>
+
+      <div class="ideaExamples" aria-label="创作示例">
+        <span>试试：</span>
+        <button v-for="example in examples" :key="example" type="button" @click="idea = example">{{ example }}</button>
       </div>
-      <div class="headerActions">
-        <router-link class="secondaryAction" to="/app/projects/import">
-          <icon-file-import :size="18" aria-hidden="true" />
-          导入旧项目
-        </router-link>
-        <router-link class="primaryAction" to="/app/projects/new">
-          <icon-plus :size="18" aria-hidden="true" />
-          开始创作
-        </router-link>
-      </div>
-    </header>
+    </section>
 
     <el-alert v-if="errorMessage" class="pageAlert" :title="errorMessage" type="error" showIcon :closable="false" />
-
-    <section class="summaryGrid" aria-label="创作概览">
-      <article class="summaryCard accentCard">
-        <span>可用积分</span>
-        <strong>{{ userAppStore.availableCredits.toLocaleString() }}</strong>
-        <small v-if="userAppStore.frozenCredits">另有 {{ userAppStore.frozenCredits }} 积分正在使用</small>
-        <small v-else>用于文本与图片生成</small>
-      </article>
-      <article class="summaryCard">
-        <span>我的项目</span>
-        <strong>{{ workspaceStore.projectList.length }}</strong>
-        <small>最近更新 {{ latestProjectTime }}</small>
-      </article>
-      <article class="summaryCard">
-        <span>进行中的任务</span>
-        <strong>{{ userAppStore.activeTaskCount }}</strong>
-        <small>{{ userAppStore.activeTaskCount ? "完成后会自动保存" : "当前没有等待任务" }}</small>
-      </article>
-    </section>
 
     <section class="contentSection" aria-labelledby="recentProjectsTitle">
       <div class="sectionHeading">
         <div>
           <p class="eyebrow">继续创作</p>
-          <h2 id="recentProjectsTitle">最近项目</h2>
+          <h2 id="recentProjectsTitle">我的项目</h2>
         </div>
-        <router-link v-if="workspaceStore.projectList.length" to="/app/projects/new">新建项目</router-link>
+        <router-link to="/app/projects/import">导入旧项目</router-link>
       </div>
       <div v-if="workspaceStore.projectList.length" class="projectGrid">
-        <button v-for="project in workspaceStore.projectList.slice(0, 4)" :key="project.id" class="projectCard" type="button" @click="openProject(project)">
-          <span class="projectCover"><icon-movie :size="30" aria-hidden="true" /></span>
+        <button v-for="project in workspaceStore.projectList.slice(0, 6)" :key="project.id" class="projectCard" type="button" @click="openProject(project)">
+          <span class="projectCover"><icon-movie :size="27" aria-hidden="true" /></span>
           <span class="projectBody">
             <strong>{{ project.name }}</strong>
-            <span>{{ project.description || "尚未填写创作描述" }}</span>
-            <small>更新于 {{ formatDate(project.updatedAt) }}</small>
+            <span>{{ project.description || "继续完善这个故事" }}</span>
+            <small>{{ formatDate(project.updatedAt) }}</small>
           </span>
           <icon-chevron-right :size="18" aria-hidden="true" />
         </button>
       </div>
-      <div v-else class="emptyPanel">
-        <icon-movie :size="34" aria-hidden="true" />
-        <h3>还没有短剧项目</h3>
-        <p>选择一个模板，几分钟内开始你的第一个故事。</p>
-        <router-link class="secondaryAction" to="/app/projects/new">创建第一个项目</router-link>
-      </div>
-    </section>
-
-    <section class="contentSection" aria-labelledby="templatesTitle">
-      <div class="sectionHeading">
-        <div>
-          <p class="eyebrow">快速开始</p>
-          <h2 id="templatesTitle">内置模板</h2>
-        </div>
-      </div>
-      <div class="templateGrid">
-        <router-link v-for="item in projectTemplates" :key="item.id" class="templateCard" :to="{ path: '/app/projects/new', query: { template: item.id } }">
-          <span class="templateIcon" :style="{ '--templateAccent': item.accent }"><component :is="item.icon" :size="23" aria-hidden="true" /></span>
-          <strong>{{ item.name }}</strong>
-          <span>{{ item.description }}</span>
-        </router-link>
-      </div>
-    </section>
-
-    <section class="contentSection" aria-labelledby="recentTasksTitle">
-      <div class="sectionHeading">
-        <div>
-          <p class="eyebrow">生成记录</p>
-          <h2 id="recentTasksTitle">最近任务</h2>
-        </div>
-        <router-link to="/app/tasks">查看全部</router-link>
-      </div>
-      <div v-if="userAppStore.tasks.length" class="recentTasks">
-        <article v-for="task in userAppStore.tasks.slice(0, 5)" :key="task.id" class="taskRow">
-          <span class="taskTypeIcon"><component :is="taskIcons[task.taskType]" :size="18" aria-hidden="true" /></span>
-          <span class="taskInfo">
-            <strong>{{ taskTypeLabels[task.taskType] }}</strong>
-            <small>{{ formatDate(task.createdAt) }} · {{ taskCreditText(task) }}</small>
-          </span>
-          <el-tag :type="taskStatusTypes[task.status]" effect="light" round>{{ taskStatusLabels[task.status] }}</el-tag>
-        </article>
-      </div>
-      <p v-else class="quietEmpty">生成记录会显示在这里。</p>
+      <p v-else class="quietEmpty">输入上面的创作需求，建立你的第一个项目。</p>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
-import { IconChevronRight, IconFileImport, IconFileText, IconMovie, IconPhoto, IconPlus, IconVideo } from "@tabler/icons-vue";
+import { nextTick, onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { ElInput } from "element-plus";
+import { IconArrowUpRight, IconChevronRight, IconMovie } from "@tabler/icons-vue";
 import { apiErrorMessage } from "@/lib/api";
-import { getProjectMode } from "@/lib/projectMode";
-import { useAuthStore } from "@/stores/auth";
+import { setProjectMode } from "@/lib/projectMode";
+import useWorkspaceFiles from "@/lib/workspaceFiles";
+import { modelChoices } from "@/stores/settings";
 import { useUserAppStore } from "@/stores/userApp";
 import { useWorkspaceStore, type Project } from "@/stores/workspace";
-import { formatDate, taskCreditText, taskStatusLabels, taskStatusTypes, taskTypeLabels } from "./appFormat";
-import { projectTemplates } from "./projectTemplates";
+import { formatDate } from "./appFormat";
 
+const route = useRoute();
 const router = useRouter();
-const authStore = useAuthStore();
 const workspaceStore = useWorkspaceStore();
 const userAppStore = useUserAppStore();
+const ideaInput = ref<InstanceType<typeof ElInput>>();
+const idea = ref("");
+const creating = ref(false);
 const loading = ref(false);
 const errorMessage = ref("");
-const taskIcons = { text: IconFileText, image: IconPhoto, video: IconVideo };
-const greeting = computed(() => {
-  const hour = new Date().getHours();
-  return hour < 11 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
-});
-const latestProjectTime = computed(() => workspaceStore.projectList[0] ? formatDate(workspaceStore.projectList[0].updatedAt) : "—");
+const examples = [
+  "都市悬疑：外卖员发现每个订单都来自同一个不存在的房间",
+  "治愈萌宠：橘猫每天清晨叫醒独居老人，做成连续短剧",
+  "古风爱情：失忆将军与女医师在边城重逢",
+];
 
 onMounted(async () => {
   loading.value = true;
   try {
-    await Promise.all([workspaceStore.loadProjects(), userAppStore.loadAccount(), userAppStore.loadTasks()]);
+    await Promise.all([workspaceStore.loadProjects(), userAppStore.loadAccount()]);
+    if (route.query.create) await nextTick(() => ideaInput.value?.focus());
   } catch (error) {
     errorMessage.value = apiErrorMessage(error, "首页信息加载失败");
   } finally {
@@ -141,12 +98,48 @@ onMounted(async () => {
   }
 });
 
+function projectName(prompt: string) {
+  return prompt.split(/[。！？!?\n]/)[0]!.trim().replace(/^[：:，,\s]+|[：:，,\s]+$/g, "").slice(0, 32) || "未命名故事";
+}
+
+async function createFromIdea() {
+  const prompt = idea.value.trim();
+  if (!prompt || creating.value) return;
+  creating.value = true;
+  errorMessage.value = "";
+  let projectId = "";
+  try {
+    const project = await workspaceStore.createProject(projectName(prompt), prompt, "freeStory");
+    projectId = project.id;
+    await useWorkspaceFiles(project.id).writeJson("画布1.json", {
+      minifeelCanvas: true,
+      nodes: [],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    }, true);
+    workspaceStore.pendingAgentMessage = {
+      projectId: project.id,
+      model: modelChoices.value[0]?.value ?? "",
+      reasoningEffort: "",
+      prompt: `/skill:workflow\n\n用户的创作需求：${prompt}\n\n直接在当前空画布开始创作，建立需要的剧本、角色、分镜和生成节点。生成角色参考图后，将它保存到“我的资产”供后续各集和镜头复用；再次生成同一角色时优先引用已有角色资产，保持脸部、发型、服装和主色一致。需要调用图片或视频模型前，先明确本次生成数量并让用户确认。`,
+    };
+    setProjectMode("advanced");
+    await router.push(`/app/projects/${project.id}/advanced`);
+  } catch (error) {
+    if (projectId) await workspaceStore.removeProject(projectId).catch(() => undefined);
+    errorMessage.value = apiErrorMessage(error, "项目创建失败，请稍后重试");
+  } finally {
+    creating.value = false;
+  }
+}
+
 async function openProject(project: Project) {
   loading.value = true;
+  errorMessage.value = "";
   try {
     await workspaceStore.openProject(project.id);
-    const path = getProjectMode() === "advanced" ? `/app/projects/${project.id}/advanced` : `/app/projects/${project.id}`;
-    await router.push(path);
+    setProjectMode("advanced");
+    await router.push(`/app/projects/${project.id}/advanced`);
   } catch (error) {
     errorMessage.value = apiErrorMessage(error, "项目打开失败");
   } finally {
@@ -157,162 +150,149 @@ async function openProject(project: Project) {
 
 <style scoped lang="scss">
 .dashboardPage {
-  .headerActions { display: flex; gap: 10px; }
+  max-width: 1120px;
 
-  .summaryGrid {
-    display: grid;
-    grid-template-columns: 1.35fr 1fr 1fr;
-    gap: 16px;
-    margin-top: 28px;
+  .creationHero {
+    display: flex;
+    min-height: 56dvh;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
 
-    .summaryCard {
-      display: flex;
-      min-height: 136px;
-      flex-direction: column;
-      justify-content: center;
-      padding: 24px;
-      border: 1px solid var(--studioBorder);
-      border-radius: var(--studioRadiusLarge);
+    h1 {
+      margin: 12px 0 10px;
+      color: var(--studioText);
+      font-size: clamp(38px, 7vw, 66px);
+      line-height: 1.08;
+      letter-spacing: -2.8px;
+    }
+
+    > p:not(.eyebrow) {
+      margin: 0;
+      color: var(--studioMuted);
+      font-size: 16px;
+    }
+
+    .creationBox {
+      width: min(760px, 100%);
+      margin-top: 34px;
+      padding: 10px 12px 12px;
+      border: 1px solid color-mix(in srgb, var(--studioAccent) 28%, var(--studioBorder));
+      border-radius: 24px;
       background: var(--studioSurface);
+      box-shadow: 0 24px 70px color-mix(in srgb, var(--studioAccent) 14%, transparent);
+      text-align: left;
 
-      span { color: var(--studioMuted); font-size: 13px; }
-      strong { margin: 8px 0 5px; color: var(--studioText); font-size: clamp(28px, 4vw, 38px); letter-spacing: -1px; }
-      small { color: var(--studioMuted); }
+      :deep(.el-textarea__inner) {
+        min-height: 94px !important;
+        padding: 16px 17px;
+        border: 0;
+        box-shadow: none;
+        background: transparent;
+        color: var(--studioText);
+        font-size: 16px;
+        line-height: 1.7;
+      }
 
-      &.accentCard {
-        border-color: transparent;
-        background: linear-gradient(135deg, #302c78, #5b4ec8 60%, #7758d9);
-        box-shadow: 0 20px 50px #4f46e530;
-        span, strong, small { color: white; }
-        small { opacity: 0.72; }
+      .creationActions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 7px 6px 0 16px;
+
+        > span { color: var(--studioMuted); font-size: 12px; line-height: 1.5; }
+        :deep(.el-button > span) { gap: 7px; }
+      }
+    }
+
+    .ideaExamples {
+      display: flex;
+      width: min(760px, 100%);
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 15px;
+      color: var(--studioMuted);
+      font-size: 12px;
+
+      button {
+        max-width: 210px;
+        overflow: hidden;
+        padding: 7px 11px;
+        border: 1px solid var(--studioBorder);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--studioSurface) 72%, transparent);
+        color: var(--studioMuted);
+        font: inherit;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+        &:hover { border-color: var(--studioAccent); color: var(--studioAccent); }
+        &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: 2px; }
       }
     }
   }
 
+  .contentSection { margin-top: 24px; }
+
   .projectGrid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
+    gap: 12px;
 
     .projectCard {
       display: grid;
-      grid-template-columns: 72px minmax(0, 1fr) auto;
+      grid-template-columns: 54px minmax(0, 1fr) auto;
       align-items: center;
-      gap: 16px;
-      padding: 16px;
+      gap: 14px;
+      padding: 14px;
       border: 1px solid var(--studioBorder);
-      border-radius: var(--studioRadiusLarge);
+      border-radius: 16px;
       background: var(--studioSurface);
       color: inherit;
       font: inherit;
       text-align: left;
       cursor: pointer;
-      transition: 180ms ease;
-
-      &:hover { border-color: color-mix(in srgb, var(--studioAccent) 38%, var(--studioBorder)); transform: translateY(-2px); box-shadow: var(--studioShadow); }
+      transition: 160ms ease;
+      &:hover { border-color: color-mix(in srgb, var(--studioAccent) 40%, var(--studioBorder)); transform: translateY(-1px); }
       &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: 2px; }
 
       .projectCover {
         display: grid;
-        width: 72px;
-        height: 72px;
+        width: 54px;
+        height: 54px;
         place-items: center;
-        border-radius: 16px;
-        background: linear-gradient(145deg, var(--studioAccentSoft), #f1e8ff);
+        border-radius: 14px;
+        background: var(--studioAccentSoft);
         color: var(--studioAccent);
       }
 
       .projectBody {
         display: grid;
-        gap: 5px;
+        gap: 4px;
         min-width: 0;
         strong, span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         strong { color: var(--studioText); }
         span, small { color: var(--studioMuted); }
-        span { font-size: 13px; }
-        small { font-size: 11px; }
+        span { font-size: 12px; }
+        small { font-size: 10px; }
       }
-    }
-  }
-
-  .templateGrid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-
-    .templateCard {
-      display: flex;
-      min-height: 188px;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 12px;
-      padding: 22px;
-      border: 1px solid var(--studioBorder);
-      border-radius: var(--studioRadiusLarge);
-      background: var(--studioSurface);
-      color: var(--studioText);
-      text-decoration: none;
-      transition: 180ms ease;
-
-      &:hover { transform: translateY(-3px); box-shadow: var(--studioShadow); }
-      &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: 2px; }
-      > span:last-child { color: var(--studioMuted); font-size: 13px; line-height: 1.65; }
-
-      .templateIcon {
-        display: grid;
-        width: 44px;
-        height: 44px;
-        place-items: center;
-        border-radius: 13px;
-        background: color-mix(in srgb, var(--templateAccent) 13%, transparent);
-        color: var(--templateAccent);
-      }
-    }
-  }
-
-  .recentTasks {
-    overflow: hidden;
-    border: 1px solid var(--studioBorder);
-    border-radius: var(--studioRadiusLarge);
-    background: var(--studioSurface);
-
-    .taskRow {
-      display: flex;
-      align-items: center;
-      gap: 13px;
-      padding: 15px 18px;
-      + .taskRow { border-top: 1px solid var(--studioBorder); }
-
-      .taskTypeIcon {
-        display: grid;
-        width: 36px;
-        height: 36px;
-        flex-shrink: 0;
-        place-items: center;
-        border-radius: 11px;
-        background: var(--studioSurfaceMuted);
-        color: var(--studioAccent);
-      }
-      .taskInfo { display: grid; flex: 1; gap: 3px; }
-      .taskInfo strong { font-size: 14px; }
-      .taskInfo small { color: var(--studioMuted); }
     }
   }
 }
 
-@media (max-width: 920px) {
+@media (max-width: 760px) {
   .dashboardPage {
-    .summaryGrid { grid-template-columns: 1fr 1fr; .accentCard { grid-column: 1 / -1; } }
+    .creationHero {
+      min-height: 64dvh;
+      h1 { letter-spacing: -1.8px; }
+      .creationBox .creationActions { align-items: stretch; flex-direction: column; padding-left: 6px; .el-button { width: 100%; } }
+      .ideaExamples { justify-content: flex-start; button { max-width: 100%; } }
+    }
     .projectGrid { grid-template-columns: 1fr; }
-  }
-}
-
-@media (max-width: 620px) {
-  .dashboardPage {
-    .headerActions { width: 100%; flex-direction: column; .primaryAction, .secondaryAction { width: 100%; } }
-    .summaryGrid, .templateGrid { grid-template-columns: 1fr; }
-    .summaryGrid .accentCard { grid-column: auto; }
-    .projectGrid .projectCard { grid-template-columns: 56px minmax(0, 1fr) auto; .projectCover { width: 56px; height: 56px; } }
   }
 }
 </style>

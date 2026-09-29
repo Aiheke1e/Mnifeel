@@ -15,10 +15,10 @@ const fileMimeTypes: Record<string, string> = {
   json: "application/json", xml: "application/xml", html: "text/html", css: "text/css", js: "text/javascript", ndjson: "application/x-ndjson",
 };
 
-export function startAssetDrag(event: DragEvent, entry: { type: string; path: string }) {
+export function startAssetDrag(event: DragEvent, entry: { type: string; path: string }, source: "workspace" | "myAssets" = "workspace") {
   if (entry.type !== "file" || !event.dataTransfer) return;
   event.dataTransfer.effectAllowed = "copy";
-  event.dataTransfer.setData(assetDragType, entry.path);
+  event.dataTransfer.setData(assetDragType, JSON.stringify({ path: entry.path, source }));
 }
 
 export function isCanvasFileDrag(event: DragEvent) {
@@ -35,15 +35,18 @@ type CanvasFileContext = {
 export async function dropCanvasFiles(event: DragEvent, context: CanvasFileContext) {
   const transfer = event.dataTransfer;
   if (!transfer) return;
-  const path = transfer.getData(assetDragType);
+  const asset = transfer.getData(assetDragType);
   let droppedFiles = Array.from(transfer.files);
   const { signal, flow } = context;
   const position = flow.screenToFlowCoordinate({ x: event.clientX, y: event.clientY });
   try {
     signal.throwIfAborted();
-    if (path) {
-      const data = await useWorkspaceFiles(context.projectId).read(path);
-      droppedFiles = [new File([data], path.split("/").pop()!)];
+    if (asset) {
+      const parsed = asset.startsWith("{") ? JSON.parse(asset) as { path: string; source: "workspace" | "myAssets" } : { path: asset, source: "workspace" as const };
+      const data = parsed.source === "myAssets"
+        ? (await axios.get<ArrayBuffer>("/api/myAssets/read", { params: { path: parsed.path }, responseType: "arraybuffer" })).data
+        : await useWorkspaceFiles(context.projectId).read(parsed.path);
+      droppedFiles = [new File([data], parsed.path.split("/").pop()!)];
     }
     await importCanvasFiles(droppedFiles, position, context);
   } catch (error) {

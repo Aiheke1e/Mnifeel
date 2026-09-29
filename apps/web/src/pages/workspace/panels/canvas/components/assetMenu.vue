@@ -8,7 +8,7 @@
               <span class="moveTrigger"><span class="moveLabel">移动到</span><icon-chevron-right :size="14" /></span>
             </template>
             <div class="moveDestinations" role="menu" aria-label="移动到目录" @click.stop @keydown.stop>
-              <el-button text :icon="IconFolderPlus" :disabled="busy" role="menuitem" @click="createMoveFolder">新建文件夹</el-button>
+              <el-button text :icon="IconFolderPlus" :disabled="busy" role="menuitem" @click="createMoveFolder">新建分组</el-button>
               <el-scrollbar maxHeight="260px">
                 <el-button v-for="item in moveFolders" :key="item.path" text :icon="IconFolder" :disabled="busy || destinationDisabled(item.path)" role="menuitem" :title="item.label" @click="moveTo(item.path)">{{ item.label }}</el-button>
               </el-scrollbar>
@@ -27,19 +27,19 @@
 import { computed, nextTick, ref, shallowRef } from "vue";
 import axios from "axios";
 import downloadFile from "@/lib/downloadFile";
-import useWorkspaceFiles from "@/lib/workspaceFiles";
+import api from "@/lib/api";
 import { ElMessage, ElMessageBox, type DropdownInstance } from "element-plus";
 import { IconChevronRight, IconFolder, IconFolderPlus } from "@tabler/icons-vue";
 
 type AssetEntry = { name: string; path: string; type: "file" | "directory"; children?: AssetEntry[] };
-const props = defineProps<{ entries: AssetEntry[]; projectId: string; rootPath: string }>();
+const props = defineProps<{ entries: AssetEntry[] }>();
 const emit = defineEmits<{ changed: [path?: string, target?: string] }>();
 const menu = ref<DropdownInstance>();
 const menuAnchor = shallowRef({ getBoundingClientRect: () => new DOMRect() });
 const activeEntry = shallowRef<AssetEntry>();
 const moveVisible = ref(false);
 const busy = ref(false);
-const parentPath = computed(() => activeEntry.value?.path.split("/").slice(0, -1).join("/") || ".");
+const parentPath = computed(() => activeEntry.value?.path.split("/").slice(0, -1).join("/") || "");
 const moveFolders = computed(() => {
   function flatten(items: AssetEntry[]): { label: string; path: string }[] {
     return items.filter(item => item.type === "directory").flatMap(item => [
@@ -47,8 +47,12 @@ const moveFolders = computed(() => {
       ...flatten(item.children ?? []),
     ]);
   }
-  return [{ label: "素材库根目录", path: props.rootPath }, ...flatten(props.entries)];
+  return [{ label: "我的资产", path: "" }, ...flatten(props.entries)];
 });
+
+function joinPath(directory: string, name: string) {
+  return directory ? `${directory}/${name}` : name;
+}
 
 function destinationDisabled(path: string) {
   const entry = activeEntry.value;
@@ -79,7 +83,7 @@ function showError(error: unknown) {
 async function relocate(entry: AssetEntry, target: string) {
   busy.value = true;
   try {
-    await useWorkspaceFiles(props.projectId).rename(entry.path, target);
+    await api.post("/myAssets/rename", { path: entry.path, target });
     emit("changed", entry.path, target);
   } finally {
     busy.value = false;
@@ -90,7 +94,7 @@ async function moveTo(directory: string) {
   const entry = activeEntry.value!;
   closeMenu();
   try {
-  await relocate(entry, directory === props.rootPath ? `${props.rootPath}/${entry.name}` : directory + "/" + entry.name);
+    await relocate(entry, joinPath(directory, entry.name));
   } catch (error) {
     showError(error);
   }
@@ -100,8 +104,8 @@ async function createMoveFolder() {
   const entry = activeEntry.value!;
   closeMenu();
   try {
-    const { value } = await ElMessageBox.prompt("新文件夹将创建在素材库根目录", "新建文件夹", {
-      inputValue: "新建文件夹",
+    const { value } = await ElMessageBox.prompt("新分组将创建在我的资产根目录", "新建分组", {
+      inputValue: "新建分组",
       inputPattern: /^[^\\/]+$/,
       inputValidator: value => !!value?.trim() || "请输入文件夹名称",
       inputErrorMessage: "名称不能包含斜杠",
@@ -109,9 +113,8 @@ async function createMoveFolder() {
       cancelButtonText: "取消",
     });
     const name = value.trim();
-    const target = `${props.rootPath}/${name}`;
-    await useWorkspaceFiles(props.projectId).mkdir(target);
-    await relocate(entry, `${target}/${entry.name}`);
+    await api.post("/myAssets/mkdir", { path: name });
+    await relocate(entry, `${name}/${entry.name}`);
   } catch (error) {
     showError(error);
     emit("changed");
@@ -128,7 +131,7 @@ async function handleCommand(command: string) {
   closeMenu();
   try {
     if (command === "download") {
-      await downloadFile(() => useWorkspaceFiles(props.projectId).read(entry.path).then(data => new Blob([data])), entry.name);
+      await downloadFile(() => api.get<ArrayBuffer>("/myAssets/read", { params: { path: entry.path }, responseType: "arraybuffer" }).then(response => new Blob([response.data])), entry.name);
     }
     if (command === "rename") {
       const { value } = await ElMessageBox.prompt("名称", "重命名", {
@@ -139,13 +142,13 @@ async function handleCommand(command: string) {
         confirmButtonText: "保存",
         cancelButtonText: "取消",
       });
-      await relocate(entry, parent === props.rootPath ? `${props.rootPath}/${value.trim()}` : parent + "/" + value.trim());
+      await relocate(entry, joinPath(parent, value.trim()));
     }
     if (command === "delete") {
       await ElMessageBox.confirm("确定删除“" + entry.name + "”？", "删除素材", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" });
       busy.value = true;
       try {
-        await useWorkspaceFiles(props.projectId).remove(entry.path);
+        await api.delete("/myAssets/remove", { data: { path: entry.path } });
         emit("changed", entry.path);
       } finally {
         busy.value = false;

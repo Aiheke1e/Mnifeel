@@ -10,13 +10,13 @@
   <panel position="bottom-left">
     <elCard shadow="never" :body-style="{ padding: '4px' }">
       <div class="canvasControls">
-        <el-tooltip :showArrow="false" :content="assetsVisible ? '关闭素材库' : '打开素材库'" placement="top" :hideAfter="0" :enterable="false" :triggerKeys="[]">
+        <el-tooltip :showArrow="false" :content="assetsVisible ? '关闭我的资产' : '打开我的资产'" placement="top" :hideAfter="0" :enterable="false" :triggerKeys="[]">
           <el-button
             class="toolButton"
             text
             :type="assetsVisible ? 'primary' : 'default'"
             :aria-pressed="assetsVisible"
-            aria-label="素材库"
+            aria-label="我的资产"
             @click="assetsVisible = !assetsVisible">
             <icon-folders :size="17" />
           </el-button>
@@ -120,7 +120,7 @@
               </template>
               <div class="helpMenu" role="note">
                 <p>双击画布添加节点，连接节点后从左到右执行创作流程。</p>
-                <p>素材可从右侧素材库拖入画布，修改会自动保存到当前项目。</p>
+                <p>图片可从右侧“我的资产”拖入画布，在不同项目和剧集中复用。</p>
               </div>
             </el-popover>
           </span>
