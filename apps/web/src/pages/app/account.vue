@@ -34,6 +34,10 @@
             <el-tag v-if="authStore.user?.email" type="info" round>邮箱账号</el-tag>
             <el-tag v-if="authStore.user?.isWhitelist" type="success" round>视频畅享</el-tag>
           </div>
+          <div class="profileFacts">
+            <span><small>密码状态</small>{{ authStore.user?.hasPassword ? "已设置" : "未设置" }}</span>
+            <span><small>登录设备</small>{{ sessions.length }} / 2</span>
+          </div>
         </div>
         <el-button round @click="passwordVisible = true">{{ authStore.user?.hasPassword ? "修改密码" : "设置密码" }}</el-button>
       </article>
@@ -253,12 +257,17 @@ onMounted(load);
     display: grid;
     grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.8fr);
     gap: 16px;
-    margin-top: 28px;
+    margin-top: 20px;
 
     .profileCard {
       display: flex;
       align-items: center;
       gap: 17px;
+      min-height: 190px;
+      padding: 26px;
+      background:
+        radial-gradient(circle at 0 100%, color-mix(in srgb, var(--studioAccent) 10%, transparent), transparent 40%),
+        var(--studioSurface);
 
       .profileAvatar {
         display: grid;
@@ -278,21 +287,46 @@ onMounted(load);
         min-width: 0;
         h2 { margin: 3px 0 9px; overflow: hidden; font-size: 20px; text-overflow: ellipsis; white-space: nowrap; }
         .profileTags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+        .profileFacts {
+          display: flex;
+          gap: 24px;
+          margin-top: 22px;
+
+          span { display: grid; gap: 4px; color: var(--studioText); font-size: 13px; font-weight: 650; }
+          small { color: var(--studioMuted); font-size: 10px; font-weight: 450; }
+        }
       }
     }
 
     .creditCard {
-      background: linear-gradient(145deg, var(--studioAccentSoft), var(--studioSurface));
-      .creditValue { margin: 11px 0 7px; color: var(--studioText); font-size: 34px; font-weight: 750; letter-spacing: -1px; small { font-size: 12px; font-weight: 500; } }
+      min-height: 190px;
+      padding: 26px;
+      background:
+        radial-gradient(circle at 100% 0, color-mix(in srgb, var(--studioAccent) 28%, transparent), transparent 48%),
+        linear-gradient(145deg, var(--studioAccentSoft), var(--studioSurface));
+      .creditValue { margin: 23px 0 8px; color: var(--studioText); font-size: 42px; font-weight: 760; letter-spacing: -1.5px; small { font-size: 12px; font-weight: 500; letter-spacing: 0; } }
       > p:not(.eyebrow), .whitelistHint { color: var(--studioMuted); font-size: 12px; }
       .whitelistHint { display: block; margin-top: 10px; line-height: 1.6; }
     }
+  }
+
+  .contentSection {
+    padding: 22px;
+    border: 1px solid var(--studioBorder);
+    border-radius: 20px;
+    background: color-mix(in srgb, var(--studioSurface) 92%, transparent);
+    box-shadow: var(--studioShadowSoft);
+
+    .sectionHeading { margin-bottom: 18px; }
   }
 
   .sessionList,
   .transactionList {
     padding: 0;
     overflow: hidden;
+    border-radius: 14px;
+    box-shadow: none;
   }
 
   .sessionRow,
@@ -300,8 +334,8 @@ onMounted(load);
     display: flex;
     align-items: center;
     gap: 13px;
-    min-height: 70px;
-    padding: 13px 18px;
+    min-height: 76px;
+    padding: 15px 18px;
     + article { border-top: 1px solid var(--studioBorder); }
   }
 
@@ -344,7 +378,9 @@ onMounted(load);
     .passwordAlert :deep(.el-alert__description) { margin-right: 0; }
     .passwordAlert :deep(.el-alert__content > .el-button) { position: static; margin-top: 10px; transform: none; }
     .accountGrid { grid-template-columns: 1fr; }
-    .accountGrid .profileCard { align-items: flex-start; flex-wrap: wrap; .el-button { margin-left: 75px; } }
+    .accountGrid .profileCard { align-items: flex-start; flex-wrap: wrap; .profileInfo { width: calc(100% - 75px); } .el-button { margin-left: 75px; } }
+    .accountGrid .profileCard .profileInfo .profileFacts { gap: 16px; }
+    .contentSection { padding: 14px; }
     .sessionRow, .transactionRow { padding-inline: 14px; }
   }
 }

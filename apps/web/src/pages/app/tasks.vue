@@ -11,6 +11,21 @@
 
     <el-alert v-if="errorMessage" class="pageAlert" :title="errorMessage" type="error" showIcon :closable="false" />
 
+    <section class="taskOverview" aria-label="任务概览">
+      <article>
+        <span class="overviewIcon active"><icon-activity :size="20" aria-hidden="true" /></span>
+        <span><small>进行中的任务</small><strong>{{ taskCount("running") + taskCount("pending") }}</strong></span>
+      </article>
+      <article>
+        <span class="overviewIcon success"><icon-circle-check :size="20" aria-hidden="true" /></span>
+        <span><small>已经完成</small><strong>{{ taskCount("succeeded") }}</strong></span>
+      </article>
+      <article>
+        <span class="overviewIcon danger"><icon-alert-circle :size="20" aria-hidden="true" /></span>
+        <span><small>需要关注</small><strong>{{ taskCount("failed") }}</strong></span>
+      </article>
+    </section>
+
     <div class="filterBar" role="group" aria-label="筛选任务">
       <button v-for="item in filters" :key="item.value" type="button" :aria-pressed="filter === item.value" @click="filter = item.value">
         {{ item.label }}
@@ -68,7 +83,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { IconFileText, IconListCheck, IconPhoto, IconRefresh, IconVideo } from "@tabler/icons-vue";
+import { IconActivity, IconAlertCircle, IconCircleCheck, IconFileText, IconListCheck, IconPhoto, IconRefresh, IconVideo } from "@tabler/icons-vue";
 import { apiErrorMessage } from "@/lib/api";
 import { useUserAppStore, type GenerationStatus, type GenerationTask } from "@/stores/userApp";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -186,12 +201,51 @@ onBeforeUnmount(() => clearTimeout(refreshTimer));
 
 <style scoped lang="scss">
 .tasksPage {
+  .taskOverview {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+
+    article {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      min-height: 88px;
+      padding: 17px;
+      border: 1px solid var(--studioBorder);
+      border-radius: 18px;
+      background: var(--studioSurface);
+      box-shadow: var(--studioShadowSoft);
+
+      .overviewIcon {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        flex-shrink: 0;
+        place-items: center;
+        border-radius: 13px;
+        background: var(--studioAccentSoft);
+        color: var(--studioAccent);
+        &.success { background: var(--el-color-success-light-9); color: var(--el-color-success); }
+        &.danger { background: var(--el-color-danger-light-9); color: var(--el-color-danger); }
+      }
+
+      > span:last-child { display: grid; gap: 3px; }
+      small { color: var(--studioMuted); font-size: 11px; }
+      strong { color: var(--studioText); font-size: 23px; line-height: 1; }
+    }
+  }
+
   .filterBar {
     display: flex;
     gap: 7px;
-    margin: 28px 0 18px;
+    margin: 20px 0 14px;
     overflow-x: auto;
-    padding-bottom: 2px;
+    padding: 10px;
+    border: 1px solid var(--studioBorder);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--studioSurface) 74%, transparent);
 
     button {
       display: flex;
@@ -218,9 +272,10 @@ onBeforeUnmount(() => clearTimeout(refreshTimer));
       }
 
       &[aria-pressed="true"] {
-        border-color: var(--studioAccent);
+        border-color: color-mix(in srgb, var(--studioAccent) 42%, var(--studioBorder));
         background: var(--studioAccentSoft);
         color: var(--studioAccent);
+        font-weight: 650;
       }
 
       &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: 2px; }
@@ -236,18 +291,22 @@ onBeforeUnmount(() => clearTimeout(refreshTimer));
       border: 1px solid var(--studioBorder);
       border-radius: var(--studioRadiusLarge);
       background: var(--studioSurface);
+      box-shadow: var(--studioShadowSoft);
+      transition: 160ms ease;
+
+      &:hover { border-color: color-mix(in srgb, var(--studioAccent) 30%, var(--studioBorder)); transform: translateY(-1px); }
 
       .taskMain {
         display: grid;
         grid-template-columns: 44px minmax(190px, 1fr) minmax(150px, auto) auto;
         align-items: center;
         gap: 15px;
-        padding: 18px;
+        padding: 20px;
 
         .taskIcon {
           display: grid;
-          width: 44px;
-          height: 44px;
+          width: 46px;
+          height: 46px;
           place-items: center;
           border-radius: 13px;
           background: var(--studioAccentSoft);
@@ -265,23 +324,26 @@ onBeforeUnmount(() => clearTimeout(refreshTimer));
         .taskCredits { display: grid; gap: 4px; text-align: right; strong { font-size: 13px; } span { color: var(--studioMuted); font-size: 11px; } }
       }
 
-      .taskProgress { margin: -3px 18px 16px 77px; }
+      .taskProgress { margin: -3px 20px 18px 81px; }
       .taskError { margin: 0; padding: 11px 18px; border-top: 1px solid var(--studioBorder); background: var(--el-color-danger-light-9); color: var(--el-color-danger); font-size: 12px; }
     }
   }
 }
 
 @media (max-width: 700px) {
-  .tasksPage .taskList .taskCard {
-    .taskMain {
-      grid-template-columns: 40px minmax(0, 1fr) auto;
-      gap: 11px;
-      padding: 15px;
-      .taskIcon { width: 40px; height: 40px; }
-      .taskCredits { grid-column: 2 / -1; text-align: left; }
-      .el-button { grid-column: 2 / -1; justify-self: start; }
+  .tasksPage {
+    .taskOverview { grid-template-columns: 1fr; article { min-height: 72px; } }
+    .taskList .taskCard {
+      .taskMain {
+        grid-template-columns: 40px minmax(0, 1fr) auto;
+        gap: 11px;
+        padding: 15px;
+        .taskIcon { width: 40px; height: 40px; }
+        .taskCredits { grid-column: 2 / -1; text-align: left; }
+        .el-button { grid-column: 2 / -1; justify-self: start; }
+      }
+      .taskProgress { margin: -3px 15px 14px 66px; }
     }
-    .taskProgress { margin: -3px 15px 14px 66px; }
   }
 }
 </style>

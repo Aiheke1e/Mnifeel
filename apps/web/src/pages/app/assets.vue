@@ -1,15 +1,15 @@
 <template>
-  <div class="assetsPage">
-    <header class="pageHeader">
+  <div class="assetsPage studioPage" :aria-busy="loading">
+    <header class="pageTopbar">
       <div>
-        <p class="eyebrow">ASSET LIBRARY</p>
+        <p class="eyebrow">资产库</p>
         <h1>我的资产</h1>
         <p>保存角色、场景和道具图片，在后续项目和剧集中继续使用。</p>
       </div>
-      <el-button type="primary" :icon="IconFolderPlus" @click="createGroup">新建分组</el-button>
+      <el-button type="primary" :icon="IconFolderPlus" round @click="createGroup">新建分组</el-button>
     </header>
 
-    <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" showIcon />
+    <el-alert v-if="errorMessage" class="pageAlert" :title="errorMessage" type="error" :closable="false" showIcon />
 
     <div class="assetWorkspace" v-loading="loading">
       <aside class="groupPanel" aria-label="资产分组">
@@ -39,7 +39,7 @@
         <div v-if="visibleFiles.length" class="assetGrid">
           <article v-for="asset in visibleFiles" :key="asset.path" class="assetCard">
             <button class="previewButton" :aria-label="`预览 ${asset.name}`" @click="previewAsset(asset)">
-              <el-image v-if="mediaKind(asset.name) === 'image'" :src="assetUrl(asset.path)" fit="cover" loading="lazy">
+              <el-image v-if="mediaKind(asset.name) === 'image'" :src="assetUrl(asset.path)" fit="contain" loading="lazy">
                 <template #error><icon-photo :size="32" /></template>
               </el-image>
               <span v-else class="filePreview">
@@ -271,40 +271,24 @@ function previewAsset(asset: AssetFile) {
 
 <style scoped lang="scss">
 .assetsPage {
-  min-height: 100dvh;
-  padding: 42px clamp(20px, 4vw, 56px);
-
-  .pageHeader {
-    display: flex;
-    align-items: end;
-    justify-content: space-between;
-    gap: 24px;
-    max-width: 1180px;
-    margin: 0 auto 28px;
-
-    .eyebrow { margin: 0 0 8px; color: var(--studioAccent); font-size: 11px; font-weight: 700; letter-spacing: 1.5px; }
-    h1 { margin: 0; color: var(--studioText); font-size: 36px; letter-spacing: -1.2px; }
-    p:last-child { margin: 8px 0 0; color: var(--studioMuted); }
-  }
-
   .assetWorkspace {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 18px;
-    max-width: 1180px;
-    min-height: 560px;
-    margin: 18px auto 0;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 16px;
+    min-height: max(620px, calc(100dvh - 250px));
+    margin-top: 22px;
   }
 
   .groupPanel,
   .assetContent {
     border: 1px solid var(--studioBorder);
-    border-radius: 18px;
+    border-radius: 20px;
     background: var(--studioSurface);
+    box-shadow: var(--studioShadowSoft);
   }
 
   .groupPanel {
-    padding: 10px;
+    padding: 13px;
 
     > button,
     .groupRow button {
@@ -312,10 +296,10 @@ function previewAsset(asset: AssetFile) {
       align-items: center;
       gap: 9px;
       width: 100%;
-      min-height: 42px;
+      min-height: 44px;
       padding: 0 10px;
       border: 0;
-      border-radius: 10px;
+      border-radius: 12px;
       background: transparent;
       color: var(--studioMuted);
       font: inherit;
@@ -323,7 +307,10 @@ function previewAsset(asset: AssetFile) {
       cursor: pointer;
       span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       small { font-size: 11px; }
-      &.active { background: var(--studioAccentSoft); color: var(--studioAccent); }
+      transition: 140ms ease;
+      &.active { background: var(--studioAccentSoft); color: var(--studioAccent); font-weight: 650; }
+      &:hover { background: var(--studioSurfaceMuted); color: var(--studioText); }
+      &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: 2px; }
     }
 
     .groupRow {
@@ -334,34 +321,47 @@ function previewAsset(asset: AssetFile) {
     }
   }
 
-  .assetContent { padding: 20px; }
+  .assetContent { min-width: 0; padding: 22px; }
   .contentHeader {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 18px;
-    margin-bottom: 18px;
-    h2 { margin: 0 0 3px; color: var(--studioText); font-size: 20px; }
+    margin-bottom: 20px;
+    h2 { margin: 0 0 4px; color: var(--studioText); font-size: 22px; letter-spacing: -0.4px; }
     span { color: var(--studioMuted); font-size: 12px; }
     .searchInput { width: min(260px, 45%); }
   }
 
   .assetGrid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
   }
 
   .assetCard {
     overflow: hidden;
     border: 1px solid var(--studioBorder);
-    border-radius: 14px;
-    background: var(--studioSurfaceMuted);
-    .previewButton { width: 100%; aspect-ratio: 1; padding: 0; border: 0; background: var(--studioBackground); cursor: pointer; }
+    border-radius: 16px;
+    background: var(--studioSurface);
+    transition: 160ms ease;
+    &:hover { border-color: color-mix(in srgb, var(--studioAccent) 38%, var(--studioBorder)); box-shadow: var(--studioShadowSoft); transform: translateY(-2px); }
+    .previewButton {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      padding: 10px;
+      border: 0;
+      background:
+        linear-gradient(45deg, color-mix(in srgb, var(--studioBorder) 32%, transparent) 25%, transparent 25%) 0 0 / 18px 18px,
+        linear-gradient(-45deg, color-mix(in srgb, var(--studioBorder) 32%, transparent) 25%, transparent 25%) 0 9px / 18px 18px,
+        var(--studioSurfaceRaised);
+      cursor: pointer;
+      &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: -3px; }
+    }
     .el-image, .filePreview { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; color: var(--studioMuted); }
-    .assetInfo { display: flex; align-items: center; gap: 6px; padding: 10px; }
+    .assetInfo { display: flex; align-items: center; gap: 6px; padding: 12px 12px 10px; border-top: 1px solid var(--studioBorder); }
     .assetInfo > div { display: grid; flex: 1; min-width: 0; gap: 3px; }
-    .assetMeta { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 10px 10px; }
+    .assetMeta { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 12px; }
     strong, span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     strong { color: var(--studioText); font-size: 13px; }
     span { color: var(--studioMuted); font-size: 11px; }
@@ -382,14 +382,22 @@ function previewAsset(asset: AssetFile) {
 
 .previewVideo { display: block; width: 100%; max-height: 68dvh; background: #000; }
 
+@media (max-width: 1080px) {
+  .assetsPage {
+    .assetWorkspace { min-height: 0; grid-template-columns: 1fr; }
+    .groupPanel { display: flex; overflow-x: auto; .groupRow { flex-shrink: 0; padding-left: 0 !important; } > button, .groupRow button { width: auto; min-width: max-content; } }
+  }
+}
+
 @media (max-width: 760px) {
   .assetsPage {
-    padding: 24px 14px;
-    .pageHeader { align-items: flex-start; flex-direction: column; h1 { font-size: 30px; } }
-    .assetWorkspace { grid-template-columns: 1fr; }
-    .groupPanel { display: flex; overflow-x: auto; .groupRow { flex-shrink: 0; padding-left: 0 !important; } > button, .groupRow button { width: auto; min-width: max-content; } }
     .contentHeader { align-items: stretch; flex-direction: column; .searchInput { width: 100%; } }
     .assetGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .assetContent { padding: 14px; }
   }
+}
+
+@media (max-width: 430px) {
+  .assetsPage .assetGrid { grid-template-columns: 1fr; }
 }
 </style>

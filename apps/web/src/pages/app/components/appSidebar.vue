@@ -5,9 +5,19 @@
       <span>Minifeel</span>
     </router-link>
     <nav class="primaryNav" aria-label="创作端主导航">
-      <router-link v-for="item in navItems" :key="item.path" class="navItem" :to="item.path" :aria-label="item.label">
-        <component :is="item.icon" :size="20" aria-hidden="true" />
-        <span>{{ item.label }}</span>
+      <span class="navLabel">创作空间</span>
+      <router-link
+        v-for="item in navItems"
+        :key="item.path"
+        class="navItem"
+        :class="{ active: isActive(item.path) }"
+        :to="item.path"
+        :aria-current="isActive(item.path) ? 'page' : undefined">
+        <span class="navIcon"><component :is="item.icon" :size="19" aria-hidden="true" /></span>
+        <span class="navCopy">
+          <strong>{{ item.label }}</strong>
+          <small>{{ item.description }}</small>
+        </span>
       </router-link>
     </nav>
     <div class="sidebarFooter">
@@ -25,6 +35,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { useRoute } from "vue-router";
 import { IconHome, IconListCheck, IconPhoto, IconUserCircle } from "@tabler/icons-vue";
 import logoUrl from "@minifeel/assets/logo.svg";
 import { useAuthStore } from "@/stores/auth";
@@ -32,14 +43,20 @@ import { useUserAppStore } from "@/stores/userApp";
 
 const authStore = useAuthStore();
 const userAppStore = useUserAppStore();
+const route = useRoute();
 const navItems = [
-  { path: "/app", label: "创作首页", icon: IconHome },
-  { path: "/app/assets", label: "我的资产", icon: IconPhoto },
-  { path: "/app/tasks", label: "生成任务", icon: IconListCheck },
-  { path: "/app/account", label: "我的账户", icon: IconUserCircle },
+  { path: "/app", label: "创作首页", description: "灵感与短剧项目", icon: IconHome },
+  { path: "/app/assets", label: "我的资产", description: "角色、场景与道具", icon: IconPhoto },
+  { path: "/app/tasks", label: "生成任务", description: "进度与消费记录", icon: IconListCheck },
+  { path: "/app/account", label: "我的账户", description: "积分与登录安全", icon: IconUserCircle },
 ];
 const identity = computed(() => authStore.user?.phone || authStore.user?.email || "创作者");
 const userInitial = computed(() => identity.value.slice(0, 1).toUpperCase());
+
+function isActive(path: string) {
+  if (path === "/app") return route.path === "/app" || route.path.startsWith("/app/projects/");
+  return route.path === path;
+}
 </script>
 
 <style scoped lang="scss">
@@ -48,19 +65,20 @@ const userInitial = computed(() => identity.value.slice(0, 1).toUpperCase());
   top: 0;
   display: flex;
   flex-direction: column;
-  width: 236px;
+  width: 252px;
   height: 100dvh;
-  padding: 24px 16px 18px;
+  padding: 24px 18px 18px;
   border-right: 1px solid var(--studioBorder);
-  background: color-mix(in srgb, var(--studioSurface) 92%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--studioSurface) 96%, transparent), color-mix(in srgb, var(--studioAccentWash) 92%, transparent));
   backdrop-filter: blur(20px);
 
   .brand {
     display: flex;
     align-items: center;
-    gap: 11px;
-    min-height: 44px;
-    padding: 0 10px;
+    gap: 12px;
+    min-height: 48px;
+    padding: 0 9px;
     color: var(--studioText);
     font-size: 18px;
     font-weight: 720;
@@ -68,8 +86,8 @@ const userInitial = computed(() => identity.value.slice(0, 1).toUpperCase());
     text-decoration: none;
 
     img {
-      width: 29px;
-      height: 29px;
+      width: 31px;
+      height: 31px;
 
       .dark & { filter: invert(1); }
     }
@@ -79,30 +97,61 @@ const userInitial = computed(() => identity.value.slice(0, 1).toUpperCase());
     display: flex;
     flex: 1;
     flex-direction: column;
-    gap: 5px;
-    margin-top: 34px;
+    gap: 7px;
+    margin-top: 30px;
+
+    .navLabel {
+      margin: 0 12px 4px;
+      color: var(--studioMuted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+    }
 
     .navItem {
       display: flex;
       align-items: center;
-      gap: 11px;
-      min-height: 44px;
-      padding: 0 13px;
-      border-radius: 12px;
+      gap: 12px;
+      min-height: 60px;
+      padding: 8px 10px;
+      border: 1px solid transparent;
+      border-radius: 16px;
       color: var(--studioMuted);
-      font-size: 14px;
-      font-weight: 560;
       text-decoration: none;
       transition: 160ms ease;
 
+      .navIcon {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        flex-shrink: 0;
+        place-items: center;
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--studioSurfaceMuted) 76%, transparent);
+      }
+
+      .navCopy {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+
+        strong { color: inherit; font-size: 13px; font-weight: 650; }
+        small { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+      }
+
       &:hover {
-        background: var(--studioSurfaceMuted);
+        border-color: var(--studioBorder);
+        background: color-mix(in srgb, var(--studioSurface) 78%, transparent);
         color: var(--studioText);
       }
 
-      &.router-link-exact-active {
-        background: var(--studioAccentSoft);
+      &.active {
+        border-color: color-mix(in srgb, var(--studioAccent) 18%, var(--studioBorder));
+        background: var(--studioSurface);
         color: var(--studioAccent);
+        box-shadow: var(--studioShadowSoft);
+
+        .navIcon { background: var(--studioAccentSoft); }
       }
 
       &:focus-visible {
@@ -120,10 +169,13 @@ const userInitial = computed(() => identity.value.slice(0, 1).toUpperCase());
       display: flex;
       align-items: end;
       justify-content: space-between;
-      padding: 14px;
+      padding: 15px;
       border: 1px solid var(--studioBorder);
       border-radius: 14px;
-      background: var(--studioSurfaceMuted);
+      background:
+        radial-gradient(circle at 100% 0, color-mix(in srgb, var(--studioAccent) 18%, transparent), transparent 48%),
+        var(--studioSurface);
+      box-shadow: var(--studioShadowSoft);
 
       .creditLabel { color: var(--studioMuted); font-size: 12px; }
       strong { color: var(--studioText); font-size: 17px; }
@@ -181,13 +233,20 @@ const userInitial = computed(() => identity.value.slice(0, 1).toUpperCase());
       gap: 4px;
       margin: 0;
 
+      .navLabel { display: none; }
+
       .navItem {
         flex-direction: column;
         justify-content: center;
         gap: 2px;
         min-height: 52px;
         padding: 4px;
-        font-size: 11px;
+        border: 0;
+        border-radius: 12px;
+
+        .navIcon { width: 24px; height: 24px; background: transparent; }
+        .navCopy { display: block; strong { font-size: 10px; } small { display: none; } }
+        &.active { background: var(--studioAccentSoft); box-shadow: none; }
       }
     }
   }

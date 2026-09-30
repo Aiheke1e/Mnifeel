@@ -743,3 +743,40 @@ Expected: PostgreSQL、Minifeel 和当前启用的反向代理容器健康；数
 - [x] **Step 4: 执行静态与浏览器验证**
 
 实际验证（2026-09-30）：Web 类型检查、生产构建和 `git diff --check` 通过。项目 `7827953c-6f80-4a8e-90ff-a38795a392b7` 在 2048px 视口显示横向四阶段导航，两个角色四视图与三张分镜均完整显示；角色图和分镜图点击后均打开有标题和真实关闭按钮的预览对话框，Tab 可聚焦关闭按钮，Escape 可关闭。720px 视口页面 `scrollWidth` 为 714、`innerWidth` 为 720，无页面级横向溢出；控制台无错误或警告。本阶段未部署服务器。
+
+### Task 9: 普通用户一级入口视觉统一
+
+**Files:**
+
+- Modify: `apps/web/src/assets/main.scss`
+- Modify: `apps/web/src/pages/app/index.vue`
+- Modify: `apps/web/src/pages/app/components/appSidebar.vue`
+- Modify: `apps/web/src/pages/app/dashboard.vue`
+- Modify: `apps/web/src/pages/app/assets.vue`
+- Modify: `apps/web/src/pages/app/tasks.vue`
+- Modify: `apps/web/src/pages/app/account.vue`
+- Modify: `AGENTS.md`
+- Modify: `docs/productExperienceIssues.md`
+- Modify: `docs/superpowers/plans/guidedStudioPlan.md`
+
+- [x] **Step 1: 盘点同类入口与共享视觉层**
+
+确认普通用户侧栏、创作首页、资产、任务和账户属于同一产品层级，但当前只有项目创作页完整采用导演式工作台设计；资产页仍维护独立页面宽度和标题样式，首页、任务与账户虽复用部分 Token，页面骨架和信息层级仍不一致。
+
+- [x] **Step 2: 统一公共页面骨架与导航**
+
+扩展现有 Studio Token 和公共页面样式，统一页面标题区、卡片、阴影、间距和响应式规则；侧栏增加清晰的创作分区、入口说明和项目内选中态，移动端继续使用底部导航。
+
+- [x] **Step 3: 同步改造四个一级业务页**
+
+创作首页改为导演式灵感入口与项目区；资产页接入公共页面骨架，媒体缩略图完整展示并保留放大预览；任务页增加基于现有任务数据的概览和统一筛选区；账户页统一档案、积分、设备与流水卡片层级。业务接口、状态管理和数据结构保持不变。
+
+- [x] **Step 4: 固化同类入口同步规则**
+
+根目录 `AGENTS.md` 明确：用户点名页面只是问题样本，修改功能、交互或视觉效果前必须搜索所有同类入口、相似组件和共享调用方；同一产品语义必须同步修改，不适用时说明原因。
+
+- [x] **Step 5: 执行静态与多页面验证**
+
+执行 Web 类型检查、生产构建和 `git diff --check`；在宽屏桌面、普通桌面和移动端检查创作首页、资产、任务、账户及项目页，确认侧栏选中态、媒体完整展示、页面宽度和响应式布局一致且无横向溢出。
+
+实际验证（2026-09-30）：Web 类型检查与生产构建通过。登录测试账号后，在 2552px、2048px、1280px 和 720px 视口依次打开创作首页、资产、任务、账户及项目 `7827953c-6f80-4a8e-90ff-a38795a392b7`；四个一级入口均正确显示选中态，项目路由保持选中“创作首页”，各视口页面 `scrollWidth` 均未超过 `innerWidth`。2552px 下普通页面使用完整的 2300px 内容区，首页改为上下结构，创作对话框宽 2086px 并占满首屏主内容，资产区为 6 列大卡片；资产缩略图使用完整比例展示，720px 下创作对话框宽 648px，并使用底部导航和 2 列资产。浏览器控制台无错误。本阶段未部署服务器。

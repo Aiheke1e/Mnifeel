@@ -23,11 +23,12 @@ onMounted(() => {
   display: flex;
   min-height: 100dvh;
   background:
-    radial-gradient(circle at 82% -8%, color-mix(in srgb, var(--studioAccent) 12%, transparent), transparent 32%),
+    radial-gradient(circle at 86% -10%, color-mix(in srgb, var(--studioAccent) 14%, transparent), transparent 34%),
+    radial-gradient(circle at 28% 110%, color-mix(in srgb, #9c8cff 8%, transparent), transparent 30%),
     var(--studioBackground);
 
   .appContent {
-    width: calc(100% - 236px);
+    width: calc(100% - 252px);
     min-width: 0;
     min-height: 100dvh;
   }

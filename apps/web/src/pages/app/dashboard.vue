@@ -1,11 +1,24 @@
 <template>
   <div class="dashboardPage studioPage" :aria-busy="creating || loading">
     <section class="creationHero" aria-labelledby="creationTitle">
-      <p class="eyebrow">AI 短剧创作</p>
-      <h1 id="creationTitle">你想创作什么？</h1>
-      <p>写下故事、角色或一个画面，剩下的交给创作助手。</p>
+      <div class="heroCopy">
+        <p class="eyebrow"><icon-sparkles :size="13" aria-hidden="true" /> AI 短剧创作</p>
+        <h1 id="creationTitle">把一个想法<br />拍成一部短剧</h1>
+        <p>写下故事、角色或一个画面，导演助手会陪你逐步完成剧本、角色、分镜和成片。</p>
+
+        <ol class="creationSteps" aria-label="创作流程">
+          <li><strong>1</strong><span>剧本</span></li>
+          <li><strong>2</strong><span>角色</span></li>
+          <li><strong>3</strong><span>分镜</span></li>
+          <li><strong>4</strong><span>成片</span></li>
+        </ol>
+      </div>
 
       <form class="creationBox" @submit.prevent="createFromIdea">
+        <div class="creationLabel">
+          <span>说说你想拍的故事</span>
+          <small>支持 Ctrl / ⌘ + Enter 快速开始</small>
+        </div>
         <el-input
           ref="ideaInput"
           v-model="idea"
@@ -24,19 +37,12 @@
             <icon-arrow-up-right :size="18" aria-hidden="true" />
           </el-button>
         </div>
+
+        <div class="ideaExamples" aria-label="创作示例">
+          <span>灵感示例</span>
+          <button v-for="example in examples" :key="example" type="button" @click="idea = example">{{ example }}</button>
+        </div>
       </form>
-
-      <ol class="creationSteps" aria-label="创作流程">
-        <li><strong>1</strong>剧本草案</li>
-        <li><strong>2</strong>角色资产</li>
-        <li><strong>3</strong>镜头分段</li>
-        <li><strong>4</strong>确认生成</li>
-      </ol>
-
-      <div class="ideaExamples" aria-label="创作示例">
-        <span>试试：</span>
-        <button v-for="example in examples" :key="example" type="button" @click="idea = example">{{ example }}</button>
-      </div>
     </section>
 
     <el-alert v-if="errorMessage" class="pageAlert" :title="errorMessage" type="error" showIcon :closable="false" />
@@ -69,7 +75,7 @@
 import { nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElInput } from "element-plus";
-import { IconArrowUpRight, IconChevronRight, IconMovie } from "@tabler/icons-vue";
+import { IconArrowUpRight, IconChevronRight, IconMovie, IconSparkles } from "@tabler/icons-vue";
 import { apiErrorMessage } from "@/lib/api";
 import { clearPendingIdea, readPendingIdea, savePendingIdea } from "@/lib/pendingIdea";
 import { setProjectMode } from "@/lib/projectMode";
@@ -165,49 +171,79 @@ async function openProject(project: Project) {
 
 <style scoped lang="scss">
 .dashboardPage {
-  max-width: 1120px;
-
   .creationHero {
-    display: flex;
-    min-height: 56dvh;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 28px;
+    padding: clamp(30px, 3.5vw, 54px);
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--studioAccent) 16%, var(--studioBorder));
+    border-radius: 30px;
+    background:
+      radial-gradient(circle at 8% 8%, color-mix(in srgb, #ffffff 80%, transparent), transparent 28%),
+      radial-gradient(circle at 95% 0, color-mix(in srgb, var(--studioAccent) 16%, transparent), transparent 38%),
+      linear-gradient(145deg, var(--studioSurface), var(--studioAccentWash));
+    box-shadow: var(--studioShadow);
 
-    h1 {
-      margin: 12px 0 10px;
-      color: var(--studioText);
-      font-size: clamp(38px, 7vw, 66px);
-      line-height: 1.08;
-      letter-spacing: -2.8px;
-    }
+    .heroCopy {
+      min-width: 0;
 
-    > p:not(.eyebrow) {
-      margin: 0;
-      color: var(--studioMuted);
-      font-size: 16px;
+      .eyebrow { gap: 6px; }
+
+      h1 {
+        margin: 16px 0 12px;
+        color: var(--studioText);
+        font-size: clamp(42px, 4vw, 64px);
+        line-height: 1.02;
+        letter-spacing: -3.4px;
+
+        br { display: none; }
+      }
+
+      > p:not(.eyebrow) {
+        max-width: 760px;
+        margin: 0;
+        color: var(--studioMuted);
+        font-size: 15px;
+        line-height: 1.8;
+      }
     }
 
     .creationBox {
-      width: min(760px, 100%);
-      margin-top: 34px;
-      padding: 10px 12px 12px;
+      width: 100%;
+      min-height: 470px;
+      min-width: 0;
+      padding: 22px;
       border: 1px solid color-mix(in srgb, var(--studioAccent) 28%, var(--studioBorder));
       border-radius: 24px;
       background: var(--studioSurface);
       box-shadow: 0 24px 70px color-mix(in srgb, var(--studioAccent) 14%, transparent);
       text-align: left;
 
+      .creationLabel {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 0 5px 10px;
+
+        span { color: var(--studioText); font-size: 13px; font-weight: 680; }
+        small { color: var(--studioMuted); font-size: 10px; }
+      }
+
       :deep(.el-textarea__inner) {
-        min-height: 94px !important;
-        padding: 16px 17px;
-        border: 0;
+        min-height: 210px !important;
+        padding: 16px;
+        border: 1px solid var(--studioBorder);
+        border-radius: 16px;
         box-shadow: none;
-        background: transparent;
+        background: var(--studioSurfaceRaised);
         color: var(--studioText);
-        font-size: 16px;
+        font-size: 15px;
         line-height: 1.7;
+
+        &:focus { border-color: color-mix(in srgb, var(--studioAccent) 55%, var(--studioBorder)); }
       }
 
       .creationActions {
@@ -215,84 +251,100 @@ async function openProject(project: Project) {
         align-items: center;
         justify-content: space-between;
         gap: 18px;
-        padding: 7px 6px 0 16px;
+        padding: 13px 0 0;
 
-        > span { color: var(--studioMuted); font-size: 12px; line-height: 1.5; }
+        > span { max-width: 340px; color: var(--studioMuted); font-size: 10px; line-height: 1.5; }
         :deep(.el-button > span) { gap: 7px; }
       }
     }
 
     .ideaExamples {
-      display: flex;
-      width: min(760px, 100%);
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      margin-top: 15px;
+      display: grid;
+      gap: 7px;
+      margin-top: 18px;
       color: var(--studioMuted);
-      font-size: 12px;
+      font-size: 10px;
+
+      > span { padding-left: 2px; font-weight: 650; }
 
       button {
-        max-width: 210px;
+        width: 100%;
         overflow: hidden;
-        padding: 7px 11px;
+        padding: 9px 11px;
         border: 1px solid var(--studioBorder);
-        border-radius: 999px;
-        background: color-mix(in srgb, var(--studioSurface) 72%, transparent);
+        border-radius: 11px;
+        background: var(--studioSurfaceRaised);
         color: var(--studioMuted);
         font: inherit;
+        text-align: left;
         text-overflow: ellipsis;
         white-space: nowrap;
         cursor: pointer;
-        &:hover { border-color: var(--studioAccent); color: var(--studioAccent); }
+        &:hover { border-color: var(--studioAccent); background: var(--studioAccentWash); color: var(--studioAccent); }
         &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: 2px; }
       }
     }
 
     .creationSteps {
       display: flex;
-      width: min(760px, 100%);
-      justify-content: center;
-      gap: 18px;
-      margin: 16px 0 0;
+      align-items: center;
+      gap: 0;
+      width: min(880px, 100%);
+      margin: 22px 0 0;
       padding: 0;
       color: var(--studioMuted);
-      font-size: 12px;
+      font-size: 11px;
       list-style: none;
-      li { display: flex; align-items: center; gap: 6px; }
-      strong { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: var(--studioAccentSoft); color: var(--studioAccent); }
+
+      li {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        gap: 7px;
+
+        &:not(:last-child)::after {
+          width: 100%;
+          height: 1px;
+          margin: 0 10px;
+          background: color-mix(in srgb, var(--studioAccent) 22%, var(--studioBorder));
+          content: "";
+        }
+      }
+
+      strong { display: grid; width: 24px; height: 24px; flex-shrink: 0; place-items: center; border-radius: 50%; background: var(--studioAccentSoft); color: var(--studioAccent); }
     }
   }
 
-  .contentSection { margin-top: 24px; }
+  .contentSection { margin-top: 38px; }
 
   .projectGrid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
 
     .projectCard {
       display: grid;
-      grid-template-columns: 54px minmax(0, 1fr) auto;
+      grid-template-columns: 62px minmax(0, 1fr) auto;
       align-items: center;
       gap: 14px;
-      padding: 14px;
+      min-height: 96px;
+      padding: 16px;
       border: 1px solid var(--studioBorder);
-      border-radius: 16px;
+      border-radius: 18px;
       background: var(--studioSurface);
+      box-shadow: var(--studioShadowSoft);
       color: inherit;
       font: inherit;
       text-align: left;
       cursor: pointer;
       transition: 160ms ease;
-      &:hover { border-color: color-mix(in srgb, var(--studioAccent) 40%, var(--studioBorder)); transform: translateY(-1px); }
+      &:hover { border-color: color-mix(in srgb, var(--studioAccent) 40%, var(--studioBorder)); box-shadow: var(--studioShadow); transform: translateY(-2px); }
       &:focus-visible { outline: 2px solid var(--studioAccent); outline-offset: 2px; }
 
       .projectCover {
         display: grid;
-        width: 54px;
-        height: 54px;
+        width: 62px;
+        height: 62px;
         place-items: center;
         border-radius: 14px;
         background: var(--studioAccentSoft);
@@ -313,13 +365,23 @@ async function openProject(project: Project) {
   }
 }
 
+@media (max-width: 1280px) {
+  .dashboardPage {
+    .creationHero .creationBox { min-height: 0; }
+    .projectGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+}
+
 @media (max-width: 760px) {
   .dashboardPage {
     .creationHero {
-      min-height: 64dvh;
-      h1 { letter-spacing: -1.8px; }
+      padding: 24px 18px;
+      border-radius: 22px;
+      .heroCopy h1 { font-size: clamp(38px, 12vw, 52px); letter-spacing: -2.2px; }
+      .creationSteps li:not(:last-child)::after { margin-inline: 5px; }
+      .creationSteps li span { display: none; }
       .creationBox .creationActions { align-items: stretch; flex-direction: column; padding-left: 6px; .el-button { width: 100%; } }
-      .ideaExamples { justify-content: flex-start; button { max-width: 100%; } }
+      .creationBox .creationLabel small { display: none; }
     }
     .projectGrid { grid-template-columns: 1fr; }
   }
