@@ -341,12 +341,18 @@ const editorOptions: Partial<EditorOptions> = {
       const clipboard = event.clipboardData;
       const markdown = clipboard?.getData("text/markdown");
       const text = markdown || clipboard?.getData("text/plain");
-      if (!text || (!markdown && clipboard?.getData("text/html")) || editor.value?.isActive("codeBlock")) return false;
-      return editor.value?.commands.insertContent(text, { contentType: "markdown" }) ?? false;
+      const currentEditor = activeEditor();
+      if (!text || (!markdown && clipboard?.getData("text/html")) || currentEditor?.isActive("codeBlock")) return false;
+      return currentEditor?.commands.insertContent(text, { contentType: "markdown" }) ?? false;
     },
   },
 };
 const editor = useEditor(editorOptions);
+
+function activeEditor() {
+  const currentEditor = editor.value;
+  return currentEditor && !currentEditor.isDestroyed ? currentEditor : undefined;
+}
 
 async function flushSave() {
   if (saveError.value && draft) saveDocument(draft);
@@ -532,7 +538,7 @@ function editTable(command: (typeof tableTools)[number]["command"]) {
 }
 
 async function openSearch() {
-  editor.value?.commands.setSearchTerm(searchTerm.value);
+  activeEditor()?.commands.setSearchTerm(searchTerm.value);
   await nextTick();
   searchInput.value?.focus();
 }
@@ -585,8 +591,9 @@ async function copyMarkdown() {
 
 onDeactivated(() => {
   searchVisible.value = false;
-  editor.value?.commands.clearSearch();
-  editor.value?.commands.blur();
+  const currentEditor = activeEditor();
+  currentEditor?.commands.clearSearch();
+  currentEditor?.commands.blur();
 });
 </script>
 

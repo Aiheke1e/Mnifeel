@@ -144,23 +144,23 @@ registerWorkspaceControl({
 });
 
 async function flushSave() {
-  await documentPanelRef.value?.flushSave();
-  await canvasPanelRef.value?.flushSave();
+  await documentPanelRef.value?.flushSave?.();
+  await canvasPanelRef.value?.flushSave?.();
 }
 
 useProjectSaveGuard({
   isBusy: () => canvasPanelRef.value?.saveBusy ?? false,
   flushSave,
   cancelSave: () => {
-    documentPanelRef.value?.cancelSave();
-    canvasPanelRef.value?.cancelSave();
+    documentPanelRef.value?.cancelSave?.();
+    canvasPanelRef.value?.cancelSave?.();
   },
 });
 
 async function switchPanel(value: string | number | boolean) {
   if (value !== "canvas" && value !== "document") return false;
   try {
-    if (activePanel.value === "document") await documentPanelRef.value?.flushSave();
+    if (activePanel.value === "document") await documentPanelRef.value?.flushSave?.();
     activePanel.value = value;
     await nextTick();
     return true;

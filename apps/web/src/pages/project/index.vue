@@ -201,8 +201,8 @@ const runtimeReady = computed(() => runtimeRef.value?.canvasReady ?? false);
 provide("canvas", () => runtimeReady.value ? runtimeRef.value?.getCanvasContext() : undefined);
 useProjectSaveGuard({
   isBusy: () => runtimeRef.value?.saveBusy ?? false,
-  flushSave: () => runtimeRef.value?.flushSave() ?? Promise.resolve(),
-  cancelSave: () => runtimeRef.value?.cancelSave(),
+  flushSave: () => runtimeRef.value?.flushSave?.() ?? Promise.resolve(),
+  cancelSave: () => runtimeRef.value?.cancelSave?.(),
 });
 const stageContents = {
   script: { number: 1, title: "把灵感变成完整剧本", description: "先确定人物、冲突和结局，再补充场景与对白。", icon: IconFileText, mediaType: "text" },
@@ -301,7 +301,7 @@ async function refreshCreativeView() {
   creativeLoading.value = true;
   creativeError.value = "";
   try {
-    await runtimeRef.value?.flushSave();
+    await runtimeRef.value?.flushSave?.();
     let view = await readCreativeView(projectId, userAppStore.tasks.filter(task => task.projectId === projectId));
     if (runtimeReady.value && await restoreTaskOutputs(view)) {
       view = await readCreativeView(projectId, userAppStore.tasks.filter(task => task.projectId === projectId));

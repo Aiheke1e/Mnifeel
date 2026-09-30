@@ -14,8 +14,8 @@ const canvasReady = computed(() => canvasRef.value?.canvasReady ?? false);
 defineExpose({
   canvasReady,
   getCanvasContext: () => canvasRef.value?.getCanvasContext(),
-  flushSave: () => canvasRef.value?.flushSave() ?? Promise.resolve(),
-  cancelSave: () => canvasRef.value?.cancelSave(),
+  flushSave: () => canvasRef.value?.flushSave?.() ?? Promise.resolve(),
+  cancelSave: () => canvasRef.value?.cancelSave?.(),
   get saveBusy() { return canvasRef.value?.saveBusy ?? false; },
 });
 </script>

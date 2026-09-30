@@ -113,7 +113,7 @@ export function useMcpControl() {
           } else if (request.name === "openProject") {
             const projectId = request.args.projectId;
             if (typeof projectId !== "string" || !projectId.trim()) throw new Error("缺少项目 ID");
-            await workspaceControl.value?.flushSave();
+            await workspaceControl.value?.flushSave?.();
             callSignal.throwIfAborted();
             // ACT: 切换项目会取消旧画布调用；当前打开项目命令属于应用层。
             calls.delete(request.callId);
