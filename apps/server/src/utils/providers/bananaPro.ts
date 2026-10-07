@@ -40,23 +40,49 @@ function requestSignal(signal: AbortSignal | undefined, timeout = 30000) {
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout);
 }
 
+// 上游限频（429）与瞬时网关错误（502/503/504）通常可自愈，自动退避重试，避免整个生成任务直接失败。
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+const MAX_RETRIES = 4;
+
+async function sleepWithAbort(delay: number, signal?: AbortSignal) {
+  if (!signal) {
+    await new Promise(resolve => setTimeout(resolve, delay));
+    return;
+  }
+  await wait(signal, delay);
+}
+
 async function fetchJson(config: ProviderRuntimeConfig, path: string, init: RequestInit = {}, signal?: AbortSignal, timeout?: number) {
-  const response = await fetch(endpoint(config, path), {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${config.apiKey}`,
-      ...init.headers,
-    },
-    signal: requestSignal(signal, timeout),
-    redirect: "error",
-  });
-  if (!response.ok) throw Object.assign(new Error(`BananaPro 请求失败（HTTP ${response.status}）`), { status: 502 });
-  const contentLength = Number(response.headers.get("content-length"));
-  if (contentLength > 140 * 1024 * 1024) throw new Error("BananaPro 响应超过 140 MB 限制");
-  const text = await response.text();
-  if (text.length > 140 * 1024 * 1024) throw new Error("BananaPro 响应超过 140 MB 限制");
-  return JSON.parse(text.trim());
+  let attempt = 0;
+  while (true) {
+    signal?.throwIfAborted();
+    const response = await fetch(endpoint(config, path), {
+      ...init,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${config.apiKey}`,
+        ...init.headers,
+      },
+      signal: requestSignal(signal, timeout),
+      redirect: "error",
+    });
+    if (response.ok) {
+      const contentLength = Number(response.headers.get("content-length"));
+      if (contentLength > 140 * 1024 * 1024) throw new Error("BananaPro 响应超过 140 MB 限制");
+      const text = await response.text();
+      if (text.length > 140 * 1024 * 1024) throw new Error("BananaPro 响应超过 140 MB 限制");
+      return JSON.parse(text.trim());
+    }
+    if (!RETRYABLE_STATUS.has(response.status) || attempt >= MAX_RETRIES) {
+      throw Object.assign(new Error(`BananaPro 请求失败（HTTP ${response.status}）`), { status: 502 });
+    }
+    attempt += 1;
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter, 60) * 1000
+      : Math.min(2 ** attempt * 500 + Math.random() * 400, 8000);
+    await sleepWithAbort(delayMs, signal);
+  }
 }
 
 function wait(signal: AbortSignal, delay: number) {
