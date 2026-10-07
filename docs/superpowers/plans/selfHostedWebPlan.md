@@ -349,7 +349,7 @@
 
 - DeepSeek 使用 Bearer 认证及 OpenAI 兼容的 `/models`、`/chat/completions`，流式文本沿用现有 pi-ai 链路，非流式结果保留输入、输出、缓存命中和推理 token 用量。
 - Agnes 使用 Bearer 认证、`POST /v1/videos` 创建任务，并通过 `/agnesapi?video_id=...&model_name=...` 轮询顶层 `status`、`progress`、`url` 和 `error`；官方未提供取消接口，因此取消只停止本地轮询，后续供应商新增取消 API 时再接入远端取消。
-- BananaPro 使用 Bearer 认证、`GET /api/models`、Gemini 异步提交与任务轮询；模型接口实际返回 `models`、`supportedFormats`、`aspectRatios` 和 `imageSizes`，1K 文生图已完成真实生成、下载和项目落盘。
+- BananaPro 使用 Bearer 认证、`GET /api/models`、Gemini 异步提交与任务轮询；模型接口实际返回 `models`、`supportedFormats`、`aspectRatios` 和 `imageSizes`，1K 文生图已完成真实生成、下载和项目落盘。读取余额、模型和任务状态遇到 429、502、503、504 时最多退避重试 4 次；创建图片任务未确认幂等键，不自动重放 POST，避免重复生成与计费。
 - 媒体结果下载最多跟随 3 次重定向、限制为 100 MB 并校验文件头和 MIME；图片、视频只写入当前项目，失败和取消回滚本次新建文件。
 - 未修改旧 `utils/ai/models.ts`：该文件仅供待 Task 10/12 删除的旧自定义供应商界面使用，新数据库供应商同步统一走 `utils/providers`；若判断错误，代价是旧管理员兼容界面在清理前仍保留旧取模协议。
 
