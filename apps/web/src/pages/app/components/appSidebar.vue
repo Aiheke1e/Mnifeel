@@ -36,7 +36,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute } from "vue-router";
-import { IconHome, IconListCheck, IconPhoto, IconUserCircle } from "@tabler/icons-vue";
+import { IconHome, IconListCheck, IconMovie, IconPhoto, IconUserCircle } from "@tabler/icons-vue";
 import logoUrl from "@minifeel/assets/logo.svg";
 import { useAuthStore } from "@/stores/auth";
 import { useUserAppStore } from "@/stores/userApp";
@@ -46,6 +46,7 @@ const userAppStore = useUserAppStore();
 const route = useRoute();
 const navItems = [
   { path: "/app", label: "创作首页", description: "灵感与短剧项目", icon: IconHome },
+  { path: "/app/projects", label: "我的项目", description: "全部短剧项目", icon: IconMovie },
   { path: "/app/assets", label: "我的资产", description: "角色、场景与道具", icon: IconPhoto },
   { path: "/app/tasks", label: "生成任务", description: "进度与消费记录", icon: IconListCheck },
   { path: "/app/account", label: "我的账户", description: "积分与登录安全", icon: IconUserCircle },
@@ -229,7 +230,7 @@ function isActive(path: string) {
 
     .primaryNav {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 4px;
       margin: 0;
 

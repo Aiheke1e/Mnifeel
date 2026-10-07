@@ -775,6 +775,7 @@ async function openAdvanced() {
     align-items: start;
     gap: 20px;
     margin-top: 22px;
+    --stageViewport: max(480px, calc(100dvh - 320px));
 
     .stageNavigation {
       grid-column: 1 / -1;
@@ -788,17 +789,25 @@ async function openAdvanced() {
   }
 
   .stageWorkspace {
-    min-height: 480px;
+    display: flex;
+    flex-direction: column;
+    height: var(--stageViewport);
     padding: 30px;
+    overflow: hidden;
 
-    .creativeWarning { margin-top: 18px; }
+    .creativeWarning { margin-top: 18px; flex-shrink: 0; }
     :deep(.scriptStage),
     :deep(.characterStage),
     :deep(.storyboardStage),
     :deep(.filmStage) { margin-top: 24px; }
+    :deep(.characterStage),
+    :deep(.storyboardStage),
+    :deep(.filmStage) { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+    :deep(.scriptStage) { flex: 1; min-height: 0; overflow: hidden; }
 
     .stageHeading {
       display: flex;
+      flex-shrink: 0;
       align-items: flex-start;
       gap: 16px;
       .stageIcon { display: grid; width: 50px; height: 50px; flex-shrink: 0; place-items: center; border-radius: 15px; background: var(--studioAccentSoft); color: var(--studioAccent); }
@@ -808,7 +817,14 @@ async function openAdvanced() {
 
   }
 
-  .projectAside { display: grid; align-content: start; gap: 14px; }
+  .projectAside {
+    display: grid;
+    align-content: start;
+    gap: 14px;
+    height: var(--stageViewport);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   .progressCard {
     strong { display: block; margin: 13px 0 10px; color: var(--studioText); font-size: 30px; }
     > p:last-child { margin: 11px 0 0; color: var(--studioMuted); font-size: 12px; }
@@ -839,7 +855,16 @@ async function openAdvanced() {
         .directorPanel { grid-column: auto; }
       }
     }
-    .stageWorkspace { min-height: 0; padding: 20px; }
+    .stageWorkspace {
+      height: auto;
+      padding: 20px;
+      overflow: visible;
+      :deep(.scriptStage),
+      :deep(.characterStage),
+      :deep(.storyboardStage),
+      :deep(.filmStage) { flex: initial; min-height: 0; overflow: visible; }
+    }
+    .projectAside { height: auto; overflow: visible; }
   }
 }
 </style>

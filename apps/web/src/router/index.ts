@@ -24,6 +24,7 @@ const router = createRouter({
       meta: { role: "user" },
       children: [
         { path: "", component: () => import("@/pages/app/dashboard.vue") },
+        { path: "projects", component: () => import("@/pages/app/myProjects.vue") },
         { path: "assets", component: () => import("@/pages/app/assets.vue") },
         { path: "tasks", component: () => import("@/pages/app/tasks.vue") },
         { path: "account", component: () => import("@/pages/app/account.vue") },

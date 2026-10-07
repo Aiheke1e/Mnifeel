@@ -19,7 +19,7 @@
           <el-button type="primary" :disabled="busy || script.confirmed || changed" @click="emit('confirmContent', script.nodeId, script.confirmedLabel)">确认剧本</el-button>
         </div>
       </header>
-      <el-input v-model="draft" class="scriptEditor" type="textarea" :autosize="{ minRows: 16, maxRows: 30 }" :disabled="busy" aria-label="剧本内容" />
+      <el-input v-model="draft" class="scriptEditor" type="textarea" :disabled="busy" aria-label="剧本内容" />
     </template>
   </section>
 </template>
@@ -61,13 +61,16 @@ function save() {
 
 <style scoped lang="scss">
 .scriptStage {
-  display: grid;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
   gap: 18px;
 
-  .stageLoading { min-height: 320px; }
+  .stageLoading { min-height: 320px; flex-shrink: 0; }
   .missingContent {
     display: grid;
     min-height: 320px;
+    flex-shrink: 0;
     place-items: center;
     align-content: center;
     gap: 10px;
@@ -79,19 +82,28 @@ function save() {
   }
   .stageToolbar {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     justify-content: space-between;
     gap: 14px;
     > div { display: flex; align-items: center; gap: 10px; }
     span { color: var(--studioMuted); font-size: 12px; }
   }
-  .scriptEditor :deep(.el-textarea__inner) {
-    padding: 18px;
-    border-radius: 14px;
-    background: var(--studioSurfaceMuted);
-    color: var(--studioText);
-    font-size: 14px;
-    line-height: 1.8;
+  .scriptEditor {
+    display: flex;
+    flex: 1;
+    min-height: 320px;
+    flex-direction: column;
+    :deep(.el-textarea__inner) {
+      height: 100%;
+      padding: 18px;
+      border-radius: 14px;
+      background: var(--studioSurfaceMuted);
+      color: var(--studioText);
+      font-size: 14px;
+      line-height: 1.8;
+      resize: none;
+    }
   }
 }
 
