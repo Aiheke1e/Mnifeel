@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将普通用户项目入口改造成剧本、角色、分镜、成片四阶段的导演式工作台，同时保留 Minifeel 高级画布及其节点、Agent、素材和生成能力。
+**Goal:** 将现有四阶段原型渐进升级为剧本、资产设定、分镜、镜头制作、成片五阶段的导演式工作台；普通页与 Minifeel 高级画布继续共享同一份节点、连接、素材、任务和工作区文件。
 
-**Architecture:** 普通工作台挂载现有 `canvasHost` 作为共享运行层，通过 `CanvasContext` 和已注册的节点工具修改同一份画布数据；`creativeViewAdapter.ts` 只把约定标签的画布节点转换为阶段卡片，不维护第二份业务数据。现有 Agent 增加普通展示模式，服务端增加复用现有计费算法的只读估价接口，实际生成仍由现有节点、任务 Worker 和积分事务执行。
+**Architecture:** 普通工作台挂载现有 `canvasHost` 作为共享运行层，通过 `CanvasContext` 和已注册的节点工具修改同一份画布数据；`creativeViewAdapter.ts` 只把约定标签、真实画布边和节点输出转换为阶段卡片，不维护第二份业务数据。角色、场景、道具和风格资产通过真实画布边进入分镜与镜头素材包；估价、用户确认和正式生成必须复用同一份冻结请求。单镜头视频继续由现有媒体节点、任务 Worker 和积分事务执行，最终成片由服务端 FFmpeg/FFprobe 合成并写回同一项目工作区。
 
 **Tech Stack:** Bun 1.3.14、TypeScript、Vue 3、Pinia、Vue Router、Element Plus、VueFlow、Express 5、PostgreSQL。
 
@@ -22,6 +22,10 @@
 - 每个任务完成后更新本计划的执行状态、实际改动、验证结果和剩余事项，与代码放入同一个中文 Conventional Commit，并推送到 `origin/dev`。
 - 任一阶段验证失败时保持“进行中”，修复根因后再提交；不以“后续处理”跳过阶段门槛。
 - `.superpowers/` 是本地设计工具的临时目录，不进入提交。
+- Task 15 起实行逐任务确认：Task 15—22 各自视为一个“实施步骤”。开始每个任务前先向用户说明本任务范围、可见结果、数据与成本风险，只有用户针对该任务明确确认后才能修改业务代码；Task 内 checkbox 属于该次确认的执行清单，上一任务完成、提交或用户此前的笼统“继续”不自动授权下一任务。
+- 当前核心闭环不接入独立声音生成、角色声线、字词时间戳、口型同步、AI 视觉审片、字幕、背景音乐、复杂转场或专业时间线，也不为这些延期能力创建占位页面、空接口或重复数据结构。已有视频片段自带的音轨在最终合成时保留，当前质量验收由用户人工预览、采用或退回。
+- 真实图片、视频和其他付费模型调用必须在对应任务中再次获得明确授权；本地实现、静态校验和复用已有结果不代表获准产生新费用。
+- 服务器部署继续遵守仓库部署授权规则，任何任务的实现、提交和推送都不自动包含部署。
 
 ## Review Focus
 
@@ -48,7 +52,15 @@
 | 11. HTTP 生产环境 UUID 兼容 | 已完成 | 应用入口在浏览器缺少原生 `randomUUID` 时，使用 `getRandomValues` 补齐 UUID v4 | Web 类型检查和生产构建通过；生产 HTTP 环境验证 UUID、导演助手、普通项目、高级画布、文档切换与退出，控制台无应用错误 | — |
 | 12. 生图等待体验修复 | 已完成 | 媒体轮询静默刷新并保留阶段内容；生图状态不再展示供应商未提供的百分比 | Web 类型检查与生产构建通过；本地前后端入口返回 200；静态调用链复核通过 | 未调用真实媒体接口，不消耗积分；未部署服务器 |
 | 13. 导演助手历史消息与状态展示修复 | 已完成 | 分离模型输入与用户展示内容；普通导演模式只显示一条实时整理状态，隐藏内部技能指令和重复思考 | Server、Web 类型检查与生产构建通过；指定账号和项目的会话、页面及高级画布兼容性复验通过 | 未调用模型，不消耗积分；未部署服务器 |
-| 14. 镜头素材链与视频模型能力规划 | 已规划 | 保存 Minifeel 素材调用链和 Toonflow 视频生成链；定义后续视频模型的准入能力、降级边界与实施阶段 | 对 Toonflow 上游提交 `72a895c` 完成源码级静态核验；文档差异检查通过 | 待按本任务的分阶段清单实现；当前未改业务代码、未调用模型、未部署服务器 |
+| 14. 镜头素材链与视频模型能力规划 | 已完成（规划） | 保存 Minifeel 素材调用链和 Toonflow 视频生成链；定义视频模型准入能力、当前核心边界与逐步实施门槛 | 对 Toonflow 上游提交 `72a895c` 完成源码级静态核验；文档差异检查通过 | 业务实现拆分到 Task 15—22，均须逐项确认 |
+| 15. 普通镜头制作安全基线 | 待确认 | — | — | 用户确认后才开始；本任务不调用模型 |
+| 16. 资产语义与真实画布连接 | 未开始 | — | — | 依赖 Task 15，并须再次确认 |
+| 17. 可组合视频能力契约 | 未开始 | — | — | 依赖 Task 16，并须再次确认 |
+| 18. 冻结镜头素材包与请求一致 | 未开始 | — | — | 依赖 Task 17，并须再次确认 |
+| 19. 合格图片生视频模型适配 | 待选模型 | — | — | 依赖 Task 18；需用户选择模型并授权最小真实调用 |
+| 20. 样片优先的镜头制作 | 未开始 | — | — | 依赖 Task 19，并须再次确认 |
+| 21. FFmpeg 单一成片与人工交付 | 未开始 | — | — | 依赖 Task 20，并须再次确认 |
+| 22. 核心闭环验收 | 未开始 | — | — | 依赖 Task 21，并须再次确认；部署另行授权 |
 
 ---
 
@@ -938,18 +950,14 @@ flowchart LR
   scene --> bundle
   prop --> bundle
   style --> bundle
-  previous[上一片段尾帧或视频\n可选] --> bundle
-  audio[配音或音频参考\n可选] --> bundle
+  previous[上一片段尾帧或视频\n后续增强] -. 延期 .-> bundle
 
   bundle --> capability{视频模型能力匹配}
   capability -->|首帧与多参考可同时使用| preferred[首帧控制 + 角色/场景/道具参考]
-  capability -->|只支持多参考| referenceFallback[分镜图与相关素材作为多参考]
-  capability -->|只支持单图或首帧| frameFallback[只直接使用分镜图\n角色与场景影响已烘焙在分镜图中]
-  capability -->|只支持文本| blocked[阻止普通成片生成\n提示管理员配置兼容模型]
+  capability -->|缺少任一核心能力| limited[仅允许高级画布或管理员调试]
+  capability -->|只支持文本| blocked[阻止普通镜头制作\n提示管理员配置兼容模型]
 
   preferred --> clip[视频片段]
-  referenceFallback --> clip
-  frameFallback --> clip
   clip --> output[本地工作区资产与画布视频节点]
 ```
 
@@ -993,14 +1001,14 @@ Toonflow 当前把一次请求选择为一种 `mode`：首帧类模式走 `first
 
 #### Minifeel 视频模型能力契约
 
-**最低准入层：图片生视频**
+**基础兼容层：图片生视频**
 
-- 必须接受一张分镜图和提示词，生成对应视频片段；纯文本模型不进入普通成片流程。
+- 必须接受一张分镜图和提示词，生成对应视频片段；纯文本模型不进入普通镜头制作流程。
 - 必须支持竖屏 `9:16`、至少 `720p` 和单片段约 4 至 10 秒；推荐覆盖 5 至 15 秒。
 - 必须提供异步任务状态、明确失败原因和可识别的限流结果；失败不能静默重试或重复扣费。
-- 此层只把分镜图直接交给视频模型。角色和场景的一致性来自已经合成好的分镜图与提示词，界面必须明确其一致性能力有限，不能声称独立使用了角色图或场景图。
+- 此层只能证明供应商具备图片生视频能力，不满足 Minifeel 普通创作流的理想要求；它可以保留在高级画布或管理员调试中，但不能作为普通用户“镜头制作”的可选模型。
 
-**推荐生产层：首帧控制与多图片参考**
+**普通创作准入层：首帧控制与多图片参考**
 
 - 同一次请求必须能把分镜图作为首帧或构图基准，并额外接收当前镜头涉及的角色、场景、道具和风格图片。
 - 至少支持 1 张分镜图和 3 张额外参考图；推荐总上限不少于 6 张，理想上限为 9 张或更多，以覆盖多角色镜头。
@@ -1015,37 +1023,378 @@ Toonflow 当前把一次请求选择为一种 `mode`：首帧类模式走 `first
 - 支持幂等请求或业务请求标识、取消任务、真实进度或清晰阶段状态，并提供可预测的计费单位。
 - 适配器负责本地文件、Base64 或安全临时上传，不要求用户把项目素材公开到互联网。
 
-#### 能力降级规则
+#### 能力准入规则
 
 | 模型能力 | 请求方式 | 普通用户表现 |
 | --- | --- | --- |
 | 首帧与多参考可同时使用 | 分镜图作为首帧，发送当前镜头的角色、场景、道具和风格参考 | 完整的默认成片路径 |
-| 只支持多图片参考 | 分镜图与相关素材共同作为参考，通过稳定顺序和提示词标注各自语义 | 允许生成，并标记构图控制能力较弱 |
-| 只支持单图或首帧 | 只直接发送分镜图，角色和场景信息依赖已生成的分镜图 | 允许受限生成，并说明一致性能力有限 |
-| 只支持文本 | 不执行普通成片生成 | 提示管理员配置至少支持图片生视频的模型 |
+| 只支持多图片参考 | 可在高级画布或管理员调试中使用 | 普通镜头制作不可选，不能声称分镜首帧得到锁定 |
+| 只支持单图或首帧 | 可在高级画布或管理员调试中使用 | 普通镜头制作不可选，不能声称独立使用角色和场景参考 |
+| 只支持文本 | 不执行普通镜头制作 | 提示管理员配置能同时使用分镜首帧和多图片参考的模型 |
 
 模型能力选择、积分估算和最终生成必须使用同一个冻结后的“镜头素材包”和能力匹配结果。不能在估价后重新选择另一种引用组合，也不能因模型不支持就静默丢弃角色、场景或分镜引用。
+
+#### 当前核心闭环与延期边界
+
+```mermaid
+flowchart LR
+  script[剧本] --> assets[资产设定\n角色/场景/道具/风格]
+  assets --> storyboard[分镜]
+  storyboard --> clips[镜头制作\n样片/批量/采用]
+  clips --> final[成片\nFFmpeg 合成]
+  final --> review[人工预览与下载]
+```
+
+当前只实现上述视觉核心闭环。独立声音模型、角色声线、情绪与语速、字词时间戳、口型同步、AI 视觉审片、字幕、背景音乐、复杂转场、专业时间线以及音视频连续性参考全部延期；后续有明确需求时再扩展，当前不创建占位组件、接口或数据表。视频片段已有音轨在合成时保留，是否采用镜头与是否通过成片由用户人工确认。
 
 - [x] **Step 1: 保存调用链并核验 Toonflow 上游能力**
 
 保存 Minifeel 镜头素材调用链和 Toonflow 视频生成链。静态核验视频节点、媒体请求 Schema、Server 生成服务和供应商适配器，确认 Toonflow 支持图片生视频、帧控制和多媒体参考；同时确认现有 `mode` 仍缺少“首帧与多参考同时启用”的直接表达。
 
-- [ ] **Step 2: 建立真实镜头素材包与画布连接**
+- [x] **Step 2: 明确当前核心边界和模型准入标准**
 
-从剧本和分镜中确定当前镜头实际涉及的角色、场景、道具和风格，为新项目建立真实画布边；旧项目提供可审查的匹配与补连流程。保留高级画布中的用户自定义边，不使用“先删除所有输入边再重连”的实现。
+确认当前阶段只完成视觉核心闭环；普通镜头制作要求模型在同一次请求中同时使用分镜首帧和当前镜头相关的多图片参考。单图、仅多参考或纯文本模型只保留给高级画布和管理员调试，不能静默降级进入普通流程。
 
-- [ ] **Step 3: 统一估价和生成请求构建**
+- [x] **Step 3: 将业务实现拆成逐项确认任务**
 
-建立一个共享请求构建入口，在操作开始时冻结镜头素材包、引用顺序、模型能力和工作目录。估价、确认界面和正式生成复用同一结果，任何不支持的引用组合都必须在扣分和创建任务前失败。
+实现拆分为 Task 15—22。每个任务完成本地验证、更新计划、提交并推送 `dev` 后立即停止；下一任务必须再次向用户说明范围并取得确认。真实付费调用与服务器部署分别单独授权。
 
-- [ ] **Step 4: 扩展模型能力描述与供应商适配器**
+---
 
-把“帧控制”和“多参考类型”从互斥模式扩展为可组合能力，接入至少一个满足推荐生产层的图片生视频模型。管理员配置页展示经过验证的能力、限制和计费，不向普通用户暴露供应商或底层参数。
+### Task 15: 普通镜头制作安全基线
 
-- [ ] **Step 5: 完成成片阶段的能力反馈与失效传播**
+**Status:** 待用户确认。本任务只修安全边界，不新增供应商、不调用图片或视频模型、不部署服务器。
 
-成片阶段展示当前镜头使用的素材和模型能力等级；角色图、场景图或分镜图变化后，使依赖的分镜或视频结果明确失效，要求重新确认生成，不能继续把旧视频显示为已完成。
+**Files:**
 
-- [ ] **Step 6: 分层验证视频生成链路**
+- Modify: `apps/web/src/pages/project/index.vue`
+- Modify: `apps/web/src/pages/project/components/projectStages.vue`
+- Modify: `apps/web/src/pages/project/components/filmStage.vue`
+- Modify: `apps/server/src/routes/generation/estimate.ts`
+- Modify: `apps/server/src/utils/generation/index.ts`
+- Modify: `apps/server/src/utils/media/generation.ts`
+- Modify: `docs/superpowers/plans/guidedStudioPlan.md`
 
-先用现有本地结果完成边、请求、估价、保存和恢复验证，不调用付费模型；管理员配置满足能力契约的模型后，再在用户明确授权且没有共享限流冲突时执行一次最小真实视频调用，核对供应商请求、任务状态、积分、输出文件和普通/高级两种视图的一致性。服务器部署需要另行获得当前任务的明确授权。
+**Outcome:** 先阻止当前已确认的破坏和误导：普通页不再删除高级画布已有输入边；仅文生视频的 Agnes 不再出现在普通“镜头制作”可用路径中；明显不符合媒体 Schema 或模型能力的请求在创建任务和冻结积分前失败。第四阶段的可见名称改为“镜头制作”，不再把单个片段称为完整成片。
+
+**Confirmation gate:** 开始前需用户明确接受：在接入满足要求的图片生视频模型前，普通工作台的视频按钮会显示“暂无兼容模型”；高级画布和管理员调试仍可保留 Agnes 文生视频能力。
+
+- [ ] **Step 1: 固化失败证据与受影响调用方**
+
+记录 `configureVideoGeneration` 删除其他入边、`startFrameOptional` 被映射成尾帧、普通页接受纯文本模式，以及估价在媒体能力校验前运行的现状。搜索 `configureVideoGeneration`、`estimateGenerationTask`、`createGenerationTask`、`generateVideo` 的全部调用方，确认修复落在共享边界。
+
+- [ ] **Step 2: 停止破坏画布连接**
+
+普通页只能增补自己明确缺少的连接，不能批量删除视频节点已有入边，也不能重排高级画布维护的自定义连接。未知连接保持原样并给出可读提示；本阶段不尝试猜测角色、场景或道具关系。
+
+- [ ] **Step 3: 收紧普通视频模型入口**
+
+普通“镜头制作”只显示显式满足组合能力契约的模型。当前只有 `text` 模式的 Agnes 显示为不兼容并阻止估价；高级画布与管理员调试不改变。修正单图帧语义，不能把首帧模型的输入放到 `lastFrame`。
+
+- [ ] **Step 4: 在扣分前执行最低限度的服务端校验**
+
+估价、任务创建和媒体执行共享现有 `imageGenerationSchema`、`videoGenerationSchema` 与模型状态检查。无效字段、媒体类型不符、停用模型和已知不支持的引用组合在任务入库及积分冻结前失败；失败不创建任务、不产生流水。
+
+- [ ] **Step 5: 本地验证、更新计划并提交**
+
+执行 Web、Server 类型检查与生产构建，使用现有画布副本验证自定义边数量和顺序不变；通过本地 HTTP 验证不兼容请求无任务、无冻结积分。运行 `git diff --check` 与 `git status --short --branch`，更新本任务状态后使用中文 Conventional Commit 提交并推送 `origin/dev`，然后停止等待 Task 16 确认。
+
+---
+
+### Task 16: 资产语义与真实画布连接
+
+**Status:** 未开始，依赖 Task 15，开始前需用户再次确认。
+
+**Files:**
+
+- Modify: `apps/web/src/pages/app/dashboard.vue`
+- Modify: `apps/web/src/pages/project/creativeViewAdapter.ts`
+- Rename/Modify: `apps/web/src/pages/project/components/characterStage.vue` → `apps/web/src/pages/project/components/assetStage.vue`
+- Modify: `apps/web/src/pages/project/components/projectStages.vue`
+- Modify: `apps/web/src/pages/project/components/storyboardStage.vue`
+- Modify: `apps/web/src/pages/project/components/filmStage.vue`
+- Modify: `apps/web/src/pages/project/index.vue`
+- Modify: `packages/skills/workflow/SKILL.md`
+- Modify: `docs/superpowers/plans/guidedStudioPlan.md`
+
+**Outcome:** 第二阶段从“定角色”扩展为“资产设定”，覆盖角色、场景、道具和风格。当前镜头选择了哪些资产，就在同一画布中建立哪些真实边；分镜图片与视频片段都从真实连接读取引用，不维护普通页专用关系表。在 Task 18 完成冻结请求前，带入边引用的分镜生成保持安全禁用，避免新增连接后继续放大现有估价与执行不一致问题。
+
+**Semantic contract:** 新节点使用 `Minifeel/角色/<名称>`、`Minifeel/场景/<名称>`、`Minifeel/道具/<名称>`、`Minifeel/风格/<名称>`、`Minifeel/分镜/<三位编号>` 和 `Minifeel/片段/<三位编号>`。旧 `Minifeel/成片/<三位编号>` 继续按“视频片段”兼容读取，不在打开项目时静默改名；单一最终视频才使用 `Minifeel/成片`。
+
+- [ ] **Step 1: 扩展只读创作视图语义**
+
+让 `creativeViewAdapter.ts` 识别四类视觉资产、分镜、片段、最终成片、画布边和 `referenceOrder`，输出缺失连接、重复顺序、未知节点和旧标签诊断。读取旧项目不得改写文件。
+
+- [ ] **Step 2: 将角色阶段改成资产设定**
+
+把现有角色编辑能力迁入 `assetStage.vue`，按角色、场景、道具和风格分组展示实际节点。只提供当前任务需要的编辑、生成、预览、采用和锁定能力；不添加声线、配音或其他延期入口。
+
+- [ ] **Step 3: 为分镜提供显式素材选择**
+
+每个分镜显示并允许调整当前镜头相关的角色、场景、道具和风格。保存选择时使用现有 `connectNodes` 增补或移除由普通页明确管理的边，并同步稳定的 `referenceOrder`；不触碰用户在高级画布建立的未知连接。
+
+- [ ] **Step 4: 同步新项目工作流和片段连接**
+
+首轮工作流只创建文字与图片节点草稿，不调用媒体模型。新项目按故事实际需要创建资产节点，并让分镜引用相关资产；片段节点引用其分镜图及同镜头资产。不得把项目全部素材无差别连接到每个镜头。
+
+带入边引用的分镜和片段在 Task 18 完成前保持不可执行并说明当前不能安全保证估价与实际输入一致，不允许估价或扣分；没有引用输入的单张资产生成继续复用现有安全链路。这是阶段间的临时保护状态，不新增模拟结果或占位接口。
+
+- [ ] **Step 5: 为旧项目提供可审查的补连流程**
+
+旧项目只显示连接缺口和建议。无法唯一判断的关系必须让用户选择；应用前展示将新增或移除的边，应用操作幂等，不删除、重命名或重排原有节点和未知边。项目级应用由界面中的用户操作确认，不执行全库静默迁移。
+
+- [ ] **Step 6: 本地验证、更新计划并提交**
+
+分别验证新项目、无连接旧项目和含高级自定义边的旧项目；确认普通页刷新与高级画布看到同一节点、边和排序，并检查宽屏、普通桌面和移动端。完成类型检查、构建、`git diff --check` 与状态检查，更新计划、提交并推送后停止等待 Task 17 确认。
+
+---
+
+### Task 17: 可组合视频能力契约
+
+**Status:** 未开始，依赖 Task 16，开始前需用户再次确认。本任务只建立公共能力协议，不接入新供应商、不调用付费模型。
+
+**Files:**
+
+- Modify: `packages/tools/mediaGeneration/src/runtime.ts`
+- Modify: `packages/nodeScaffold/src/nodeAi.ts`
+- Modify: `packages/nodes/videoGenerationNode/src/index.vue`
+- Modify: `packages/nodes/videoGenerationNode/src/components/generationSettings.vue`
+- Modify: `apps/server/src/utils/providers/types.ts`
+- Modify: `apps/server/src/utils/providers/index.ts`
+- Modify: `apps/server/src/utils/media/generation.ts`
+- Modify: `apps/server/src/routes/ai/media/models.ts`
+- Modify: `apps/server/src/routes/admin/models/save.ts`
+- Modify: `apps/web/src/pages/admin/models.vue`
+- Modify: `apps/web/src/stores/userApp.ts`
+- Modify: `docs/superpowers/plans/guidedStudioPlan.md`
+
+**Outcome:** 视频能力从一个互斥的 `mode` 字段扩展为可组合、可验证的能力描述。普通工作台可以准确判断一个模型能否在同一次请求中使用分镜首帧和多张资产参考；旧 `mode` 继续供既有高级画布读取，但不会被自动解释为更强能力。
+
+- [ ] **Step 1: 定义版本化能力 Schema**
+
+新增明确字段描述首帧、尾帧、图片参考上限、是否可把帧控制和图片参考同时使用、支持时长、画幅和分辨率。当前版本不加入音频参考、口型或 AI 审片字段。未知字段不作为已验证能力，旧模型默认不满足普通创作准入。
+
+- [ ] **Step 2: 建立唯一能力解析与匹配规则**
+
+Web、Server、图片/视频节点和管理员页面复用同一套类型与匹配语义。普通创作的硬门槛为：分镜图可作为首帧、至少可附加当前镜头所需的多张图片参考、两者能同时生效，并满足 `9:16`、至少 `720p` 和目标时长。
+
+- [ ] **Step 3: 兼容高级画布旧模式**
+
+现有 `text`、`singleImage`、首尾帧和 `imageReference:n` 模式仍可加载、编辑和运行。未迁移模型不会导致节点或画布打不开，也不会被静默提升为组合能力；Agnes 继续诚实声明 `text`。
+
+- [ ] **Step 4: 收紧管理员能力配置**
+
+管理员保存和启用模型前校验能力结构与数值上限，界面显示“普通创作兼容/仅高级画布”及原因。管理员可以配置模型，普通用户只能选择已启用且通过准入校验的模型，供应商与 API Key 仍不下发。
+
+- [ ] **Step 5: 本地验证、更新计划并提交**
+
+使用本地能力样本验证组合能力、单图、纯文本、非法上限和旧 `mode`；执行相关包、Web、Server 类型检查与构建。更新计划、检查差异、提交并推送后停止等待 Task 18 确认。
+
+---
+
+### Task 18: 冻结镜头素材包与请求一致
+
+**Status:** 未开始，依赖 Task 17，开始前需用户再次确认。
+
+**Files:**
+
+- Modify: `packages/nodes/imageGenerationNode/src/index.vue`
+- Modify: `packages/nodes/videoGenerationNode/src/index.vue`
+- Modify: `packages/nodeScaffold/src/nodeAi.ts`
+- Modify: `apps/web/src/pages/project/index.vue`
+- Modify: `apps/web/src/pages/project/components/generationConfirm.vue`
+- Modify: `apps/server/src/routes/generation/estimate.ts`
+- Modify: `apps/server/src/routes/generation/create.ts`
+- Modify: `apps/server/src/routes/ai/media/generate.ts`
+- Modify: `apps/server/src/utils/generation/index.ts`
+- Modify: `apps/server/src/utils/media/generation.ts`
+- Modify: `docs/superpowers/plans/guidedStudioPlan.md`
+
+**Outcome:** 分镜生图和镜头生视频都由节点根据真实入边构建唯一请求；估价、确认和执行使用同一镜头素材包及服务端指纹。素材、边、顺序、模型能力或文件内容在确认后发生变化时，系统要求重新估价，不能继续扣分和运行旧请求。
+
+**Interfaces:** 图片与视频生成节点新增 `node:prepareGeneration`，返回实际将执行的请求及引用摘要；`node:generateImage`、`node:generateVideo` 接收可选 `expectedFingerprint`。高级画布无参数调用保持当前行为，普通工作台必须传入已确认指纹。
+
+- [ ] **Step 1: 在节点内提取唯一请求构建入口**
+
+图片节点把角色、场景、道具和风格真实入边写入分镜请求；视频节点把分镜图写入首帧，并按 `referenceOrder` 写入当前镜头资产参考。现有开始生成逻辑和 `node:prepareGeneration` 调用同一函数，普通页不再复制一套请求拼装规则。
+
+- [ ] **Step 2: 让服务端生成可信请求指纹**
+
+估价端在鉴权后解析媒体 Schema、解析并限制项目内路径、读取引用文件元数据或内容摘要、校验模型能力与管理员状态，基于规范化后的项目、节点、引用顺序、模型、参数和输出目录生成指纹。不得信任浏览器自行声明的能力或文件哈希。
+
+- [ ] **Step 3: 让估价、确认和执行复用指纹**
+
+确认框展示模型、镜头、引用资产、规格和积分。用户点击确认时重新准备并估价；任何差异都更新确认内容并要求再次确认。任务创建和媒体执行再次验证 `expectedFingerprint`，不一致返回冲突且不创建任务、不冻结积分。
+
+- [ ] **Step 4: 保存足够的脱敏快照**
+
+`generationTasks.requestSummary` 保存能力版本、引用角色与顺序、工作区相对路径、请求指纹和计费快照；不保存 API Key、绝对路径或媒体 Base64。后续采用和失效判断以该快照为依据。
+
+- [ ] **Step 5: 验证竞态与费用边界**
+
+使用已有本地媒体验证估价后改提示词、替换资产、断开边、调整引用顺序、停用模型和修改价格；全部应在付费执行前要求重估。执行类型检查、构建和 HTTP 验证，更新计划、提交并推送后停止等待 Task 19 确认。
+
+---
+
+### Task 19: 合格图片生视频模型适配
+
+**Status:** 待用户后续选择模型。依赖 Task 18；没有满足普通创作准入的供应商和官方 API 文档时不得开始编码供应商适配器。
+
+**Files:**
+
+- Future Create: `apps/server/src/utils/providers/<供应商小驼峰名称>.ts`
+- Modify: `apps/server/src/utils/database/types.ts`
+- Modify: `apps/server/src/utils/database/migrations/*`
+- Modify: `apps/server/src/utils/providers/index.ts`
+- Modify: `apps/server/src/utils/providers/types.ts`
+- Modify: `apps/server/src/routes/admin/providers/debug.ts`
+- Modify: `apps/web/src/pages/admin/providers.vue`
+- Modify: `docs/superpowers/plans/guidedStudioPlan.md`
+
+**Selection gate:** 用户需提供或确认候选供应商、官方文档、测试 Key、目标模型、参考图限制、时长/分辨率、异步与取消能力、价格和限流。先做文档与最小静态适配审查；真实请求的预计费用和请求数量需单独确认。
+
+- [ ] **Step 1: 形成供应商能力对照**
+
+只依据已核验的官方文档，把候选模型逐项映射到 Task 17 的能力 Schema。不能根据营销文案猜测多参考、角色一致性、首帧或并发能力。
+
+- [ ] **Step 2: 接入单一最小适配器**
+
+仅实现已选模型需要的列表、创建、查询、取消和结果下载；严格校验响应，错误不静默重试。需要新增 `ProviderType` 或数据库约束时使用迁移，API Key 继续只在服务端加密保存。
+
+- [ ] **Step 3: 扩展管理员最小调试**
+
+管理员调试允许提交分镜首帧与少量角色/场景参考，显示实际请求能力、任务状态和返回结果；普通用户不可访问，调试不自动写入创作项目或消耗用户积分。
+
+- [ ] **Step 4: 分层验证并执行一次获批真实调用**
+
+先用本地静态数据、输入校验和供应商提供的非付费能力接口验证。只有用户明确批准后，执行一次最低成本、最短时长、`9:16` 的真实镜头请求，核对参考是否同时送达、状态恢复、输出类型、积分和失败退款；不得自动重试。
+
+- [ ] **Step 5: 更新计划并提交**
+
+完成适配器、管理员能力与实际验证记录后，执行检查、提交并推送；不部署服务器，停止等待 Task 20 确认。
+
+---
+
+### Task 20: 样片优先的镜头制作
+
+**Status:** 未开始，依赖 Task 19，开始前需用户再次确认。
+
+**Files:**
+
+- Modify: `apps/web/src/pages/project/creativeViewAdapter.ts`
+- Modify: `apps/web/src/pages/project/index.vue`
+- Modify: `apps/web/src/pages/project/components/filmStage.vue`
+- Modify: `apps/web/src/stores/userApp.ts`
+- Modify: `packages/nodes/imageGenerationNode/src/index.vue`
+- Modify: `packages/nodes/videoGenerationNode/src/index.vue`
+- Modify: `docs/superpowers/plans/guidedStudioPlan.md`
+
+**Outcome:** 第四阶段完整呈现“镜头制作”：先生成一个代表性或高风险镜头作为样片，用户采用后才允许按再次确认的总价批量生成其余镜头。每次生成都是候选版本，新结果不覆盖已采用版本；上游采用版变化后，只把真正依赖它的下游标为“需更新”。
+
+- [ ] **Step 1: 复用任务结果形成候选版本**
+
+候选文件和任务沿用 `generationTasks.result.files`，不新增普通页候选数据库。项目页按 `projectId` 分页读取完整任务记录，不能只依赖全账户最近 100 条。引导模式使用 `candidateOnly`，生成成功不直接替换节点已采用输出；高级画布无参数生成维持旧行为。
+
+- [ ] **Step 2: 在同一节点保存采用状态**
+
+图片与视频节点提供 `node:acceptOutput`，只接受属于该节点工作区目录的成功任务文件，并写入公开输出及 `accepted` 元数据：任务 ID、相对路径、MIME、请求指纹和采用时间。普通页通过节点工具操作，不直接改画布 JSON。
+
+- [ ] **Step 3: 实现样片门槛与批量确认**
+
+默认推荐一个代表性镜头，用户可改选。样片成功后先预览、采用或退回；只有采用后才计算其余镜头总价并展示模型、规格、数量、引用和积分，用户再次确认才批量创建任务。失败、取消和未采用结果不推进阶段。
+
+- [ ] **Step 4: 按读取时指纹判断定向失效**
+
+`creativeViewAdapter.ts` 用当前提示词、真实入边、`referenceOrder`、上游已采用输出和模型能力重算请求指纹，与下游 `accepted.requestFingerprint` 比较。不同则显示“需更新”并保留旧预览，不遍历改写所有下游节点、不删除文件、不自动重生成；无关镜头不受影响。
+
+- [ ] **Step 5: 验证恢复、版本和局部失败**
+
+验证刷新、切换普通/高级画布、样片退回、重新生成、部分镜头失败、上游只改草稿但未采用、上游采用版变化和无关资产变化。完成检查、更新计划、提交并推送后停止等待 Task 21 确认。
+
+---
+
+### Task 21: FFmpeg 单一成片与人工交付
+
+**Status:** 未开始，依赖 Task 20，开始前需用户再次确认。本任务不调用模型、不产生积分流水。
+
+**Files:**
+
+- Create: `apps/server/src/utils/database/migrations/projectRenderTasks.ts`
+- Modify: `apps/server/src/utils/database/migrate.ts`
+- Modify: `apps/server/sql/schema.sql`
+- Create: `apps/server/src/utils/render/index.ts`
+- Create: `apps/server/src/utils/render/worker.ts`
+- Create: `apps/server/src/routes/render/create.ts`
+- Create: `apps/server/src/routes/render/get.ts`
+- Create: `apps/server/src/routes/render/list.ts`
+- Create: `apps/server/src/routes/render/cancel.ts`
+- Modify: `apps/server/src/app.ts`
+- Modify: `apps/server/src/utils.ts`
+- Modify: `apps/server/src/utils/projects/index.ts`
+- Modify: `apps/web/src/pages/project/components/projectStages.vue`
+- Modify: `apps/web/src/pages/project/components/filmStage.vue`
+- Create: `apps/web/src/pages/project/components/finalStage.vue`
+- Modify: `apps/web/src/pages/project/creativeViewAdapter.ts`
+- Modify: `apps/web/src/pages/project/index.vue`
+- Modify: `packages/nodes/videoNode/src/index.vue`
+- Modify: `docs/superpowers/plans/guidedStudioPlan.md`
+
+**Architecture:** 本地合成不复用 `generationTasks`，因为该表强制关联模型、供应商计费和积分事务。新增独立的 `projectRenderTasks` 保存输入快照、状态、进度、输出和错误，复用 `createWorkspaceFfmpeg`、FFprobe、工作区路径校验、文件锁和项目资产索引。第五阶段与可工作的合成链一起上线，不提前放置空页面。
+
+- [ ] **Step 1: 建立可恢复的本地渲染任务**
+
+接口按项目鉴权并只接受已采用、未失效的片段相对路径和冻结顺序。Worker 支持排队、心跳、取消、失败恢复和服务重启后的明确状态；任务不需要模型 ID，不冻结或结算积分。
+
+- [ ] **Step 2: 用 FFprobe 预检所有片段**
+
+校验容器、视频流、时长、分辨率、帧率和音轨。缺文件、损坏文件、路径逃逸或失效指纹在启动 FFmpeg 前失败。输入快照变化时要求重新创建任务。
+
+- [ ] **Step 3: 完成最小可靠合成**
+
+按分镜顺序统一画幅、编码、像素格式、帧率与音频参数后硬切拼接成一个 MP4。保留片段已有音轨；无音轨片段补静音轨以保证拼接稳定。本阶段不生成配音、口型、字幕、背景音乐、复杂转场或时间线工程。
+
+- [ ] **Step 4: 写回同一项目和画布**
+
+输出保存为 `assets/final/<renderId>.mp4`，写入 `projectAssets`，创建或复用一个 `remote-videoNode` 并通过 `node:setVideo` 标记为 `Minifeel/成片`。普通页与高级画布预览同一文件；重做成片保留旧文件，只有用户采用的新结果成为当前输出。
+
+- [ ] **Step 5: 完成第五阶段的人工审片与下载**
+
+`finalStage.vue` 展示片段顺序、合成状态、技术错误、完整成片预览、重新合成和下载。用户可从问题片段返回镜头制作；当前验收只做人工预览，不增加 AI 视觉审片入口。
+
+- [ ] **Step 6: 本地验证、更新计划并提交**
+
+用既有视频样本验证相同规格、混合分辨率/帧率、有音轨与无音轨混合、取消、FFmpeg 缺失、坏文件、服务重启和下载文件。检查五阶段响应式布局、类型、构建、路由生成、数据库迁移和差异，更新计划、提交并推送后停止等待 Task 22 确认。
+
+---
+
+### Task 22: 核心闭环验收
+
+**Status:** 未开始，依赖 Task 15—21，开始前需用户再次确认。部署服务器不包含在本任务内。
+
+**Files:**
+
+- Modify: `docs/productExperienceIssues.md`
+- Modify: `docs/superpowers/plans/guidedStudioPlan.md`
+- Modify: 仅限验收发现且能复现的相关实现文件
+
+**Outcome:** 验证“剧本 → 资产设定 → 分镜 → 镜头制作 → 成片 → 人工预览与下载”在普通工作台完整闭环，并证明高级画布读取同一节点、边、素材、任务和结果。只修复验收中形成明确失败证据的问题，不顺带开发延期能力。
+
+- [ ] **Step 1: 执行旧项目兼容矩阵**
+
+覆盖现有四类标签项目、零连接项目、含高级画布自定义边项目、重复编号、缺文件、损坏画布和旧 `Minifeel/成片/<编号>`。打开项目不得静默改写；补连、采用和标签规范化均需可审查的用户操作。
+
+- [ ] **Step 2: 执行模型与费用矩阵**
+
+覆盖无兼容模型、模型停用、价格变化、积分不足、估价后素材变化、限流、失败退款、取消和服务恢复。先复用既有媒体结果；新的付费图片或视频调用必须另行明确授权，失败不自动重试。
+
+- [ ] **Step 3: 执行端到端创作矩阵**
+
+至少验证一个新项目和一个旧项目的资产连接、分镜生成请求、样片、采用、批量片段、定向失效、FFmpeg 合成、最终预览和下载；同时核对普通/高级两种入口、任务中心、资产库和账户流水的一致性。
+
+- [ ] **Step 4: 执行界面与可访问性检查**
+
+检查宽屏桌面、普通桌面和移动端；确认无横向溢出、异常空白、遮挡或旧 UI 混用，图片和视频完整展示且可放大/播放，所有关键操作可用键盘完成并有可见焦点、加载、空、失败、超时和重试反馈。
+
+- [ ] **Step 5: 完成仓库验证和交付记录**
+
+执行受影响工作区类型检查、生产构建、必要 HTTP 与浏览器操作、`git diff --check` 和 `git status --short --branch`。更新问题清单与本计划的真实结果，使用中文 Conventional Commit 提交并推送 `origin/dev`。完成后停止；只有用户另行明确要求部署时，才进入备份、部署和线上低成本冒烟流程。
