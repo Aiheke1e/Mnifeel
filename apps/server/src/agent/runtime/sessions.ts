@@ -32,6 +32,19 @@ type SessionMessage = {
 const activeSessions = new Map<string, ActiveAgentSession>();
 const sessionKey = (path: string) => process.platform === "win32" ? resolve(path).toLowerCase() : resolve(path);
 
+function getAgentDisplayContent(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("/skill:workflow")) return content;
+  const marker = "用户的创作需求：";
+  const start = trimmed.indexOf(marker);
+  if (start < 0) return content;
+  const contentStart = start + marker.length;
+  const request = trimmed.slice(contentStart);
+  const instructionStart = request.search(/\s+直接在当前空画布/);
+  const displayContent = request.slice(0, instructionStart < 0 ? undefined : instructionStart).trim();
+  return displayContent || content;
+}
+
 export function getActiveAgentSession(path: string) {
   return activeSessions.get(sessionKey(path));
 }
@@ -228,7 +241,7 @@ export async function listAgentSessions(cwd: string, directory: string) {
     .sort((left, right) => right.modified.getTime() - left.modified.getTime())
     .map((item) => ({
       file: basename(item.path),
-      name: item.name || (item.messageCount ? item.firstMessage.trim().slice(0, 60) : "") || "新对话",
+      name: getAgentDisplayContent(item.name || (item.messageCount ? item.firstMessage : "")).trim().slice(0, 60) || "新对话",
       modified: item.modified,
       messageCount: item.messageCount,
     }));
@@ -319,7 +332,7 @@ export async function getAgentSession(cwd: string, path: string) {
         entryId: entry.id,
         replyTo: message.role === "assistant" ? replyTo : undefined,
         role: message.role,
-        content,
+        content: message.role === "user" ? getAgentDisplayContent(content) : content,
         parts,
         error,
         attachments,
@@ -368,7 +381,7 @@ export async function getAgentSession(cwd: string, path: string) {
   }
   return {
     file: basename(path),
-    name: history.getSessionName() || (firstUserMessage?.content.trim() || firstUserMessage?.attachments?.[0]?.name)?.slice(0, 60) || "新对话",
+    name: getAgentDisplayContent(history.getSessionName() || firstUserMessage?.content || "").trim().slice(0, 60) || firstUserMessage?.attachments?.[0]?.name?.slice(0, 60) || "新对话",
     messages,
     stats: getAgentStats(history),
     contextUsage: limitsModel && model ? getAgentContext(history, getModelLimits(model.provider, limitsModel).contextWindow) : undefined,

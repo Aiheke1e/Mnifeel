@@ -28,6 +28,7 @@ type AgentOptions = {
   projectId: string;
   allowGlobalPersonalization: boolean;
   prompt: string;
+  displayPrompt?: string;
   attachments?: z.infer<typeof agentAttachmentsSchema>;
   cwd: string;
   providerId: string;
@@ -43,6 +44,7 @@ type AgentOptions = {
 export async function run(
   {
     prompt,
+    displayPrompt,
     userId,
     projectId,
     allowGlobalPersonalization,
@@ -218,9 +220,10 @@ export async function run(
       const firstMessage = !messageAccepted;
       messageAccepted = true;
       if (firstMessage && (attachments.length || prompt.trimStart().startsWith("/skill:"))) {
-        history.appendCustomEntry("minifeelUserMessage", { messageId: entry.id, content: prompt.trim(), attachments });
+        const content = prompt.trimStart().startsWith("/skill:") ? displayPrompt?.trim() || prompt.trim() : prompt.trim();
+        history.appendCustomEntry("minifeelUserMessage", { messageId: entry.id, content, attachments });
         if (!history.getSessionName() && history.getBranch().filter((item) => item.type === "message" && item.message.role === "user").length === 1) {
-          history.appendSessionInfo((prompt.trim() || attachments[0]!.name).slice(0, 60));
+          history.appendSessionInfo((content || attachments[0]!.name).slice(0, 60));
         }
       }
       const saved = history.getBranch().findLast(item => item.type === "custom" && item.customType === "minifeelUserMessage" && (item.data as { messageId?: string })?.messageId === entry.id);

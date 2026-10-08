@@ -6,7 +6,7 @@ import { getAuth, validateFields } from "@/lib/middleware";
 import u from "@/utils";
 
 const inputSchema = z.object({
-  prompt: z.string().trim(), projectId: z.uuid(),
+  prompt: z.string().trim(), displayPrompt: z.string().trim().max(4000).optional(), projectId: z.uuid(),
   attachments: u.agent.agentAttachmentsSchema.optional(),
   providerId: z.string().min(1), modelId: z.string().min(1),
   thinkingLevel: z.enum(["off", "low", "medium", "high"]).optional(),

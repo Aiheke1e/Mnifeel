@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将普通用户项目入口改造成剧本、角色、分镜、成片四阶段的导演式工作台，同时保留 Toonflow 高级画布及其节点、Agent、素材和生成能力。
+**Goal:** 将普通用户项目入口改造成剧本、角色、分镜、成片四阶段的导演式工作台，同时保留 Minifeel 高级画布及其节点、Agent、素材和生成能力。
 
 **Architecture:** 普通工作台挂载现有 `canvasHost` 作为共享运行层，通过 `CanvasContext` 和已注册的节点工具修改同一份画布数据；`creativeViewAdapter.ts` 只把约定标签的画布节点转换为阶段卡片，不维护第二份业务数据。现有 Agent 增加普通展示模式，服务端增加复用现有计费算法的只读估价接口，实际生成仍由现有节点、任务 Worker 和积分事务执行。
 
@@ -869,3 +869,30 @@ Web 类型检查和生产构建通过。
 执行 Web 类型检查、生产构建和 `git diff --check`；复核首次进入仍有加载反馈，媒体轮询不再切换阶段内容，且图片入口不展示百分比。本阶段不调用真实媒体接口、不消耗积分、不部署服务器。
 
 实际验证（2026-10-08）：`bun run typecheck` 与 `bun run build` 均通过；本地前端首页与后端认证配置接口返回 200。静态调用链确认只有任务轮询使用静默刷新，角色与分镜显示“正在生成”，任务中心仅对图片使用不确定状态，视频仍展示供应商返回的真实进度。未发起真实图片或视频生成，因此没有消耗积分；未部署服务器。
+
+### Task 13: 导演助手历史消息与状态展示修复
+
+**Files:**
+
+- Modify: `apps/server/src/routes/agent.ts`
+- Modify: `apps/server/src/agent/runtime/index.ts`
+- Modify: `apps/server/src/agent/runtime/sessions.ts`
+- Modify: `apps/web/src/components/agent/conversation.vue`
+- Modify: `docs/productExperienceIssues.md`
+- Modify: `docs/superpowers/plans/guidedStudioPlan.md`
+
+- [x] **Step 1: 定位共享会话链路**
+
+确认创作首页把用户原始需求和内部工作流指令分别保存为 `displayPrompt` 与 `prompt`，但请求只提交内部指令；Server 因此把内部指令写入会话。历史恢复后，普通导演助手又逐项渲染每个推理段和工具调用，TDesign 默认样式把回到底部按钮绝对定位在消息区中间。
+
+- [x] **Step 2: 分离模型输入与用户展示内容**
+
+Agent 接口接收长度受限的 `displayPrompt`。完整 `prompt` 继续用于模型执行，只有技能指令的首条用户记录使用 `displayPrompt` 生成可见消息和会话名；普通消息与附件消息不接受替代显示内容。已有自动工作流会话在读取时提取“用户的创作需求”，不改写原始 JSONL 或模型上下文。
+
+- [x] **Step 3: 收敛导演助手状态**
+
+共享对话组件在 `guided` 模式只显示一条实时整理状态，并按错误、运行、中断、成功的优先级汇总同一回复的工具结果；完成后的多段思考不再进入普通用户界面。`advanced` 模式继续展示完整思考与工具明细。回到底部按钮只在导演助手中固定到消息区右下角。
+
+- [x] **Step 4: 执行本地验证**
+
+Server、Web 类型检查与生产构建通过。账号 `18800001002` 的项目 `670029b6-5a4f-408b-a606-1fe12ead2c2f` 通过会话接口与 Codex 浏览器复验：用户消息仅显示“治愈萌宠：橘猫每天清晨叫醒独居老人，做成连续短剧”，无 `/skill:workflow` 和“已完成思考”，同一回复只显示一条“项目内容已更新”；Minifeel 高级画布仍显示完整思考明细，浏览器控制台无错误。本轮未调用文本、图片或视频模型，未消耗积分，未部署服务器。

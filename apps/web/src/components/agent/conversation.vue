@@ -1,5 +1,5 @@
 <template>
-  <div class="agentConversation">
+  <div class="agentConversation" :class="{ guidedConversation: props.mode === 'guided' }">
     <chat-list class="messageList" :clearHistory="false">
       <chat-item v-if="!messages.length && !disabled" role="assistant" variant="text">
         <template #content>
@@ -28,14 +28,17 @@
           <template #content>
             <div class="messageContent">
               <div v-if="item.report && props.mode === 'advanced'" class="reportHeader"><icon-users-group :size="14" />{{ item.report.name }} 上报</div>
+              <div v-if="props.mode === 'guided' && item.streaming && hasThinking(item)" class="messageReasoning" role="status">
+                正在整理创作内容…
+              </div>
+              <div v-if="props.mode === 'guided' && guidedToolSummary(item)" class="guidedToolStatus" :data-status="guidedToolSummary(item)?.status" role="status">
+                {{ guidedToolSummary(item)?.text }}
+              </div>
               <template v-for="part in item.parts" :key="part.id">
-                <div v-if="part.type === 'thinking' && part.content" class="messageReasoning" role="status">
+                <div v-if="props.mode === 'advanced' && part.type === 'thinking' && part.content" class="messageReasoning" role="status">
                   {{ item.streaming ? "正在整理创作内容…" : `已完成思考${part.duration !== undefined ? ` · ${part.duration.toFixed(1)} 秒` : ""}` }}
                 </div>
                 <toolMessage v-else-if="part.type === 'tool' && props.mode === 'advanced'" :tool="part.tool" :projectId="projectId" @copy="copyMessage" />
-                <div v-else-if="part.type === 'tool'" class="guidedToolStatus" :data-status="part.tool.status" role="status">
-                  {{ guidedToolText(part.tool) }}
-                </div>
                 <messageMarkdown v-else-if="part.type === 'text' && part.content" :content="part.content" :streaming="!!item.streaming" :projectId="projectId" />
               </template>
               <attachmentList v-if="item.attachments?.length" :attachments="item.attachments" :projectId="projectId" />
@@ -272,6 +275,19 @@ function guidedToolText(tool: AgentToolCall) {
   return `项目更新失败：${detail}`;
 }
 
+function hasThinking(message: AgentMessage) {
+  return message.parts?.some(part => part.type === "thinking" && part.content) ?? false;
+}
+
+function guidedToolSummary(message: AgentMessage) {
+  const tools = message.parts?.flatMap(part => part.type === "tool" ? [part.tool] : []) ?? [];
+  const tool = tools.findLast(item => item.status === "error")
+    ?? tools.findLast(item => item.status === "running")
+    ?? tools.findLast(item => item.status === "interrupted")
+    ?? tools.findLast(item => item.status === "success");
+  return tool ? { status: tool.status, text: guidedToolText(tool) } : undefined;
+}
+
 defineExpose({ receiveEvent, fillPrompt });
 
 async function selectSkill(name: string) {
@@ -460,7 +476,7 @@ async function sendMessage(source?: AgentMessage, direct?: { prompt: string; dis
     const response = await fetch("/api/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-minifeel-workspace": "1" },
-      body: JSON.stringify({ prompt, attachments: attachments.map(({ name, path, mimeType }) => ({ name, path, mimeType })), projectId, providerId: model.providerId, modelId: model.modelId, thinkingLevel: reasoningEffort.value || undefined, sessionFile: props.sessionFile, resendFrom, canvas: canvasContext ? { id: canvasContext.id, tools: canvasContext.tools } : undefined }),
+      body: JSON.stringify({ prompt, displayPrompt: direct?.displayPrompt, attachments: attachments.map(({ name, path, mimeType }) => ({ name, path, mimeType })), projectId, providerId: model.providerId, modelId: model.modelId, thinkingLevel: reasoningEffort.value || undefined, sessionFile: props.sessionFile, resendFrom, canvas: canvasContext ? { id: canvasContext.id, tools: canvasContext.tools } : undefined }),
       signal: requestController.signal,
     });
     for await (const event of readAgentEvents(response, requestController.signal)) {
@@ -842,6 +858,13 @@ watch(() => !props.initialSession?.parentFile && !!workspaceStore.pendingAgentMe
         line-height: 1.6;
       }
     }
+  }
+
+  &.guidedConversation .messageList .t-chat__to-bottom {
+    right: 12px;
+    bottom: 12px;
+    left: auto;
+    margin-left: 0;
   }
 
   .compactionStatus {
