@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">任务中心</p>
         <h1>每一次生成，都有清楚记录</h1>
-        <p>查看生成进度、积分消费和失败退款。</p>
+        <p>查看生成状态、积分消费和失败退款。</p>
       </div>
       <el-button :icon="IconRefresh" :loading="loading" round @click="load">刷新</el-button>
     </header>
@@ -64,17 +64,17 @@
         <el-progress
           v-if="group.status === 'pending' || group.status === 'running'"
           class="taskProgress"
-          :percentage="group.progress"
+          :percentage="group.taskType === 'image' ? 100 : group.progress"
           :strokeWidth="5"
           :showText="false"
-          :indeterminate="group.status === 'pending'" />
+          :indeterminate="group.taskType === 'image' || group.status === 'pending'" />
         <p v-if="group.errorMessage" class="taskError" role="alert">{{ group.errorMessage }}</p>
       </article>
     </section>
     <div v-else class="emptyPanel">
       <icon-list-check :size="36" aria-hidden="true" />
       <h2>这里还没有任务</h2>
-      <p>开始创作后，文本、图片和视频的生成进度会显示在这里。</p>
+      <p>开始创作后，文本、图片和视频的生成状态会显示在这里。</p>
       <router-link class="secondaryAction" to="/app/projects/new">开始创作</router-link>
     </div>
   </div>

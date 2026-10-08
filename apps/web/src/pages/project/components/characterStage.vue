@@ -153,7 +153,7 @@ function handlePreviewVisibility(visible: boolean) {
 }
 
 function statusText(character: CreativeMediaCard) {
-  if (character.task?.status === "pending" || character.task?.status === "running") return `生成中 ${character.task.progress}%`;
+  if (character.task?.status === "pending" || character.task?.status === "running") return "正在生成";
   if (character.task?.status === "failed") return "生成失败";
   if (character.output) return character.confirmed ? "已锁定" : "已有预览";
   return character.confirmed ? "已锁定" : "待确认";

@@ -193,6 +193,7 @@ const selectedModelId = ref("");
 const runtimeRef = ref<InstanceType<typeof projectRuntime>>();
 const directorRef = ref<InstanceType<typeof directorPanel>>();
 let creativeRefreshVersion = 0;
+let creativeLoadingVersion = 0;
 let taskPollTimer: number | undefined;
 let taskPolling = false;
 const taskDiscoveries = ref<TaskDiscovery[]>([]);
@@ -294,12 +295,16 @@ function getCanvas(): CanvasContext {
   return canvas;
 }
 
-async function refreshCreativeView() {
+async function refreshCreativeView(options: { silent?: boolean } = {}) {
   const projectId = workspaceStore.project?.id;
   if (!projectId) return;
   const version = ++creativeRefreshVersion;
-  creativeLoading.value = true;
-  creativeError.value = "";
+  const silent = options.silent === true;
+  const loadingVersion = silent ? 0 : ++creativeLoadingVersion;
+  if (!silent) {
+    creativeLoading.value = true;
+    creativeError.value = "";
+  }
   try {
     await runtimeRef.value?.flushSave?.();
     let view = await readCreativeView(projectId, userAppStore.tasks.filter(task => task.projectId === projectId));
@@ -313,11 +318,12 @@ async function refreshCreativeView() {
     creativeView.value = view;
   } catch (error) {
     if (version === creativeRefreshVersion && projectId === workspaceStore.project?.id) {
+      if (silent) throw error;
       creativeView.value = undefined;
       creativeError.value = apiErrorMessage(error, "创作内容读取失败");
     }
   } finally {
-    if (version === creativeRefreshVersion && projectId === workspaceStore.project?.id) creativeLoading.value = false;
+    if (!silent && loadingVersion === creativeLoadingVersion && projectId === workspaceStore.project?.id) creativeLoading.value = false;
   }
 }
 
@@ -712,7 +718,7 @@ async function pollGenerationTasks() {
   taskPolling = true;
   try {
     await Promise.all([userAppStore.loadTasks(), userAppStore.loadAccount()]);
-    await refreshCreativeView();
+    await refreshCreativeView({ silent: true });
     const remaining: TaskDiscovery[] = [];
     for (const discovery of taskDiscoveries.value) {
       if (!discovery.taskId) {
