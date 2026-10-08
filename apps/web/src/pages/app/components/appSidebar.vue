@@ -29,14 +29,15 @@
         <span class="userAvatar">{{ userInitial }}</span>
         <span class="userIdentity" :title="identity">{{ identity }}</span>
       </div>
+      <el-button class="logoutButton" text :icon="IconLogout" @click="logout">退出登录</el-button>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { useRoute } from "vue-router";
-import { IconHome, IconListCheck, IconMovie, IconPhoto, IconUserCircle } from "@tabler/icons-vue";
+import { useRoute, useRouter } from "vue-router";
+import { IconHome, IconListCheck, IconLogout, IconMovie, IconPhoto, IconUserCircle } from "@tabler/icons-vue";
 import logoUrl from "@minifeel/assets/logo.svg";
 import { useAuthStore } from "@/stores/auth";
 import { useUserAppStore } from "@/stores/userApp";
@@ -44,6 +45,7 @@ import { useUserAppStore } from "@/stores/userApp";
 const authStore = useAuthStore();
 const userAppStore = useUserAppStore();
 const route = useRoute();
+const router = useRouter();
 const navItems = [
   { path: "/app", label: "创作首页", description: "灵感与短剧项目", icon: IconHome },
   { path: "/app/projects", label: "我的项目", description: "全部短剧项目", icon: IconMovie },
@@ -57,6 +59,11 @@ const userInitial = computed(() => identity.value.slice(0, 1).toUpperCase());
 function isActive(path: string) {
   if (path === "/app") return route.path === "/app" || route.path.startsWith("/app/projects/");
   return route.path === path;
+}
+
+async function logout() {
+  await authStore.logout();
+  await router.replace("/login");
 }
 </script>
 
@@ -210,6 +217,14 @@ function isActive(path: string) {
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+    }
+
+    .logoutButton {
+      justify-content: flex-start;
+      margin: 0;
+      color: var(--studioMuted);
+
+      &:hover, &:focus-visible { color: var(--studioText); }
     }
   }
 }
