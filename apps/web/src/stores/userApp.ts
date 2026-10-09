@@ -1,5 +1,7 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
+import { readVideoCapability } from "@minifeel/tools-scaffold/runtime";
+import type { VideoCapability } from "@minifeel/tools-scaffold/runtime";
 import api from "@/lib/api";
 
 type ApiResponse<T> = { code: number; data: T; message: string };
@@ -47,6 +49,8 @@ export type PublicModel = {
   capabilities: Record<string, unknown>;
   isDefault: boolean;
   pricing: Record<string, number>;
+  /** 只有显式声明并通过校验的视频能力才存在；未迁移的旧模型为 undefined。 */
+  videoCapability?: VideoCapability;
 };
 
 export type GenerationEstimate = {
@@ -86,7 +90,7 @@ export const useUserAppStore = defineStore("userApp", () => {
   async function loadModels(signal?: AbortSignal) {
     const { data } = await api.get<ApiResponse<PublicModel[]>>("/models/get", { signal });
     signal?.throwIfAborted();
-    models.value = data.data;
+    models.value = data.data.map(model => ({ ...model, videoCapability: readVideoCapability(model.capabilities) }));
     modelsLoaded.value = true;
   }
 

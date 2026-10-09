@@ -169,6 +169,7 @@ import connectionRepairDialog from "./components/connectionRepairDialog.vue";
 import storyboardStage from "./components/storyboardStage.vue";
 import filmStage from "./components/filmStage.vue";
 import generationConfirm from "./components/generationConfirm.vue";
+import { checkGuidedVideoCapability } from "@minifeel/tools-scaffold/runtime";
 import { creativeLabels, readConnectionGaps, readCreativeView, referenceKey, type CreativeMediaCard, type CreativeView } from "./creativeViewAdapter";
 
 type PreparedGeneration = {
@@ -236,11 +237,18 @@ const stageContents = {
   video: { number: 4, title: "制作可以剪辑的镜头片段", description: "选择确认过的分镜，生成镜头片段并查看任务进度。", icon: IconVideo, mediaType: "video" },
 } as const;
 const stageContent = computed(() => stageContents[activeStage.value]);
+// ACT: 普通创作的视频硬门槛：分镜图作首帧、可同时附加本镜所需参考图、支持 9:16 与至少 720p。
+const guidedVideoRequirement = computed(() => ({
+  requiredImageReferences: Math.max(1, ...(creativeView.value?.storyboard ?? []).map(shot => shot.assetReferences.length)),
+  ratio: "9:16",
+  minResolutionHeight: 720,
+}));
 const stageModels = computed<PublicModel[]>(() => {
   const mediaType = stageContent.value.mediaType;
-  // ACT: 旧 mode 只能表达互斥模式；组合能力契约落地前普通镜头制作不开放视频模型，之后在此按已验证能力过滤。
-  if (mediaType === "video") return [];
-  return userAppStore.models.filter(model => model.mediaType === mediaType);
+  const candidates = userAppStore.models.filter(model => model.mediaType === mediaType);
+  // ACT: 只开放通过组合能力准入校验的视频模型；旧 mode 不会被解释为更强能力，未迁移模型默认不通过。
+  if (mediaType !== "video") return candidates;
+  return candidates.filter(model => checkGuidedVideoCapability(model.videoCapability, guidedVideoRequirement.value).passed);
 });
 const projectTasks = computed(() => userAppStore.tasks.filter(task => task.projectId === workspaceStore.project?.id));
 const activeTasks = computed(() => projectTasks.value.filter(task => task.status === "pending" || task.status === "running"));
@@ -676,14 +684,40 @@ async function ensureFilmNode(shot: CreativeMediaCard) {
 
 async function configureVideoGeneration(nodeId: string, modelId: string, prompt: string, image: { path: string; mimeType: string }, sourceNodeId: string) {
   const canvas = getCanvas();
-  const available = readVideoNodeConfig(await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:getConfig", args: {} } }), false);
-  const model = available.models.find(item => item.providerId === "managed" && item.modelId === modelId);
+  const model = stageModels.value.find(item => item.id === modelId);
   if (!model) throw new Error("所选视频模型已不可用，请重新选择");
-  const mode = model.mode.find(item => Array.isArray(item) && item.some(value => value.startsWith("imageReference:") && Number(value.split(":")[1]) > 0))
-    ?? model.mode.find(item => item === "singleImage")
-    ?? model.mode.find(item => item === "endFrameOptional")
-    ?? model.mode.find(item => item === "startFrameOptional")
-    ?? model.mode.find(item => item === "text");
+  const available = readVideoNodeConfig(await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:getConfig", args: {} } }), false);
+  const nodeModel = available.models.find(item => item.providerId === "managed" && item.modelId === modelId);
+  if (!nodeModel) throw new Error("所选视频模型已不可用，请重新选择");
+  const reference = { path: image.path, mimeType: image.mimeType };
+  // ACT: 已声明可组合能力的模型直接用分镜图作首帧，不再退化成互斥的旧 mode。
+  if (model.videoCapability) {
+    await canvas.call({
+      name: "connectNodes",
+      args: { connections: [{ source: sourceNodeId, sourceHandle: "image", target: nodeId, targetHandle: "in" }] },
+    });
+    const configured = readVideoNodeConfig(await canvas.call({
+      name: "nodeTools",
+      args: { nodeId, name: "node:setConfig", args: { providerId: "managed", modelId } },
+    }));
+    await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:setPrompt", args: { prompt } } });
+    return {
+      providerId: "managed",
+      modelId,
+      prompt,
+      duration: configured.config.duration,
+      ratio: configured.config.ratio,
+      generateAudio: configured.config.generateAudio,
+      outputDirectory: `assets/${nodeId}`,
+      ...(configured.config.resolution ? { resolution: configured.config.resolution } : {}),
+      firstFrame: reference,
+    } satisfies Record<string, unknown>;
+  }
+  const mode = nodeModel.mode.find(item => Array.isArray(item) && item.some(value => value.startsWith("imageReference:") && Number(value.split(":")[1]) > 0))
+    ?? nodeModel.mode.find(item => item === "singleImage")
+    ?? nodeModel.mode.find(item => item === "endFrameOptional")
+    ?? nodeModel.mode.find(item => item === "startFrameOptional")
+    ?? nodeModel.mode.find(item => item === "text");
   if (!mode) throw new Error("当前视频模型需要两张参考图，导演工作台暂不支持，请更换模型");
   const useImage = mode !== "text";
   if (useImage) {
@@ -708,7 +742,6 @@ async function configureVideoGeneration(nodeId: string, modelId: string, prompt:
     outputDirectory: `assets/${nodeId}`,
   };
   if (configured.config.resolution) request.resolution = configured.config.resolution;
-  const reference = { path: image.path, mimeType: image.mimeType };
   if (useImage && ["startEndRequired", "endFrameOptional"].includes(String(configured.config.mode))) request.firstFrame = reference;
   else if (useImage && configured.config.mode === "startFrameOptional") request.lastFrame = reference;
   else if (useImage) request.images = [reference];
@@ -740,8 +773,9 @@ function readVideoNodeConfig(value: unknown, requireRunnable = true) {
   const matchingModes = Array.isArray(value.matchingModes)
     ? value.matchingModes.filter(item => typeof item === "string" || Array.isArray(item) && item.every(part => typeof part === "string")) as Array<string | string[]>
     : [];
+  const composite = value.composite === true;
   const modeMatches = mode !== undefined && matchingModes.some(item => JSON.stringify(item) === JSON.stringify(mode));
-  if (requireRunnable && (!modeMatches || typeof value.config.duration !== "number" || !value.config.duration || typeof value.config.ratio !== "string")) throw new Error("视频节点没有适用于当前分镜的配置");
+  if (requireRunnable && (!(modeMatches || composite) || typeof value.config.duration !== "number" || !value.config.duration || typeof value.config.ratio !== "string")) throw new Error("视频节点没有适用于当前分镜的配置");
   return {
     config: {
       duration: typeof value.config.duration === "number" ? value.config.duration : 0,
@@ -752,6 +786,7 @@ function readVideoNodeConfig(value: unknown, requireRunnable = true) {
     },
     models,
     matchingModes,
+    composite,
   };
 }
 

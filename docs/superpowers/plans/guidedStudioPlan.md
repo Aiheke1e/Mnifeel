@@ -59,7 +59,7 @@
 | 14. 镜头素材链与视频模型能力规划 | 已完成（规划） | 保存 Minifeel 素材调用链和 Toonflow 视频生成链；定义视频模型准入能力、当前核心边界与逐步实施门槛 | 对 Toonflow 上游提交 `72a895c` 完成源码级静态核验；文档差异检查通过 | 业务实现拆分到 Task 15—22，均须逐项确认 |
 | 15. 普通镜头制作安全基线 | 已完成（2026-10-09） | 停止批量删除视频节点入边；普通“镜头制作”不再展示旧视频模型并显示“暂无兼容模型”；估价、任务创建与媒体执行共享媒体 Schema 与模型能力校验并在扣分前失败；第四阶段改名为“镜头制作” | Web、Server 类型检查与生产构建通过；1280px 与 720px 浏览器验证第四阶段命名、无兼容模型提示与生成按钮禁用；HTTP 验证非法视频估价、非法视频创建与非法图片 Schema 均为 400，任务数、积分与流水不变 | 真实视频能力待 Task 17—19 建立契约并选定模型 |
 | 16. 资产语义与真实画布连接 | 已完成（2026-10-09） | `CreativeAssetType` 扩展为角色/场景/道具/风格；第二阶段 `characterStage.vue` 重命名为 `assetStage.vue` 并按四类分组；分镜页提供“本镜资产”选择，保存时用 `connectNodes` 携带 `data.minifeelRelationship=assetReference` 建立真实画布边并同步 `referenceOrder`；工作流 SKILL.md 补齐命名契约与“不无差别连接全部资产”约束；新增 `connectionRepairDialog.vue` 为旧项目提供可审查、可预选、幂等的补连流程 | 根目录类型检查 19 个包全部通过，生产构建通过；浏览器实测无连接旧项目缺口 5→2、分镜显示“当前引用：角色·陈爷爷”、重复应用无重复边；含高级自定义边旧项目高级画布 9 节点/4 条边与普通页 4 条引用一致；2048/1280/720px 无横向溢出、控制台无错误 | 本地样本无边时，高级画布自定义边保留与 `connectNodes` 幂等性由代码复核与边数量比对间接验证 |
-| 17. 可组合视频能力契约 | 未开始 | — | — | 依赖 Task 16，并须再次确认 |
+| 17. 可组合视频能力契约 | 已完成（2026-10-09） | 在 `tools-scaffold` 定义 `version=1` 的 `videoCapability` 与唯一解析/匹配规则；Server 按能力校验生成请求并在保存/启用前拒绝非法能力；管理员页显示“普通创作兼容/仅高级画布”及原因；视频节点新增首帧 + 图片参考组合路径；普通“镜头制作”按同一门槛过滤视频模型 | 20 个包类型检查通过；tools、Web、Server 生产构建通过；18 条能力样本 + 13 条服务端校验样本全部符合预期 | 组合路径暂不使用尾帧；未声明能力的旧模型仍不进普通创作，待 Task 19 选定模型 |
 | 18. 冻结镜头素材包与请求一致 | 未开始 | — | — | 依赖 Task 17，并须再次确认 |
 | 19. 合格图片生视频模型适配 | 待选模型 | — | — | 依赖 Task 18；需用户选择模型并授权最小真实调用 |
 | 20. 样片优先的镜头制作 | 未开始 | — | — | 依赖 Task 19，并须再次确认 |
@@ -1183,44 +1183,63 @@ Web、Server 类型检查与生产构建均通过。Codex 浏览器在 1280px �
 
 ### Task 17: 可组合视频能力契约
 
-**Status:** 未开始，依赖 Task 16，开始前需用户再次确认。本任务只建立公共能力协议，不接入新供应商、不调用付费模型。
+**Status:** 已完成（2026-10-09）。Step 1—5 全部完成：能力 Schema、解析与匹配规则落在 `packages/toolScaffold/src/runtime.ts`，Web、Server、视频节点与管理员页复用同一套语义；Server 在生成校验与模型保存两处都按能力判断；视频节点同时支持组合路径与旧 `mode`；普通“镜头制作”改为按已验证能力过滤视频模型。本任务只建立公共能力协议，没有接入新供应商，也没有调用付费模型。已使用中文 Conventional Commit 提交并推送 `origin/dev`，停止等待 Task 18 确认。
 
 **Files:**
 
-- Modify: `packages/tools/mediaGeneration/src/runtime.ts`
-- Modify: `packages/nodeScaffold/src/nodeAi.ts`
+- Modify: `packages/toolScaffold/src/runtime.ts`（`MediaModel` 增加 `videoCapability`；新增 `VideoCapability`、`parseVideoCapability`、`readVideoCapability`、`resolutionHeight`、`checkGuidedVideoCapability`）
 - Modify: `packages/nodes/videoGenerationNode/src/index.vue`
 - Modify: `packages/nodes/videoGenerationNode/src/components/generationSettings.vue`
-- Modify: `apps/server/src/utils/providers/types.ts`
 - Modify: `apps/server/src/utils/providers/index.ts`
 - Modify: `apps/server/src/utils/media/generation.ts`
-- Modify: `apps/server/src/routes/ai/media/models.ts`
-- Modify: `apps/server/src/routes/admin/models/save.ts`
-- Modify: `apps/web/src/pages/admin/models.vue`
 - Modify: `apps/web/src/stores/userApp.ts`
+- Modify: `apps/web/src/pages/admin/models.vue`
+- Modify: `apps/web/src/pages/project/index.vue`
 - Modify: `docs/superpowers/plans/guidedStudioPlan.md`
 
 **Outcome:** 视频能力从一个互斥的 `mode` 字段扩展为可组合、可验证的能力描述。普通工作台可以准确判断一个模型能否在同一次请求中使用分镜首帧和多张资产参考；旧 `mode` 继续供既有高级画布读取，但不会被自动解释为更强能力。
 
-- [ ] **Step 1: 定义版本化能力 Schema**
+- [x] **Step 1: 定义版本化能力 Schema**
 
 新增明确字段描述首帧、尾帧、图片参考上限、是否可把帧控制和图片参考同时使用、支持时长、画幅和分辨率。当前版本不加入音频参考、口型或 AI 审片字段。未知字段不作为已验证能力，旧模型默认不满足普通创作准入。
 
-- [ ] **Step 2: 建立唯一能力解析与匹配规则**
+实际改动：能力类型与 Schema 落在 `packages/toolScaffold/src/runtime.ts`（唯一被 Web、Server、节点 scaffold 与媒体生成工具共同依赖的包），`MediaModel` 增加可选 `videoCapability`。`videoCapabilitySchema` 用 `z.strictObject` 校验 `version: z.literal(1)`、`firstFrame`、`lastFrame`、`maxImageReferences`（0—64 整数）、`combineFrameWithReferences`、`durations`、`ratios`、`resolutions`，包含未知字段或版本号不符时一律解析失败。`packages/tools/mediaGeneration/src/runtime.ts` 不再重复定义这套结构，避免两份 Schema 漂移。
+
+验证：`parseVideoCapability` 对上限越界（`maxImageReferences: 100`）、版本号不符（`version: 2`）和含未知字段（`extra: true`）的样本都返回 `undefined`，调用方按「未声明能力」处理。
+
+- [x] **Step 2: 建立唯一能力解析与匹配规则**
 
 Web、Server、图片/视频节点和管理员页面复用同一套类型与匹配语义。普通创作的硬门槛为：分镜图可作为首帧、至少可附加当前镜头所需的多张图片参考、两者能同时生效，并满足 `9:16`、至少 `720p` 和目标时长。
 
-- [ ] **Step 3: 兼容高级画布旧模式**
+实际改动：`checkGuidedVideoCapability(capability, requirement)` 是唯一匹配规则，返回 `{ passed, reasons }`；`resolutionHeight` 把 `720p`/`1080p` 视为纵向像素，把 `1K`/`2K` 视为横向像素并按画幅折算纵向像素，无法识别的格式返回 `undefined` 并按「分辨率格式无法识别」处理。`apps/web/src/stores/userApp.ts` 在 `loadModels` 时用 `readVideoCapability` 解析一次并挂到 `PublicModel.videoCapability`；`apps/web/src/pages/project/index.vue` 的 `guidedVideoRequirement` 取当前项目分镜所需参考图数量的最大值（至少 1），`stageModels` 对视频模型统一走同一道门槛过滤，替换了 Task 15 留下的 `if (mediaType === "video") return []` 占位。
+
+验证：18 条本地样本全部符合预期——组合能力通过；`combineFrameWithReferences: false` 的单图模型以「首帧与图片参考不能同时使用」被拒；纯文本模型同时命中首帧、参考数与组合三项原因；画幅 `1:1`、时长 15 秒、仅 `480p` 分别给出对应原因；`1K` 在 `9:16` 下折算为 1820，`2K` 在 `16:9` 下折算为 1152，`高清` 返回 `undefined`。
+
+- [x] **Step 3: 兼容高级画布旧模式**
 
 现有 `text`、`singleImage`、首尾帧和 `imageReference:n` 模式仍可加载、编辑和运行。未迁移模型不会导致节点或画布打不开，也不会被静默提升为组合能力；Agnes 继续诚实声明 `text`。
 
-- [ ] **Step 4: 收紧管理员能力配置**
+实际改动：`apps/server/src/utils/media/generation.ts` 的 `validateMediaGenerationRequest` 先用 `readVideoCapability` 读取能力，缺失或非法时才回落到旧 `modes` + `videoModeMatches`，画幅/时长/分辨率列表也随之切换；`listMediaModels` 输出 `videoCapability`，并在没有旧映射表时按已验证能力合成一份 `durationResolutionMap`，让高级画布沿用同一套读取方式。视频节点新增 `composite` 分支：声明能力的模型不再读写 `mode`，第一张图片作首帧、其余作图片参考，`setConfig` 传入 `mode` 时直接报错；未声明能力的模型完全沿用旧路径，时长与分辨率也可从 `videoCapability` 读取。
+
+验证：13 条服务端样本全部符合预期——组合能力的首帧 + 2 张参考通过，超上限、未声明尾帧、不允许组合、不支持画幅/时长均被拦截；旧 `mode` 的首尾帧与 `imageReference:3` 正常通过，旧模型带首帧 + 参考被拒（未被静默提升）；能力声明非法（`version: 2`）时回落旧 `mode` 校验并按旧规则报错。
+
+- [x] **Step 4: 收紧管理员能力配置**
 
 管理员保存和启用模型前校验能力结构与数值上限，界面显示“普通创作兼容/仅高级画布”及原因。管理员可以配置模型，普通用户只能选择已启用且通过准入校验的模型，供应商与 API Key 仍不下发。
 
-- [ ] **Step 5: 本地验证、更新计划并提交**
+实际改动：`apps/server/src/utils/providers/index.ts` 的 `saveModel` 在 `capabilities.videoCapability` 存在但不通过 `videoCapabilitySchema` 时以 409 拒绝保存，错误信息说明需要 `version=1` 的对象且不含未知字段。`apps/web/src/pages/admin/models.vue` 新增“普通创作”列，用与前台相同的 `checkGuidedVideoCapability` 预览结果：`el-tag` 显示“普通创作兼容/仅高级画布”，`el-tooltip` 给出具体原因，非视频模型显示占位符；编辑弹窗内按当前 `capabilitiesText` 实时提示准入结果与原因。管理员保存路由与模型列表路由无需改动：前者复用 `saveModel`，后者复用 `listMediaModels`。
+
+验证：非法能力（含未知字段、上限越界、版本号不符）在保存前即被 409 拦截；管理员页对同一份能力 JSON 得到的准入结论与前台过滤结论来自同一函数，不存在两套判断。
+
+- [x] **Step 5: 本地验证、更新计划并提交**
 
 使用本地能力样本验证组合能力、单图、纯文本、非法上限和旧 `mode`；执行相关包、Web、Server 类型检查与构建。更新计划、检查差异、提交并推送后停止等待 Task 18 确认。
+
+实际改动：随 Step 1—4 一并提交 8 个源文件与本计划文档。过程中修复了本地依赖环境的两个问题：`node_modules/.bun` 隔离存储里部分包链接缺失（element-plus 的 `@popperjs/core` 等），以及提升目录的 `typescript` 指向 TS 7（其 `"."` 导出仅 `lib/version.cjs`，无 `sys`，导致 `vue/compiler-sfc` 无法解析 `defineProps` 的导入类型），已把相关链接补齐并改指 TS 6.0.3；`bun.lock` 与自动生成的 `components.d.ts` 最终无实质改动，已从提交中排除。
+
+验证：根目录类型检查 20 个包全部通过；`bun run build`（tools + Web + Server）生产构建全部通过，Web 产出 16301 个模块、无编译错误。18 条能力样本与 13 条服务端校验样本全部符合预期。已执行 `git diff --check` 与 `git status` 检查，随后使用中文 Conventional Commit 提交并推送 `origin/dev`，停止等待 Task 18 确认。
+
+已知限制：组合路径目前只使用「首帧 + 图片参考」，即使模型声明了 `lastFrame` 也不会自动把第二张图当尾帧，尾帧能力留到后续任务按明确交互接入；当前没有模型声明新能力，因此普通“镜头制作”的视频列表仍为空，行为与 Task 15 一致，待 Task 19 选定模型后才有真实模型通过准入。
 
 ---
 

@@ -31,8 +31,8 @@
           v-model="refList"
           @preview="setReferencePreview"
           @remove="removeReference" />
-        <div v-if="frameMode" class="referenceHint">
-          {{ selectedMode === "startFrameOptional" ? "仅一张图片时作为尾帧；两张图片按顺序作为首帧、尾帧" : "图片引用按顺序作为首帧、尾帧" }}
+        <div v-if="frameMode || composite" class="referenceHint">
+          {{ composite ? "第一张图片作为首帧，其余作为图片参考" : selectedMode === "startFrameOptional" ? "仅一张图片时作为尾帧；两张图片按顺序作为首帧、尾帧" : "图片引用按顺序作为首帧、尾帧" }}
         </div>
         <promptInput v-model="data.promptModel" v-model:text="data.prompt" :references="referenceMentions" />
         <div class="promptFooter">
@@ -128,6 +128,9 @@ const ratioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];
 const selectedModel = computed(() => models.value.find((item) => JSON.stringify([item.providerId, item.modelId]) === data.value.model));
 const selectedMode = computed(() => selectedModel.value?.mode?.find((item) => JSON.stringify(item) === data.value.mode) as NodeVideoRequest["mode"]);
 const frameMode = computed(() => ["startEndRequired", "endFrameOptional", "startFrameOptional"].includes(String(selectedMode.value)));
+// ACT: 声明了可组合能力的模型不使用互斥的旧 mode，首帧与图片参考可同时生效。
+const capability = computed(() => selectedModel.value?.videoCapability);
+const composite = computed(() => capability.value !== undefined);
 const mediaCounts = computed(() => ({
   image: refList.value.filter((item) => item.dataType === "IMAGE").length,
   video: refList.value.filter((item) => item.dataType === "VIDEO").length,
@@ -150,13 +153,18 @@ function getMatchingModes(choice?: NodeMediaModel) {
 }
 
 function getDurations(choice: NodeMediaModel) {
-  return [...new Set((choice.durationResolutionMap ?? []).flatMap((item) => item.duration))].sort((a, b) => a - b);
+  const mappings = choice.durationResolutionMap ?? [];
+  const durations = mappings.length ? mappings.flatMap((item) => item.duration) : (choice.videoCapability?.durations ?? []);
+  return [...new Set(durations)].sort((a, b) => a - b);
 }
 
 function getResolutions(choice: NodeMediaModel, duration?: number) {
   // ACT: 当前视频分辨率使用 p 单位；出现其他单位时再统一换算。
-  return [...new Set((choice.durationResolutionMap ?? []).filter((item) => item.duration.includes(duration!)).flatMap((item) => item.resolution))]
-    .sort((left, right) => (Number.parseFloat(left) || Infinity) - (Number.parseFloat(right) || Infinity));
+  const mappings = choice.durationResolutionMap ?? [];
+  const resolutions = mappings.length
+    ? mappings.filter((item) => item.duration.includes(duration!)).flatMap((item) => item.resolution)
+    : (choice.videoCapability?.resolutions ?? []);
+  return [...new Set(resolutions)].sort((left, right) => (Number.parseFloat(left) || Infinity) - (Number.parseFloat(right) || Infinity));
 }
 // ACT: 引用改变时只替换不适用的模式；普通媒体优先作为参考，避免自动变成首尾帧。
 watch([selectedModel, matchingModes, () => data.value.mode], ([choice, matches]) => {
@@ -248,22 +256,29 @@ async function startGeneration() {
   if (!generationPrompt.value) throw new Error("请输入生成提示词");
   if (refList.value.some(item => item.value === undefined)) throw new Error("引用节点暂无内容，请先补充引用内容");
   const images = refList.value.flatMap((item) => item.dataType === "IMAGE" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : []);
-  if (choice.mode?.length && !matchingModes.value.length) throw new Error("当前模型没有适合这些参考素材的生成模式，请更换模型或调整引用");
+  if (!composite.value && choice.mode?.length && !matchingModes.value.length) throw new Error("当前模型没有适合这些参考素材的生成模式，请更换模型或调整引用");
+  const [firstImage, ...restImages] = images;
+  const useFirstFrame = composite.value && capability.value?.firstFrame === true;
+  if (composite.value && (useFirstFrame ? restImages.length : images.length) > (capability.value?.maxImageReferences ?? 0)) {
+    throw new Error(`当前模型最多支持 ${capability.value?.maxImageReferences ?? 0} 张图片参考，请减少引用`);
+  }
   const workspace = files.getWorkspaceFiles();
   const controller = new AbortController();
   const input: Omit<NodeVideoRequest, "projectId"> = {
     providerId: choice.providerId,
     modelId: choice.modelId,
     prompt: generationPrompt.value,
-    mode: selectedMode.value,
+    mode: composite.value ? undefined : selectedMode.value,
     duration: data.value.duration,
     resolution: data.value.resolution || undefined,
     ratio: data.value.ratio,
     generateAudio: choice.audio === "optional" ? data.value.generateAudio : choice.audio,
     outputDirectory: `assets/${id}`,
-    images: frameMode.value ? undefined : images,
-    firstFrame: frameMode.value && (selectedMode.value !== "startFrameOptional" || images.length > 1) ? images[0] : undefined,
-    lastFrame: frameMode.value ? images[selectedMode.value === "startFrameOptional" && images.length === 1 ? 0 : 1] : undefined,
+    images: composite.value ? (useFirstFrame ? restImages : images) : (frameMode.value ? undefined : images),
+    firstFrame: composite.value
+      ? (useFirstFrame ? firstImage : undefined)
+      : (frameMode.value && (selectedMode.value !== "startFrameOptional" || images.length > 1) ? images[0] : undefined),
+    lastFrame: composite.value ? undefined : (frameMode.value ? images[selectedMode.value === "startFrameOptional" && images.length === 1 ? 0 : 1] : undefined),
     videos: refList.value.flatMap((item) => item.dataType === "VIDEO" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : []),
     audios: refList.value.flatMap((item) => item.dataType === "AUDIO" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : []),
   };
@@ -332,6 +347,8 @@ function getConfig() {
     models: models.value,
     ratios: ratioOptions,
     matchingModes: matchingModes.value,
+    capability: capability.value,
+    composite: composite.value,
   };
 }
 
@@ -374,6 +391,7 @@ nodeTools.register({
     const resolutions = getResolutions(choice, duration);
     if (args.resolution !== undefined && !resolutions.includes(args.resolution)) throw new Error(`当前时长不支持分辨率 ${args.resolution}，可选：${resolutions.join("、")}`);
     const resolution = args.resolution ?? (resolutions.includes(data.value.resolution) ? data.value.resolution : resolutions[0] ?? "");
+    if (args.mode !== undefined && choice.videoCapability) throw new Error("当前模型使用可组合能力，不需要选择生成模式");
     if (args.mode !== undefined && !getMatchingModes(choice).some((item) => JSON.stringify(item) === JSON.stringify(args.mode))) throw new Error("所选模式不受当前模型支持或不适用于当前引用，请根据模型能力及已连接素材选择");
     if (args.generateAudio !== undefined && choice.audio !== "optional" && args.generateAudio !== (choice.audio === true)) throw new Error("当前模型不支持切换声音，请查看 getConfig 返回的 audio 能力");
     data.value.model = JSON.stringify([choice.providerId, choice.modelId]);

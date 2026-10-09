@@ -1,6 +1,7 @@
 import { mkdir, readFile, realpath, stat, unlink } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { imageGenerationSchema, videoGenerationSchema } from "@minifeel/tool-media-generation/runtime";
+import { readVideoCapability } from "@minifeel/tools-scaffold/runtime";
 import type { GeneratedMedia, MediaGenerationRequest, MediaModel, MediaReference } from "@minifeel/tools-scaffold/runtime";
 import { z } from "zod";
 import { getRunnableModel, listPublicModels } from "@/utils/providers";
@@ -88,7 +89,9 @@ export function validateMediaGenerationRequest(
   if (request.providerId !== "managed") invalid("所选媒体模型与供应商不匹配");
   if (request.modelId !== expectedModelId) invalid("媒体请求中的模型与任务模型不匹配");
 
-  const ratios = imageOptions(capabilities.ratios, /^[1-9]\d{0,3}:[1-9]\d{0,3}$/) ?? [];
+  // ACT: 新能力描述优先；它缺失时才回落到旧 mode，旧模型因此不会被静默提升为组合能力。
+  const capability = mediaType === "video" ? readVideoCapability(capabilities) : undefined;
+  const ratios = imageOptions(capability?.ratios ?? capabilities.ratios, /^[1-9]\d{0,3}:[1-9]\d{0,3}$/) ?? [];
   if (request.ratio && ratios.length && !ratios.includes(request.ratio)) invalid(`当前模型不支持画幅 ${request.ratio}`);
   if (mediaType === "image") {
     const sizes = imageOptions(capabilities.sizes, /^[^\u0000-\u001f\u007f]+$/) ?? [];
@@ -103,28 +106,37 @@ export function validateMediaGenerationRequest(
     return request;
   }
 
-  const modes = videoModesSchema.safeParse(capabilities.modes);
-  if (!modes.success) invalid("视频模型的生成模式配置无效", 409);
-  if (request.mode !== undefined && !modes.data.some(mode => sameMode(mode, request.mode))) {
-    invalid("当前模型不支持所选视频生成模式");
-  }
-  const matchingModes = request.mode === undefined ? modes.data : [request.mode];
-  if (!matchingModes.some(mode => videoModeMatches(mode, request))) {
-    invalid("当前视频模型不支持这些参考素材的组合");
+  if (capability) {
+    const imageCount = request.images?.length ?? 0;
+    const hasFrame = request.firstFrame !== undefined || request.lastFrame !== undefined;
+    if (request.firstFrame !== undefined && !capability.firstFrame) invalid("当前视频模型不支持首帧");
+    if (request.lastFrame !== undefined && !capability.lastFrame) invalid("当前视频模型不支持尾帧");
+    if (imageCount > capability.maxImageReferences) invalid(`当前模型最多支持 ${capability.maxImageReferences} 张图片参考`);
+    if (hasFrame && imageCount && !capability.combineFrameWithReferences) invalid("当前视频模型不能同时使用帧控制与图片参考");
+  } else {
+    const modes = videoModesSchema.safeParse(capabilities.modes);
+    if (!modes.success) invalid("视频模型的生成模式配置无效", 409);
+    if (request.mode !== undefined && !modes.data.some(mode => sameMode(mode, request.mode))) {
+      invalid("当前模型不支持所选视频生成模式");
+    }
+    const matchingModes = request.mode === undefined ? modes.data : [request.mode];
+    if (!matchingModes.some(mode => videoModeMatches(mode, request))) {
+      invalid("当前视频模型不支持这些参考素材的组合");
+    }
   }
   if (request.generateAudio === true && capabilities.audio !== true && capabilities.audio !== "optional") {
     invalid("当前视频模型不支持生成音频");
   }
 
-  const durations = numberOptions(capabilities.durations);
+  const durations = capability ? capability.durations : numberOptions(capabilities.durations);
   if (request.duration !== undefined && durations.length && !durations.includes(request.duration)) {
     invalid(`当前模型不支持视频时长 ${request.duration}`);
   }
-  const resolutions = imageOptions(capabilities.resolutions, /^[^\u0000-\u001f\u007f]+$/) ?? [];
+  const resolutions = capability ? capability.resolutions : (imageOptions(capabilities.resolutions, /^[^\u0000-\u001f\u007f]+$/) ?? []);
   if (request.resolution && resolutions.length && !resolutions.includes(request.resolution)) {
     invalid(`当前模型不支持视频分辨率 ${request.resolution}`);
   }
-  const mappings = durationResolutionOptions(capabilities.durationResolutionMap);
+  const mappings = capability ? [] : durationResolutionOptions(capabilities.durationResolutionMap);
   if (mappings.length && request.duration !== undefined) {
     const durationMappings = mappings.filter(item => item.duration.includes(request.duration!));
     if (!durationMappings.length) invalid(`当前模型不支持视频时长 ${request.duration}`);
@@ -142,6 +154,8 @@ export async function listMediaModels(): Promise<MediaModel[]> {
   return models.flatMap(model => {
     if (model.mediaType !== "image" && model.mediaType !== "video") return [];
     const capabilities = model.capabilities ?? {};
+    // ACT: 新能力没有旧的时长分辨率映射表，按已验证能力合成一份，让高级画布沿用同一套读取方式。
+    const videoCapability = model.mediaType === "video" ? readVideoCapability(capabilities) : undefined;
     return [{
       providerId: "managed",
       providerLabel: "平台模型",
@@ -149,7 +163,10 @@ export async function listMediaModels(): Promise<MediaModel[]> {
       label: model.displayName,
       type: model.mediaType,
       mode: capabilities.modes,
-      durationResolutionMap: Array.isArray(capabilities.durationResolutionMap) ? capabilities.durationResolutionMap as MediaModel["durationResolutionMap"] : undefined,
+      videoCapability,
+      durationResolutionMap: Array.isArray(capabilities.durationResolutionMap)
+        ? capabilities.durationResolutionMap as MediaModel["durationResolutionMap"]
+        : videoCapability ? [{ duration: videoCapability.durations, resolution: videoCapability.resolutions }] : undefined,
       audio: typeof capabilities.audio === "boolean" || capabilities.audio === "optional" ? capabilities.audio : undefined,
       ...(model.mediaType === "image" ? {
         imageSizes: imageOptions(capabilities.sizes, /^[^\u0000-\u001f\u007f]+$/),

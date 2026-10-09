@@ -80,6 +80,98 @@ export interface MediaModel {
   durationResolutionMap?: { duration: number[]; resolution: string[] }[];
   audio?: boolean | "optional";
   voices?: { title: string; voice: string }[];
+  videoCapability?: VideoCapability;
+}
+
+/** 版本化视频能力描述：只有显式声明并通过校验的模型才被视为已验证能力。 */
+export interface VideoCapability {
+  version: 1;
+  firstFrame: boolean;
+  lastFrame: boolean;
+  maxImageReferences: number;
+  combineFrameWithReferences: boolean;
+  durations: number[];
+  ratios: string[];
+  resolutions: string[];
+}
+
+/** 普通创作对一次视频请求的最低要求。 */
+export interface GuidedVideoRequirement {
+  requiredImageReferences: number;
+  ratio: string;
+  duration?: number;
+  minResolutionHeight: number;
+}
+
+export interface GuidedVideoGateResult {
+  passed: boolean;
+  reasons: string[];
+}
+
+/** 视频能力描述的当前版本；版本不符或含未知字段时不作为已验证能力。 */
+export const videoCapabilityVersion = 1;
+
+export const videoCapabilitySchema = z.strictObject({
+  version: z.literal(videoCapabilityVersion),
+  firstFrame: z.boolean(),
+  lastFrame: z.boolean(),
+  maxImageReferences: z.number().int().min(0).max(64),
+  combineFrameWithReferences: z.boolean(),
+  durations: z.array(z.number().finite().positive().max(3600)).min(1).max(64),
+  ratios: z.array(z.string().regex(/^[1-9]\d{0,3}:[1-9]\d{0,3}$/)).min(1).max(32),
+  resolutions: z.array(z.string().trim().min(1).max(64)).min(1).max(32),
+});
+
+/** 解析视频能力描述；缺失或不合格时返回 undefined，旧模型因此默认不满足普通创作准入。 */
+export function parseVideoCapability(value: unknown): VideoCapability | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const parsed = videoCapabilitySchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+export function readVideoCapability(capabilities: Record<string, unknown>) {
+  return parseVideoCapability(capabilities.videoCapability);
+}
+
+/**
+ * 把 720p、1080p 这类纵向标记和 1K、2K 这类横向标记换算成纵向像素数。
+ * 无法识别时返回 undefined，调用方应视为未验证的分辨率。
+ */
+export function resolutionHeight(value: string, ratioWidth = 9, ratioHeight = 16) {
+  const match = /^(\d+(?:\.\d+)?)\s*(p|k)$/i.exec(value.trim());
+  if (!match || !ratioWidth || !ratioHeight) return undefined;
+  const size = Number.parseFloat(match[1]!);
+  if (!Number.isFinite(size) || size <= 0) return undefined;
+  // ACT: K 表示横向像素，按画幅换算纵向像素；P 直接表示纵向像素。
+  return match[2]!.toLowerCase() === "p" ? size : (size * 1024 * ratioHeight) / ratioWidth;
+}
+
+/** 唯一的能力匹配规则：普通工作台用它判断一个模型能否在同一次请求里使用首帧和多张图片参考。 */
+export function checkGuidedVideoCapability(
+  capability: VideoCapability | undefined,
+  requirement: GuidedVideoRequirement,
+): GuidedVideoGateResult {
+  if (!capability) return { passed: false, reasons: ["模型尚未声明可组合的视频能力"] };
+  const reasons: string[] = [];
+  if (!capability.firstFrame) reasons.push("分镜图不能作为首帧");
+  if (capability.maxImageReferences < requirement.requiredImageReferences) {
+    reasons.push(`最多只能附加 ${capability.maxImageReferences} 张图片参考，当前镜头需要 ${requirement.requiredImageReferences} 张`);
+  }
+  if (requirement.requiredImageReferences > 0 && !capability.combineFrameWithReferences) reasons.push("首帧与图片参考不能同时使用");
+  if (!capability.ratios.includes(requirement.ratio)) reasons.push(`不支持画幅 ${requirement.ratio}`);
+  if (requirement.duration === undefined) {
+    if (!capability.durations.length) reasons.push("未声明支持的时长");
+  } else if (!capability.durations.includes(requirement.duration)) {
+    reasons.push(`不支持时长 ${requirement.duration} 秒`);
+  }
+  const [width = 9, height = 16] = requirement.ratio.split(":").map(Number);
+  const heights = capability.resolutions.flatMap(resolution => {
+    const value = resolutionHeight(resolution, width, height);
+    return value === undefined ? [] : [value];
+  });
+  if (!heights.length) reasons.push("分辨率格式无法识别");
+  else if (Math.max(...heights) < requirement.minResolutionHeight) reasons.push(`最高分辨率不足 ${requirement.minResolutionHeight}p`);
+  return { passed: !reasons.length, reasons };
 }
 
 export interface MediaReference {

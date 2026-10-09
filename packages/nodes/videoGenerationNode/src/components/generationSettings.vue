@@ -8,6 +8,7 @@
       </el-button>
     </template>
     <div class="generationSettings nodrag nopan nowheel" @pointerdown.stop @mousedown.stop @dblclick.stop @keydown.stop @wheel.stop>
+      <div v-if="capability" class="capabilityHint">首帧与图片参考{{ capability.combineFrameWithReferences ? "可同时使用" : "不能同时使用" }}，最多 {{ capability.maxImageReferences }} 张图片参考</div>
       <div v-if="modes.length" class="sectionLabel">生成模式</div>
       <el-select v-if="modes.length" v-model="mode" :disabled="disabled" :teleported="false" aria-label="视频生成模式">
         <el-option v-for="item in modes" :key="item.value" :value="item.value" :label="item.label" />
@@ -62,6 +63,7 @@ const modes = computed(() => (props.model?.mode ?? []).map(item => ({
   value: JSON.stringify(item),
   label: Array.isArray(item) ? "混合参考" : modeLabels[item] ?? item,
 })));
+const capability = computed(() => props.model?.videoCapability);
 const mappings = computed(() => props.model?.durationResolutionMap ?? []);
 const durations = computed(() => [...new Set(mappings.value.flatMap(item => item.duration))].sort((a, b) => a - b));
 const resolutions = computed(() => resolutionsFor(duration.value));
@@ -98,6 +100,12 @@ function ratioStyle(value: string) {
     color: var(--el-text-color-secondary);
     font-size: 12px;
     font-weight: 500;
+  }
+
+  .capabilityHint {
+    margin-bottom: 12px;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
   }
 
   > .el-select { margin-bottom: 14px; }

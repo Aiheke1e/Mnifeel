@@ -6,6 +6,12 @@
       <el-table-column label="模型" minWidth="210"><template #default="scope"><strong>{{ scope.row.displayName }}</strong><small>{{ scope.row.upstreamModelId }}</small></template></el-table-column>
       <el-table-column prop="providerDisplayName" label="供应商" width="150" /><el-table-column label="类型" width="90"><template #default="scope"><el-tag>{{ mediaText(scope.row.mediaType) }}</el-tag></template></el-table-column>
       <el-table-column label="状态" width="130"><template #default="scope"><el-tag :type="scope.row.enabled ? 'success' : 'info'">{{ scope.row.enabled ? "已启用" : "未启用" }}</el-tag><el-tag v-if="scope.row.isDefault" class="defaultTag">默认</el-tag></template></el-table-column>
+      <el-table-column label="普通创作" width="150"><template #default="scope">
+        <el-tooltip v-if="scope.row.mediaType === 'video'" :content="guidedText(scope.row.id)" placement="top" :disabled="!guidedReasons(scope.row.id).length">
+          <el-tag :type="guidedPassed(scope.row.id) ? 'success' : 'info'">{{ guidedPassed(scope.row.id) ? "普通创作兼容" : "仅高级画布" }}</el-tag>
+        </el-tooltip>
+        <span v-else class="muted">—</span>
+      </template></el-table-column>
       <el-table-column label="计价" minWidth="230"><template #default="scope">{{ pricingText(scope.row) }}</template></el-table-column>
       <el-table-column label="操作" width="100" fixed="right"><template #default="scope"><el-button size="small" @click="openEditor(scope.row)">编辑</el-button></template></el-table-column>
       <template #empty><el-empty description="暂无模型，请先到供应商页面同步" /></template>
@@ -20,6 +26,13 @@
           <div v-else class="pricingFields"><el-radio-group v-model="videoPricingMode"><el-radio-button value="perTask">每次任务</el-radio-button><el-radio-button value="perSecond">每秒</el-radio-button></el-radio-group><el-input-number v-model="videoPrice" :min="0" :max="1000000000" /></div>
         </el-form-item>
         <el-form-item label="能力参数（JSON）"><el-input v-model="capabilitiesText" type="textarea" :rows="6" /></el-form-item>
+        <el-alert
+          v-if="editingGuided"
+          class="capabilityHint"
+          :type="editingGuided.passed ? 'success' : 'warning'"
+          showIcon
+          :closable="false"
+          :title="editingGuided.passed ? '普通创作兼容：满足首帧、图片参考、画幅与分辨率门槛' : `仅高级画布：${editingGuided.reasons.join('；')}`" />
       </el-form>
       <template #footer><el-button @click="editorVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveModel">保存</el-button></template>
     </el-dialog>
@@ -30,14 +43,33 @@
 import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { IconRefresh } from "@tabler/icons-vue";
+import { checkGuidedVideoCapability, readVideoCapability } from "@minifeel/tools-scaffold/runtime";
 import api, { apiErrorMessage } from "@/lib/api";
 
+// ACT: 管理员页用与普通创作相同的硬门槛预览能力，避免配置与准入判断各写一套。
+const guidedRequirement = { requiredImageReferences: 1, ratio: "9:16", minResolutionHeight: 720 };
 type MediaType = "text" | "image" | "video";
 type Model = { id: string; upstreamModelId: string; displayName: string; providerDisplayName: string; mediaType: MediaType; enabled: boolean; isDefault: boolean; capabilities: Record<string, unknown>; pricing: Record<string, number> };
 type ApiResponse<T> = { data: T };
 const models = ref<Model[]>([]); const loading = ref(false); const saving = ref(false); const mediaFilter = ref<"all" | MediaType>("all"); const editorVisible = ref(false); const editing = ref<Model>(); const capabilitiesText = ref("{}"); const videoPricingMode = ref<"perTask" | "perSecond">("perTask"); const videoPrice = ref(0);
 const mediaOptions = [{ label: "全部", value: "all" }, { label: "文本", value: "text" }, { label: "图片", value: "image" }, { label: "视频", value: "video" }];
 const filteredModels = computed(() => mediaFilter.value === "all" ? models.value : models.value.filter(model => model.mediaType === mediaFilter.value));
+function guidedResult(capabilities: Record<string, unknown>) {
+  return checkGuidedVideoCapability(readVideoCapability(capabilities), guidedRequirement);
+}
+const guidedByModel = computed(() => new Map(models.value.map(model => [model.id, guidedResult(model.capabilities)])));
+const editingGuided = computed(() => {
+  if (!editing.value || editing.value.mediaType !== "video") return undefined;
+  let parsed: unknown;
+  try { parsed = JSON.parse(capabilitiesText.value); }
+  catch { return { passed: false, reasons: ["能力参数不是合法的 JSON"] }; }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { passed: false, reasons: ["能力参数必须是 JSON 对象"] };
+  return guidedResult(parsed as Record<string, unknown>);
+});
+function guidedOf(id: string) { return guidedByModel.value.get(id); }
+function guidedPassed(id: string) { return guidedOf(id)?.passed === true; }
+function guidedReasons(id: string) { return guidedOf(id)?.reasons ?? []; }
+function guidedText(id: string) { const reasons = guidedReasons(id); return reasons.length ? reasons.join("；") : "满足普通创作硬门槛"; }
 function mediaText(type: MediaType) { return { text: "文本", image: "图片", video: "视频" }[type]; }
 function pricingUnit(type: MediaType) { return { text: "积分 / 百万 token", image: "积分 / 张", video: "积分 / 次或秒" }[type]; }
 function pricingText(modelValue: unknown) { const model = modelValue as Model; if (model.mediaType === "text") return `输入 ${model.pricing.inputPerMillionTokens ?? 0} / 输出 ${model.pricing.outputPerMillionTokens ?? 0} 积分 / 百万 token`; if (model.mediaType === "image") return `${model.pricing.perImage ?? 0} 积分 / 张`; if ("perSecond" in model.pricing) return `${model.pricing.perSecond} 积分 / 秒`; return `${model.pricing.perTask ?? 0} 积分 / 次`; }
@@ -53,5 +85,6 @@ onMounted(loadModels);
   .filters { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
   .modelTable { border: 1px solid var(--el-border-color-lighter); border-radius: 12px; } .modelTable strong, .modelTable small { display: block; } .modelTable small { margin-top: 4px; } .defaultTag { margin-left: 5px; }
   .switches { display: flex; gap: 24px; margin-bottom: 20px; } .pricingFields { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; width: 100%; }
+  .muted { color: var(--el-text-color-placeholder); } .capabilityHint { margin-bottom: 18px; }
 }
 </style>

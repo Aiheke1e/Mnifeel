@@ -12,6 +12,7 @@ import deepSeek from "@/utils/providers/deepSeek";
 import agnes from "@/utils/providers/agnes";
 import bananaPro from "@/utils/providers/bananaPro";
 import { parsePricing } from "@/utils/billing/pricing";
+import { videoCapabilitySchema } from "@minifeel/tools-scaffold/runtime";
 
 export * from "@/utils/providers/redact";
 export type * from "@/utils/providers/types";
@@ -355,6 +356,10 @@ export async function saveModel(adminUserId: string, input: {
   const displayName = input.displayName.trim();
   if (!displayName) invalid("模型名称不能为空");
   const capabilities = redactSecrets(input.capabilities) as Record<string, unknown>;
+  // ACT: 能力结构不合法的模型不得保存或启用，未知字段一律不作为已验证能力。
+  if (capabilities.videoCapability !== undefined && !videoCapabilitySchema.safeParse(capabilities.videoCapability).success) {
+    invalid("视频能力配置无效：需为 version=1 的对象，包含首帧、尾帧、图片参考上限、组合开关、时长、画幅与分辨率，且不含未知字段", 409);
+  }
   const pricing = parsePricing(input.mediaType, input.pricing) as Record<string, number>;
   return getDatabase().begin(async transaction => {
     const rows = await transaction<(ModelRow & { connectionStatus: ConnectionStatus })[]>`
