@@ -203,6 +203,27 @@ export interface MediaGenerationRequest {
     | (`${"image" | "video" | "audio"}Reference:${number}`)[];
 }
 
+/** 引用在一次生成请求中承担的角色；顺序由节点的 referenceOrder 决定。 */
+export interface GenerationReference {
+  /** 引用键，由来源节点与输出端口决定。 */
+  key: string;
+  /** 引用素材类型，例如 IMAGE、VIDEO、AUDIO、STRING。 */
+  dataType: string;
+  /** 该引用在请求中充当首帧、尾帧还是普通参考。 */
+  role: "firstFrame" | "lastFrame" | "reference";
+  /** 工作区相对路径；文本引用没有文件。 */
+  path?: string;
+}
+
+/**
+ * 节点按真实入边构建出的唯一请求与其引用摘要。
+ * 估价、确认和执行都以此为准，普通工作台不再另写一套请求拼装规则。
+ */
+export interface NodeGenerationPlan {
+  request: Record<string, unknown>;
+  references: GenerationReference[];
+}
+
 export interface GeneratedMedia {
   path: string;
   mimeType: string;

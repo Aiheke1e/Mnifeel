@@ -133,6 +133,7 @@
       :modelName="pendingGeneration?.modelName ?? ''"
       :generationType="pendingGeneration?.generationType ?? '媒体内容'"
       :count="pendingGeneration?.items.length ?? 1"
+      :items="pendingGenerationItems"
       :estimatedCredits="pendingEstimatedCredits"
       :availableCredits="userAppStore.availableCredits"
       :loading="generationLoading"
@@ -169,15 +170,20 @@ import connectionRepairDialog from "./components/connectionRepairDialog.vue";
 import storyboardStage from "./components/storyboardStage.vue";
 import filmStage from "./components/filmStage.vue";
 import generationConfirm from "./components/generationConfirm.vue";
-import { checkGuidedVideoCapability } from "@minifeel/tools-scaffold/runtime";
+import { checkGuidedVideoCapability, type GenerationReference, type NodeGenerationPlan } from "@minifeel/tools-scaffold/runtime";
 import { creativeLabels, readConnectionGaps, readCreativeView, referenceKey, type CreativeMediaCard, type CreativeView } from "./creativeViewAdapter";
 
 type PreparedGeneration = {
   nodeId: string;
   modelId: string;
   taskType: "image" | "video";
+  /** 确认框展示用的镜头或资产名称。 */
+  label: string;
   request: Record<string, unknown>;
   estimate: GenerationEstimate;
+  /** 服务端返回的请求指纹；确认与执行都以此为准。 */
+  fingerprint: string;
+  references: GenerationReference[];
 };
 
 type PendingGeneration = {
@@ -262,6 +268,39 @@ const completedStageCount = computed(() => Object.values(stageStatuses.value).fi
 const generationBusy = computed(() => creativeBusy.value || taskDiscoveries.value.length > 0);
 const connectionGaps = computed(() => creativeView.value ? readConnectionGaps(creativeView.value) : []);
 const pendingEstimatedCredits = computed(() => pendingGeneration.value?.items.reduce((total, item) => total + item.estimate.estimatedCredits, 0) ?? 0);
+// ACT: 确认框按镜头逐条展示模型、镜头、引用资产与规格，用户确认的就是这一份内容。
+const pendingGenerationItems = computed(() => (pendingGeneration.value?.items ?? []).map(item => {
+  const request = item.request;
+  const parts = [
+    typeof request.duration === "number" ? `${request.duration}s` : "",
+    typeof request.resolution === "string" && request.resolution ? request.resolution : "",
+    typeof request.ratio === "string" && request.ratio ? request.ratio : "",
+    typeof request.size === "string" && request.size ? request.size : "",
+  ].filter(Boolean);
+  const assets = item.references.map(reference => {
+    const label = referenceLabel(reference.path);
+    if (!label) return undefined;
+    return reference.role === "firstFrame" ? `首帧·${label}` : reference.role === "lastFrame" ? `尾帧·${label}` : label;
+  }).filter((value): value is string => !!value);
+  return {
+    label: item.label,
+    spec: parts.join(" · ") || "默认规格",
+    assets: assets.length ? assets.join("、") : "无",
+    credits: item.estimate.estimatedCredits,
+  };
+}));
+
+function referenceLabel(path: string | undefined) {
+  if (!path) return undefined;
+  const nodeId = creativePathNodeId(path);
+  const card = [...(creativeView.value?.assets ?? []), ...(creativeView.value?.storyboard ?? [])].find(value => value.nodeId === nodeId);
+  return card?.draftLabel;
+}
+
+function creativePathNodeId(path: string) {
+  const match = /assets\/([^/]+)\//.exec(path);
+  return match?.[1];
+}
 
 function savedModelId(projectId: string) {
   try {
@@ -545,7 +584,6 @@ async function prepareAssetGeneration(nodeId: string) {
 
 async function prepareStoryboardGeneration(nodeId: string) {
   const shot = creativeView.value?.storyboard.find(item => item.nodeId === nodeId);
-  if (shot?.assetReferences.length) return void ElMessage.warning("镜头已关联资产，当前版本尚不能安全冻结引用并估价");
   if (shot) await prepareImageGenerations([shot], "分镜图片");
 }
 
@@ -553,7 +591,7 @@ async function prepareStoryboardBatch(nodeIds: string[]) {
   if (new Set(nodeIds).size !== nodeIds.length) return void ElMessage.error("批量分镜列表无效，请刷新后重试");
   const shots = nodeIds.flatMap(nodeId => {
     const shot = creativeView.value?.storyboard.find(item => item.nodeId === nodeId);
-    return shot && !shot.output && !shot.assetReferences.length && shot.prompt.trim() && shot.task?.status !== "pending" && shot.task?.status !== "running" ? [shot] : [];
+    return shot && !shot.output && shot.prompt.trim() && shot.task?.status !== "pending" && shot.task?.status !== "running" ? [shot] : [];
   });
   if (shots.length !== nodeIds.length) return void ElMessage.error("分镜内容已经变化，请确认保存后重试");
   if (shots.length) await prepareImageGenerations(shots, "分镜图片");
@@ -563,15 +601,24 @@ async function prepareImageGenerations(cards: CreativeMediaCard[], generationTyp
   const projectId = workspaceStore.project?.id;
   const model = userAppStore.models.find(item => item.id === selectedModelId.value && item.mediaType === "image");
   if (!projectId || !model || generationBusy.value) return;
-  if (cards.some(card => card.assetReferences.length)) return void ElMessage.warning("包含资产引用的分镜尚不能安全冻结输入并估价");
   creativeBusy.value = true;
   try {
     const items: PreparedGeneration[] = [];
     for (const card of cards) {
-      const request = await configureImageGeneration(card.nodeId, model.id, card.prompt);
-      const estimate = await userAppStore.estimateGeneration({ projectId, modelId: model.id, request });
+      const plan = await prepareImageNode(card.nodeId, model.id, card.prompt);
+      const estimate = await userAppStore.estimateGeneration({ projectId, modelId: model.id, request: plan.request });
       if (estimate.taskType !== "image") throw new Error("所选模型已不再是图片模型，请重新选择");
-      items.push({ nodeId: card.nodeId, modelId: model.id, taskType: "image", request, estimate });
+      if (!estimate.fingerprint) throw new Error("服务端未返回请求指纹，请稍后重试");
+      items.push({
+        nodeId: card.nodeId,
+        modelId: model.id,
+        taskType: "image",
+        label: card.draftLabel,
+        request: plan.request,
+        estimate,
+        fingerprint: estimate.fingerprint,
+        references: plan.references,
+      });
     }
     await userAppStore.loadAccount();
     pendingGeneration.value = { generationType, modelName: model.displayName, items };
@@ -584,25 +631,16 @@ async function prepareImageGenerations(cards: CreativeMediaCard[], generationTyp
   }
 }
 
-async function configureImageGeneration(nodeId: string, modelId: string, prompt: string) {
+// ACT: 请求由节点按真实入边构建，普通页只负责选择模型与提示词，不再另写一套拼装规则。
+async function prepareImageNode(nodeId: string, modelId: string, prompt: string) {
   const canvas = getCanvas();
   const available = readImageNodeConfig(await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:getConfig", args: {} } }));
   if (!available.models.some(model => model.providerId === "managed" && model.modelId === modelId)) {
     throw new Error("所选图片模型已不可用，请重新选择");
   }
-  const configured = readImageNodeConfig(await canvas.call({
-    name: "nodeTools",
-    args: { nodeId, name: "node:setConfig", args: { providerId: "managed", modelId } },
-  }));
-  const request: Record<string, unknown> = {
-    providerId: "managed",
-    modelId,
-    prompt,
-    outputDirectory: `assets/${nodeId}`,
-  };
-  if (configured.config.size) request.size = configured.config.size;
-  if (configured.config.ratio) request.ratio = configured.config.ratio;
-  return request;
+  await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:setConfig", args: { providerId: "managed", modelId } } });
+  await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:setPrompt", args: { prompt } } });
+  return readGenerationPlan(await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:prepareGeneration", args: {} } }));
 }
 
 async function reorderStoryboard(nodeId: string, direction: -1 | 1) {
@@ -642,21 +680,30 @@ async function prepareVideoGeneration(storyboardNodeId: string) {
   const projectId = workspaceStore.project?.id;
   const shot = creativeView.value?.storyboard.find(item => item.nodeId === storyboardNodeId);
   const model = stageModels.value.find(item => item.id === selectedModelId.value);
-  if (shot?.assetReferences.length) return void ElMessage.warning("镜头已关联资产，当前版本尚不能安全冻结引用并估价");
   if (!projectId || !shot || !shot.output || !shot.confirmed || !model || generationBusy.value) return;
   creativeBusy.value = true;
   try {
     const filmNodeId = await ensureFilmNode(shot);
-    const request = await configureVideoGeneration(filmNodeId, model.id, shot.prompt, shot.output, shot.nodeId);
+    const plan = await prepareVideoNode(filmNodeId, model.id, shot);
     const [estimate] = await Promise.all([
-      userAppStore.estimateGeneration({ projectId, modelId: model.id, request }),
+      userAppStore.estimateGeneration({ projectId, modelId: model.id, request: plan.request }),
       userAppStore.loadAccount(),
     ]);
     if (estimate.taskType !== "video") throw new Error("所选模型已不再是视频模型，请重新选择");
+    if (!estimate.fingerprint) throw new Error("服务端未返回请求指纹，请稍后重试");
     pendingGeneration.value = {
       generationType: "视频片段",
       modelName: model.displayName,
-      items: [{ nodeId: filmNodeId, modelId: model.id, taskType: "video", request, estimate }],
+      items: [{
+        nodeId: filmNodeId,
+        modelId: model.id,
+        taskType: "video",
+        label: shot.draftLabel,
+        request: plan.request,
+        estimate,
+        fingerprint: estimate.fingerprint,
+        references: plan.references,
+      }],
     };
     generationDialogVisible.value = true;
   } catch (error) {
@@ -665,6 +712,37 @@ async function prepareVideoGeneration(storyboardNodeId: string) {
   } finally {
     creativeBusy.value = false;
   }
+}
+
+/**
+ * 视频请求由节点按真实入边构建：分镜图作首帧，本镜资产按 referenceOrder 作图片参考。
+ * 普通页只负责连线、排序、选模型与提示词，不复制一份请求拼装。
+ */
+async function prepareVideoNode(nodeId: string, modelId: string, shot: CreativeMediaCard) {
+  const canvas = getCanvas();
+  const model = stageModels.value.find(item => item.id === modelId);
+  if (!model || !shot.output) throw new Error("所选视频模型已不可用，请重新选择");
+  const available = readVideoNodeConfig(await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:getConfig", args: {} } }), false);
+  const nodeModel = available.models.find(item => item.providerId === "managed" && item.modelId === modelId);
+  if (!nodeModel) throw new Error("所选视频模型已不可用，请重新选择");
+  await canvas.call({
+    name: "connectNodes",
+    args: { connections: [{ source: shot.nodeId, sourceHandle: "image", target: nodeId, targetHandle: "in" }] },
+  });
+  const film = creativeView.value?.films.find(item => item.nodeId === nodeId);
+  const assetKeys = shot.assetReferences.map(reference => reference.referenceKey);
+  if (film) {
+    // ACT: 复用分镜的补连逻辑，只新增缺失边、只移除普通页自己管理的边。
+    const plan = planShotAssetReferences(film, shot.assetReferences.map(reference => reference.nodeId));
+    await writeShotAssetReferences(film, plan);
+  }
+  await canvas.call({
+    name: "nodeTools",
+    args: { nodeId, name: "node:setReferenceOrder", args: { handleId: "in", referenceKeys: [referenceKey(shot.nodeId), ...assetKeys] } },
+  });
+  await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:setConfig", args: { providerId: "managed", modelId } } });
+  await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:setPrompt", args: { prompt: shot.prompt } } });
+  return readGenerationPlan(await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:prepareGeneration", args: {} } }));
 }
 
 async function ensureFilmNode(shot: CreativeMediaCard) {
@@ -680,72 +758,6 @@ async function ensureFilmNode(shot: CreativeMediaCard) {
   }
   await refreshCreativeView();
   return filmNodeId;
-}
-
-async function configureVideoGeneration(nodeId: string, modelId: string, prompt: string, image: { path: string; mimeType: string }, sourceNodeId: string) {
-  const canvas = getCanvas();
-  const model = stageModels.value.find(item => item.id === modelId);
-  if (!model) throw new Error("所选视频模型已不可用，请重新选择");
-  const available = readVideoNodeConfig(await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:getConfig", args: {} } }), false);
-  const nodeModel = available.models.find(item => item.providerId === "managed" && item.modelId === modelId);
-  if (!nodeModel) throw new Error("所选视频模型已不可用，请重新选择");
-  const reference = { path: image.path, mimeType: image.mimeType };
-  // ACT: 已声明可组合能力的模型直接用分镜图作首帧，不再退化成互斥的旧 mode。
-  if (model.videoCapability) {
-    await canvas.call({
-      name: "connectNodes",
-      args: { connections: [{ source: sourceNodeId, sourceHandle: "image", target: nodeId, targetHandle: "in" }] },
-    });
-    const configured = readVideoNodeConfig(await canvas.call({
-      name: "nodeTools",
-      args: { nodeId, name: "node:setConfig", args: { providerId: "managed", modelId } },
-    }));
-    await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:setPrompt", args: { prompt } } });
-    return {
-      providerId: "managed",
-      modelId,
-      prompt,
-      duration: configured.config.duration,
-      ratio: configured.config.ratio,
-      generateAudio: configured.config.generateAudio,
-      outputDirectory: `assets/${nodeId}`,
-      ...(configured.config.resolution ? { resolution: configured.config.resolution } : {}),
-      firstFrame: reference,
-    } satisfies Record<string, unknown>;
-  }
-  const mode = nodeModel.mode.find(item => Array.isArray(item) && item.some(value => value.startsWith("imageReference:") && Number(value.split(":")[1]) > 0))
-    ?? nodeModel.mode.find(item => item === "singleImage")
-    ?? nodeModel.mode.find(item => item === "endFrameOptional")
-    ?? nodeModel.mode.find(item => item === "startFrameOptional")
-    ?? nodeModel.mode.find(item => item === "text");
-  if (!mode) throw new Error("当前视频模型需要两张参考图，导演工作台暂不支持，请更换模型");
-  const useImage = mode !== "text";
-  if (useImage) {
-    await canvas.call({
-      name: "connectNodes",
-      args: { connections: [{ source: sourceNodeId, sourceHandle: "image", target: nodeId, targetHandle: "in" }] },
-    });
-  }
-  const configured = readVideoNodeConfig(await canvas.call({
-    name: "nodeTools",
-    args: { nodeId, name: "node:setConfig", args: { providerId: "managed", modelId, mode } },
-  }));
-  await canvas.call({ name: "nodeTools", args: { nodeId, name: "node:setPrompt", args: { prompt } } });
-  const request: Record<string, unknown> = {
-    providerId: "managed",
-    modelId,
-    prompt,
-    mode: configured.config.mode,
-    duration: configured.config.duration,
-    ratio: configured.config.ratio,
-    generateAudio: configured.config.generateAudio,
-    outputDirectory: `assets/${nodeId}`,
-  };
-  if (configured.config.resolution) request.resolution = configured.config.resolution;
-  if (useImage && ["startEndRequired", "endFrameOptional"].includes(String(configured.config.mode))) request.firstFrame = reference;
-  else if (useImage && configured.config.mode === "startFrameOptional") request.lastFrame = reference;
-  else if (useImage) request.images = [reference];
-  return request;
 }
 
 function readImageNodeConfig(value: unknown) {
@@ -790,6 +802,17 @@ function readVideoNodeConfig(value: unknown, requireRunnable = true) {
   };
 }
 
+// ACT: 节点返回的准备结果只认 { request, references } 两个字段，避免普通页误用节点内部字段。
+function readGenerationPlan(value: unknown): NodeGenerationPlan {
+  if (!isRecord(value) || !isRecord(value.request) || !Array.isArray(value.references)) throw new Error("生成请求读取失败，请稍后重试");
+  const references = value.references.map(item => {
+    if (!isRecord(item) || typeof item.key !== "string" || typeof item.dataType !== "string") throw new Error("生成请求读取失败，请稍后重试");
+    const role: GenerationReference["role"] = item.role === "firstFrame" || item.role === "lastFrame" ? item.role : "reference";
+    return { key: item.key, dataType: item.dataType, role, ...(typeof item.path === "string" ? { path: item.path } : {}) };
+  });
+  return { request: value.request, references };
+}
+
 async function confirmGeneration() {
   const projectId = workspaceStore.project?.id;
   const pending = pendingGeneration.value;
@@ -799,15 +822,19 @@ async function confirmGeneration() {
   try {
     const items: PreparedGeneration[] = [];
     for (const item of pending.items) {
-      const request = await reconfigureGeneration(item);
-      const estimate = await userAppStore.estimateGeneration({ projectId, modelId: item.modelId, request });
+      const plan = await reprepareGeneration(item);
+      const estimate = await userAppStore.estimateGeneration({ projectId, modelId: item.modelId, request: plan.request });
       if (estimate.taskType !== item.taskType) throw new Error("模型类型已经变化，请重新选择");
-      items.push({ ...item, request, estimate });
+      if (!estimate.fingerprint) throw new Error("服务端未返回请求指纹，请稍后重试");
+      items.push({ ...item, request: plan.request, references: plan.references, estimate, fingerprint: estimate.fingerprint });
     }
     await userAppStore.loadAccount();
-    if (JSON.stringify(items.map(item => ({ request: item.request, credits: item.estimate.estimatedCredits }))) !== JSON.stringify(pending.items.map(item => ({ request: item.request, credits: item.estimate.estimatedCredits })))) {
+    // ACT: 指纹或积分任何一项变化都回到确认态，用户不重新确认就不能扣分。
+    const changed = items.some((item, index) => item.fingerprint !== pending.items[index]?.fingerprint
+      || item.estimate.estimatedCredits !== pending.items[index]?.estimate.estimatedCredits);
+    if (changed) {
       pendingGeneration.value = { ...pending, items };
-      ElMessage.warning("模型配置或估价已更新，请重新确认");
+      ElMessage.warning("镜头素材、模型或估价已经变化，请重新确认");
       return;
     }
     const totalCredits = items.reduce((total, item) => total + item.estimate.estimatedCredits, 0);
@@ -830,7 +857,14 @@ async function confirmGeneration() {
       };
       taskDiscoveries.value.push(discovery);
       try {
-        await getCanvas().call({ name: "nodeTools", args: { nodeId: item.nodeId, name: item.taskType === "video" ? "node:generateVideo" : "node:generateImage", args: {} } });
+        await getCanvas().call({
+          name: "nodeTools",
+          args: {
+            nodeId: item.nodeId,
+            name: item.taskType === "video" ? "node:generateVideo" : "node:generateImage",
+            args: { expectedFingerprint: item.fingerprint },
+          },
+        });
         startedCount++;
       } catch (error) {
         generationErrors[item.nodeId] = apiErrorMessage(error, `${item.taskType === "video" ? "视频" : "图片"}生成未能启动`);
@@ -854,18 +888,17 @@ async function confirmGeneration() {
   }
 }
 
-async function reconfigureGeneration(item: PreparedGeneration) {
+// ACT: 确认时按当前画布重新走一遍节点准备，得到新指纹；与待确认指纹不一致就要求重新确认。
+async function reprepareGeneration(item: PreparedGeneration): Promise<NodeGenerationPlan> {
   if (item.taskType === "image") {
     const card = [...(creativeView.value?.assets ?? []), ...(creativeView.value?.storyboard ?? [])].find(value => value.nodeId === item.nodeId);
     if (!card) throw new Error("待生成内容已经变化，请关闭确认框后重试");
-    if (card.assetReferences.length) throw new Error("分镜已关联资产，当前版本尚不能安全冻结输入并估价");
-    return configureImageGeneration(item.nodeId, item.modelId, card.prompt);
+    return prepareImageNode(item.nodeId, item.modelId, card.prompt);
   }
   const film = creativeView.value?.films.find(value => value.nodeId === item.nodeId);
   const shot = creativeView.value?.storyboard.find(value => value.order === film?.order);
   if (!shot?.output) throw new Error("分镜图片已经变化，请关闭确认框后重试");
-  if (shot.assetReferences.length) throw new Error("分镜已关联资产，当前版本尚不能安全冻结输入并估价");
-  return configureVideoGeneration(item.nodeId, item.modelId, shot.prompt, shot.output, shot.nodeId);
+  return prepareVideoNode(item.nodeId, item.modelId, shot);
 }
 
 function cancelGeneration() {

@@ -9,8 +9,10 @@ import { redactErrorMessage } from "@/utils/providers/redact";
 export default Router().post("/", validateFields({
   projectId: z.uuid(), modelId: z.uuid(), mediaType: z.enum(["image", "video"]),
   requestId: z.string().trim().min(8).max(150).optional(),
+  // ACT: 普通工作台传入已确认指纹；高级画布不传，行为与之前一致。
+  expectedFingerprint: z.string().trim().min(8).max(200).optional(),
 }), async (req, res) => {
-  const { projectId, mediaType, requestId, ...request } = req.body;
+  const { projectId, mediaType, requestId, expectedFingerprint, ...request } = req.body;
   const parsed = (mediaType === "image" ? imageGenerationSchema : videoGenerationSchema).safeParse(request);
   if (!parsed.success) {
     res.status(400).json(error("参数错误", parsed.error.issues, 400));
@@ -27,6 +29,7 @@ export default Router().post("/", validateFields({
       modelId: parsed.data.modelId,
       request: parsed.data,
       idempotencyKey: requestId ? `media:${requestId}` : crypto.randomUUID(),
+      ...(typeof expectedFingerprint === "string" ? { expectedFingerprint } : {}),
     }, { external: true, expectedTaskType: mediaType });
     res.set({
       "Content-Type": "application/json; charset=utf-8",

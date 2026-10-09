@@ -82,7 +82,7 @@
 import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from "vue";
 import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElMessage, ElLoading } from "element-plus";
 import { IconCameraAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer } from "@tabler/icons-vue";
-import { groupNodeModels, nodeSkeleton, nodeTools, useNode, useNodeGeneration, useNodeReferences, z, type NodeMediaModel, type NodeVideoRequest, type NodeHandle } from "@minifeel/nodes-scaffold/runtime";
+import { groupNodeModels, nodeReferenceKey, nodeSkeleton, nodeTools, useNode, useNodeGeneration, useNodeReferences, z, type GenerationReference, type NodeMediaModel, type NodeVideoRequest, type NodeHandle } from "@minifeel/nodes-scaffold/runtime";
 import promptInput from "@minifeel/nodes-scaffold/promptInput";
 import videoPlayer from "@minifeel/nodes-scaffold/videoPlayer";
 import referenceItem from "@minifeel/nodes-scaffold/referenceItem";
@@ -247,11 +247,9 @@ function loadModels() {
   return modelsRequest;
 }
 
-async function startGeneration() {
+// ACT: 开始生成与 node:prepareGeneration 共用这一个入口；组合能力下第一张图片作首帧，其余按 referenceOrder 作图片参考。
+function buildVideoRequest(): { request: Omit<NodeVideoRequest, "projectId">; references: GenerationReference[] } {
   const choice = selectedModel.value;
-  if (generating.value) throw new Error("视频正在生成，请等待完成");
-  if (uploading.value) throw new Error("视频正在替换，请等待完成");
-  if (deleting.value) throw new Error("节点正在删除");
   if (!choice) throw new Error("请先选择视频模型");
   if (!generationPrompt.value) throw new Error("请输入生成提示词");
   if (refList.value.some(item => item.value === undefined)) throw new Error("引用节点暂无内容，请先补充引用内容");
@@ -262,9 +260,7 @@ async function startGeneration() {
   if (composite.value && (useFirstFrame ? restImages.length : images.length) > (capability.value?.maxImageReferences ?? 0)) {
     throw new Error(`当前模型最多支持 ${capability.value?.maxImageReferences ?? 0} 张图片参考，请减少引用`);
   }
-  const workspace = files.getWorkspaceFiles();
-  const controller = new AbortController();
-  const input: Omit<NodeVideoRequest, "projectId"> = {
+  const request: Omit<NodeVideoRequest, "projectId"> = {
     providerId: choice.providerId,
     modelId: choice.modelId,
     prompt: generationPrompt.value,
@@ -282,13 +278,35 @@ async function startGeneration() {
     videos: refList.value.flatMap((item) => item.dataType === "VIDEO" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : []),
     audios: refList.value.flatMap((item) => item.dataType === "AUDIO" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : []),
   };
+  // ACT: 引用角色按最终请求判定，避免摘要与真实请求对不上。
+  const roleOf = (path: string | undefined) => path === request.firstFrame?.path ? "firstFrame" as const : path === request.lastFrame?.path ? "lastFrame" as const : "reference" as const;
+  const references: GenerationReference[] = refList.value.map(item => ({
+    key: nodeReferenceKey(item),
+    dataType: String(item.dataType),
+    role: roleOf(item.dataType === "IMAGE" ? item.value?.url : undefined),
+    ...(item.dataType === "IMAGE" && item.value ? { path: item.value.url } : {}),
+  }));
+  return { request, references };
+}
+
+async function startGeneration(expectedFingerprint?: string) {
+  const choice = selectedModel.value;
+  if (generating.value) throw new Error("视频正在生成，请等待完成");
+  if (uploading.value) throw new Error("视频正在替换，请等待完成");
+  if (deleting.value) throw new Error("节点正在删除");
+  if (!choice) throw new Error("请先选择视频模型");
+  if (!generationPrompt.value) throw new Error("请输入生成提示词");
+  if (refList.value.some(item => item.value === undefined)) throw new Error("引用节点暂无内容，请先补充引用内容");
+  const workspace = files.getWorkspaceFiles();
+  const controller = new AbortController();
+  const input = buildVideoRequest().request;
   generationController = controller;
   // ACT: 工具立即返回，任务由节点持有；仅用户停止或删除节点时取消。
   generation = generationState.run(() => workspace
     .list()
     .then(({ projectId }) => {
       controller.signal.throwIfAborted();
-      return ai.generateVideo({ ...input, projectId }, controller.signal);
+      return ai.generateVideo({ ...input, projectId, ...(expectedFingerprint ? { expectedFingerprint } : {}) }, controller.signal);
     })
     .then(([result]) => {
       controller.signal.throwIfAborted();
@@ -444,12 +462,26 @@ nodeTools.register({
 });
 
 nodeTools.register({
-  name: "generateVideo",
-  description: "启动此节点的后台视频生成，使用当前提示词、模型、模式、时长、分辨率、比例和参考素材；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止生成",
+  name: "prepareGeneration",
+  description: "按当前真实入边构建此节点将要执行的视频请求与引用摘要；声明组合能力时第一张图片作首帧、其余作图片参考；只返回请求内容，不启动生成、不估价、不扣分",
   parameters: z.strictObject({}),
-  execute(_args, { signal }) {
+  async execute(_args, { signal }) {
     signal?.throwIfAborted();
-    return startGeneration();
+    await loadModels();
+    signal?.throwIfAborted();
+    return buildVideoRequest();
+  },
+});
+
+nodeTools.register({
+  name: "generateVideo",
+  description: "启动此节点的后台视频生成，使用当前提示词、模型、模式、时长、分辨率、比例和参考素材；传入 expectedFingerprint 时服务端会校验该指纹与当前请求一致，不一致则拒绝扣分；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止生成",
+  parameters: z.strictObject({
+    expectedFingerprint: z.string().min(8).max(200).optional(),
+  }),
+  execute(args, { signal }) {
+    signal?.throwIfAborted();
+    return startGeneration(args.expectedFingerprint);
   },
 });
 </script>

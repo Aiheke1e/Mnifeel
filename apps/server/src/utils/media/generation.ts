@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath, stat, unlink } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { imageGenerationSchema, videoGenerationSchema } from "@minifeel/tool-media-generation/runtime";
@@ -6,7 +7,7 @@ import type { GeneratedMedia, MediaGenerationRequest, MediaModel, MediaReference
 import { z } from "zod";
 import { getRunnableModel, listPublicModels } from "@/utils/providers";
 import type { ProviderMediaAsset, ProviderMediaInput, ProviderVideoTask } from "@/utils/providers/types";
-import { lockWorkspaceFiles, resolveWorkspacePath, writeWorkspaceFile } from "@/utils/workspace/files";
+import { lockWorkspaceFiles, resolveProjectWorkspaceFile, resolveWorkspacePath, writeWorkspaceFile } from "@/utils/workspace/files";
 
 const maxMediaSize = 100 * 1024 * 1024;
 const mediaExtensions: Record<string, string> = {
@@ -147,6 +148,82 @@ export function validateMediaGenerationRequest(
     invalid(`当前模型不支持视频分辨率 ${request.resolution}`);
   }
   return request;
+}
+
+/** 引用在一次请求中承担的角色与工作区相对路径，顺序即请求中的顺序。 */
+export type GenerationReferenceSummary = {
+  role: "firstFrame" | "lastFrame" | "reference";
+  dataType: "IMAGE" | "VIDEO" | "AUDIO";
+  path: string;
+};
+
+export type GenerationFingerprint = {
+  fingerprint: string;
+  references: GenerationReferenceSummary[];
+  capabilityVersion: number | undefined;
+};
+
+/**
+ * 按请求本身推导引用顺序：首帧、尾帧、图片参考、视频参考、音频参考。
+ * 不读取浏览器声明的引用列表，避免前端伪造摘要绕过指纹。
+ */
+function referenceEntries(request: MediaGenerationRequest): GenerationReferenceSummary[] {
+  return [
+    ...(request.firstFrame ? [{ role: "firstFrame" as const, dataType: "IMAGE" as const, path: request.firstFrame.path }] : []),
+    ...(request.lastFrame ? [{ role: "lastFrame" as const, dataType: "IMAGE" as const, path: request.lastFrame.path }] : []),
+    ...(request.images ?? []).map(item => ({ role: "reference" as const, dataType: "IMAGE" as const, path: item.path })),
+    ...(request.videos ?? []).map(item => ({ role: "reference" as const, dataType: "VIDEO" as const, path: item.path })),
+    ...(request.audios ?? []).map(item => ({ role: "reference" as const, dataType: "AUDIO" as const, path: item.path })),
+  ];
+}
+
+/**
+ * 生成可信的请求指纹：只在鉴权、媒体 Schema、项目内路径与模型能力校验之后调用。
+ * 引用文件按大小与修改时间参与指纹，内容被替换或引用顺序变化都会导致指纹变化。
+ */
+export async function buildGenerationFingerprint(userId: string, input: {
+  projectId: string;
+  mediaType: "image" | "video";
+  request: MediaGenerationRequest;
+  capabilities: Record<string, unknown>;
+}): Promise<GenerationFingerprint> {
+  const capability = input.mediaType === "video" ? readVideoCapability(input.capabilities) : undefined;
+  const digests: string[] = [];
+  const references: GenerationReferenceSummary[] = [];
+  for (const reference of referenceEntries(input.request)) {
+    let detail = "";
+    try {
+      const resolved = await resolveProjectWorkspaceFile(userId, input.projectId, reference.path);
+      const info = await stat(resolved.path);
+      if (!info.isFile()) throw new Error("not a file");
+      detail = `${reference.role}:${resolved.relativePath}:${info.size}:${Math.round(info.mtimeMs)}`;
+      // ACT: 快照只写规范化后的工作区相对路径，不落绝对路径与文件内容。
+      references.push({ role: reference.role, dataType: reference.dataType, path: resolved.relativePath });
+    } catch {
+      invalid(`参考素材已变化：${reference.path} 无法读取，请重新估价`, 409);
+    }
+    digests.push(detail);
+  }
+  const canonical = {
+    projectId: input.projectId,
+    providerId: input.request.providerId,
+    modelId: input.request.modelId,
+    prompt: input.request.prompt,
+    outputDirectory: input.request.outputDirectory ?? "",
+    ratio: input.request.ratio ?? "",
+    size: input.request.size ?? "",
+    resolution: input.request.resolution ?? "",
+    duration: input.request.duration ?? 0,
+    generateAudio: input.request.generateAudio === true,
+    mode: input.request.mode ?? null,
+    capabilityVersion: capability?.version ?? null,
+    references: digests,
+  };
+  return {
+    fingerprint: createHash("sha256").update(JSON.stringify(canonical)).digest("hex"),
+    references,
+    capabilityVersion: capability?.version,
+  };
 }
 
 export async function listMediaModels(): Promise<MediaModel[]> {

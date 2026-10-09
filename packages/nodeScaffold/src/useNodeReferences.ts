@@ -50,6 +50,10 @@ export function useNodeReferences(handleId = "in") {
   return { refList, referenceMentions, setReferencePreview, removeReference };
 }
 
-function referenceKey(item: NodeInputValue) {
+export function nodeReferenceKey(item: Pick<NodeInputValue, "source" | "sourceHandle">) {
   return encodeURIComponent(JSON.stringify([item.source, item.sourceHandle]));
+}
+
+function referenceKey(item: NodeInputValue) {
+  return nodeReferenceKey(item);
 }

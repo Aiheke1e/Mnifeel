@@ -60,7 +60,7 @@
 | 15. 普通镜头制作安全基线 | 已完成（2026-10-09） | 停止批量删除视频节点入边；普通“镜头制作”不再展示旧视频模型并显示“暂无兼容模型”；估价、任务创建与媒体执行共享媒体 Schema 与模型能力校验并在扣分前失败；第四阶段改名为“镜头制作” | Web、Server 类型检查与生产构建通过；1280px 与 720px 浏览器验证第四阶段命名、无兼容模型提示与生成按钮禁用；HTTP 验证非法视频估价、非法视频创建与非法图片 Schema 均为 400，任务数、积分与流水不变 | 真实视频能力待 Task 17—19 建立契约并选定模型 |
 | 16. 资产语义与真实画布连接 | 已完成（2026-10-09） | `CreativeAssetType` 扩展为角色/场景/道具/风格；第二阶段 `characterStage.vue` 重命名为 `assetStage.vue` 并按四类分组；分镜页提供“本镜资产”选择，保存时用 `connectNodes` 携带 `data.minifeelRelationship=assetReference` 建立真实画布边并同步 `referenceOrder`；工作流 SKILL.md 补齐命名契约与“不无差别连接全部资产”约束；新增 `connectionRepairDialog.vue` 为旧项目提供可审查、可预选、幂等的补连流程 | 根目录类型检查 19 个包全部通过，生产构建通过；浏览器实测无连接旧项目缺口 5→2、分镜显示“当前引用：角色·陈爷爷”、重复应用无重复边；含高级自定义边旧项目高级画布 9 节点/4 条边与普通页 4 条引用一致；2048/1280/720px 无横向溢出、控制台无错误 | 本地样本无边时，高级画布自定义边保留与 `connectNodes` 幂等性由代码复核与边数量比对间接验证 |
 | 17. 可组合视频能力契约 | 已完成（2026-10-09） | 在 `tools-scaffold` 定义 `version=1` 的 `videoCapability` 与唯一解析/匹配规则；Server 按能力校验生成请求并在保存/启用前拒绝非法能力；管理员页显示“普通创作兼容/仅高级画布”及原因；视频节点新增首帧 + 图片参考组合路径；普通“镜头制作”按同一门槛过滤视频模型 | 20 个包类型检查通过；tools、Web、Server 生产构建通过；18 条能力样本 + 13 条服务端校验样本全部符合预期 | 组合路径暂不使用尾帧；未声明能力的旧模型仍不进普通创作，待 Task 19 选定模型 |
-| 18. 冻结镜头素材包与请求一致 | 未开始 | — | — | 依赖 Task 17，并须再次确认 |
+| 18. 冻结镜头素材包与请求一致 | 已完成（2026-10-10） | 图片与视频节点新增 `node:prepareGeneration` 作为唯一请求构建入口，`node:generateImage`/`node:generateVideo` 接受可选 `expectedFingerprint`；Server 在鉴权与校验后按规范化请求与引用文件元数据生成指纹；确认框逐条展示镜头、引用资产、规格与积分，确认时重新准备并比对指纹与积分；任务创建与媒体执行再次校验指纹，不一致返回 409 且不创建任务、不冻结积分；`requestSummary` 增加指纹、能力版本与脱敏引用快照 | 20 个包类型检查通过；tools、Web、Server 生产构建通过；14 条指纹样本与 3 条图片请求样本全部符合预期（改提示词、改规格、调序、断边、替换素材、改能力版本均改变指纹；素材缺失或越界拒绝估价） | 指纹使用大小与修改时间，同大小同时间重写无法区分；旧确认框未轮询模型停用与改价，只在重新确认或执行时拦截 |
 | 19. 合格图片生视频模型适配 | 待选模型 | — | — | 依赖 Task 18；需用户选择模型并授权最小真实调用 |
 | 20. 样片优先的镜头制作 | 未开始 | — | — | 依赖 Task 19，并须再次确认 |
 | 21. FFmpeg 单一成片与人工交付 | 未开始 | — | — | 依赖 Task 20，并须再次确认 |
@@ -1122,7 +1122,7 @@ Web、Server 类型检查与生产构建均通过。Codex 浏览器在 1280px �
 - Modify: `packages/skills/workflow/SKILL.md`
 - Modify: `docs/superpowers/plans/guidedStudioPlan.md`
 
-**Outcome:** 第二阶段从“定角色”扩展为“资产设定”，覆盖角色、场景、道具和风格。当前镜头选择了哪些资产，就在同一画布中建立哪些真实边；分镜图片与视频片段都从真实连接读取引用，不维护普通页专用关系表。在 Task 18 完成冻结请求前，带入边引用的分镜生成保持安全禁用，避免新增连接后继续放大现有估价与执行不一致问题。
+**Outcome:** 第二阶段从“定角色”扩展为“资产设定”，覆盖角色、场景、道具和风格。当前镜头选择了哪些资产，就在同一画布中建立哪些真实边；分镜图片与视频片段都从真实连接读取引用，不维护普通页专用关系表。该临时保护已在 Task 18 解除：带入边引用的分镜与片段现在走节点唯一请求构建入口加服务端指纹，估价与执行不一致时会被拦截并要求重新确认。
 
 **Semantic contract:** 新节点使用 `Minifeel/角色/<名称>`、`Minifeel/场景/<名称>`、`Minifeel/道具/<名称>`、`Minifeel/风格/<名称>`、`Minifeel/分镜/<三位编号>` 和 `Minifeel/片段/<三位编号>`。旧 `Minifeel/成片/<三位编号>` 继续按“视频片段”兼容读取，不在打开项目时静默改名；单一最终视频才使用 `Minifeel/成片`。
 
@@ -1152,7 +1152,7 @@ Web、Server 类型检查与生产构建均通过。Codex 浏览器在 1280px �
 
 实际改动：`packages/skills/workflow/SKILL.md` 补齐资产与分镜、片段的命名契约（含旧 `Minifeel/成片/<三位编号>` 按片段兼容读取、不静默改名）；明确“分镜只连接本镜确实需要的资产，不要把项目全部资产无差别连接到每个镜头”；片段引用其分镜图及同镜头资产，引用顺序以 `referenceOrder.in` 为准；高级画布连接非普通流程管理对象，不删除、不重排或改名。`index.vue` 对含资产引用的分镜与片段保持禁用估价与扣分并给出提示。验证：SKILL.md 差异与代码复核一致。
 
-带入边引用的分镜和片段在 Task 18 完成前保持不可执行并说明当前不能安全保证估价与实际输入一致，不允许估价或扣分；没有引用输入的单张资产生成继续复用现有安全链路。这是阶段间的临时保护状态，不新增模拟结果或占位接口。
+带入边引用的分镜和片段曾在此保护下不可执行（说明当时不能安全保证估价与实际输入一致，不允许估价或扣分）；Task 18 完成后该限制已解除，改为由节点构建请求、服务端生成指纹并在不一致时拒绝扣分。没有引用输入的单张资产生成继续复用现有安全链路。该保护为阶段间临时状态，不新增模拟结果或占位接口。
 
 - [x] **Step 5: 为旧项目提供可审查的补连流程**
 
@@ -1245,16 +1245,21 @@ Web、Server、图片/视频节点和管理员页面复用同一套类型与匹�
 
 ### Task 18: 冻结镜头素材包与请求一致
 
-**Status:** 未开始，依赖 Task 17，开始前需用户再次确认。
+**Status:** 已完成（2026-10-10）。
 
 **Files:**
 
 - Modify: `packages/nodes/imageGenerationNode/src/index.vue`
 - Modify: `packages/nodes/videoGenerationNode/src/index.vue`
 - Modify: `packages/nodeScaffold/src/nodeAi.ts`
+- Modify: `packages/nodeScaffold/src/runtime.ts`
+- Modify: `packages/nodeScaffold/src/useNodeReferences.ts`
+- Modify: `packages/toolScaffold/src/runtime.ts`
 - Modify: `apps/web/src/pages/project/index.vue`
 - Modify: `apps/web/src/pages/project/components/generationConfirm.vue`
-- Modify: `apps/server/src/routes/generation/estimate.ts`
+- Modify: `apps/web/src/pages/project/components/storyboardStage.vue`
+- Modify: `apps/web/src/pages/project/components/filmStage.vue`
+- Modify: `apps/web/src/stores/userApp.ts`
 - Modify: `apps/server/src/routes/generation/create.ts`
 - Modify: `apps/server/src/routes/ai/media/generate.ts`
 - Modify: `apps/server/src/utils/generation/index.ts`
@@ -1265,25 +1270,37 @@ Web、Server、图片/视频节点和管理员页面复用同一套类型与匹�
 
 **Interfaces:** 图片与视频生成节点新增 `node:prepareGeneration`，返回实际将执行的请求及引用摘要；`node:generateImage`、`node:generateVideo` 接收可选 `expectedFingerprint`。高级画布无参数调用保持当前行为，普通工作台必须传入已确认指纹。
 
-- [ ] **Step 1: 在节点内提取唯一请求构建入口**
+- [x] **Step 1: 在节点内提取唯一请求构建入口**
 
 图片节点把角色、场景、道具和风格真实入边写入分镜请求；视频节点把分镜图写入首帧，并按 `referenceOrder` 写入当前镜头资产参考。现有开始生成逻辑和 `node:prepareGeneration` 调用同一函数，普通页不再复制一套请求拼装规则。
 
-- [ ] **Step 2: 让服务端生成可信请求指纹**
+实际改动：图片节点新增 `buildImageRequest()`、视频节点新增 `buildVideoRequest()`，二者同时供节点按钮与 `node:prepareGeneration` 使用，返回 `{ request, references }`；视频节点按最终请求判定引用角色，摘要不会与实际请求错位。`nodeReferenceKey()` 从 `useNodeReferences.ts` 导出并由 `nodes-scaffold/runtime` 转出，节点与摘要共用同一引用键。`tools-scaffold` 新增 `GenerationReference`、`NodeGenerationPlan` 两个类型。普通页删除 `configureImageGeneration`、`configureVideoGeneration`，改为 `prepareImageNode` / `prepareVideoNode`：只负责连线、引用排序、选模型和提示词，请求一律由节点返回。
+
+- [x] **Step 2: 让服务端生成可信请求指纹**
 
 估价端在鉴权后解析媒体 Schema、解析并限制项目内路径、读取引用文件元数据或内容摘要、校验模型能力与管理员状态，基于规范化后的项目、节点、引用顺序、模型、参数和输出目录生成指纹。不得信任浏览器自行声明的能力或文件哈希。
 
-- [ ] **Step 3: 让估价、确认和执行复用指纹**
+实际改动：`apps/server/src/utils/media/generation.ts` 新增 `buildGenerationFingerprint()`。引用条目按「首帧、尾帧、图片参考、视频参考、音频参考」顺序从请求本身推导，不读取浏览器声明；每个引用先经 `resolveProjectWorkspaceFile` 限制在项目工作区内，再把 `角色:相对路径:大小:修改时间` 计入指纹，文件缺失或越界直接拒绝估价。指纹在鉴权、Schema、路径与能力校验之后计算，并把 `capabilityVersion` 一并纳入。
+
+- [x] **Step 3: 让估价、确认和执行复用指纹**
 
 确认框展示模型、镜头、引用资产、规格和积分。用户点击确认时重新准备并估价；任何差异都更新确认内容并要求再次确认。任务创建和媒体执行再次验证 `expectedFingerprint`，不一致返回冲突且不创建任务、不冻结积分。
 
-- [ ] **Step 4: 保存足够的脱敏快照**
+实际改动：`/generation/estimate` 返回 `fingerprint`；`/generation/create` 与 `/api/ai/media/generate` 接受可选 `expectedFingerprint`，`prepareGeneration` 在冻结积分前比对，不一致返回 409「镜头素材、模型或参数已变化，请重新估价后再生成」。普通页确认时按当前画布重新走一遍节点准备（`reprepareGeneration`），再比对指纹与积分，任一变化就回到确认态；执行时把已确认指纹传给 `node:generateImage` / `node:generateVideo`，高级画布不传参时行为与之前一致。确认框改为逐条展示镜头/资产名、规格、引用资产（首帧与尾帧带角色前缀）和积分，并说明素材或价格变化需要重新确认。分镜与镜头阶段移除「含资产引用不能估价」的临时禁用。
+
+- [x] **Step 4: 保存足够的脱敏快照**
 
 `generationTasks.requestSummary` 保存能力版本、引用角色与顺序、工作区相对路径、请求指纹和计费快照；不保存 API Key、绝对路径或媒体 Base64。后续采用和失效判断以该快照为依据。
 
-- [ ] **Step 5: 验证竞态与费用边界**
+实际改动：`requestSummary` 在原 `input` 与 `billing` 之外新增 `fingerprint`、`capabilityVersion`、`references`；`references` 只含角色、数据类型和规范化后的工作区相对路径，不含绝对路径、密钥或媒体字节。
+
+- [x] **Step 5: 验证竞态与费用边界**
 
 使用已有本地媒体验证估价后改提示词、替换资产、断开边、调整引用顺序、停用模型和修改价格；全部应在付费执行前要求重估。执行类型检查、构建和 HTTP 验证，更新计划、提交并推送后停止等待 Task 19 确认。
+
+验证：根目录 `bun run typecheck` 20 个包全部通过；`bun run build`（tools + Web + Server）生产构建全部通过。新增 14 条指纹样本全部符合预期：同一请求重复估价指纹稳定；改提示词、改规格、调整引用顺序、断开一条引用、替换素材内容、重新写入素材、图片与视频区分、能力版本变化都会改变指纹；素材被删除或越界时拒绝估价；快照只含相对路径与角色顺序。图片请求校验样本确认带资产引用的分镜请求通过、越界路径被拒。已执行 `git diff --check` 与 `git status` 检查，随后使用中文 Conventional Commit 提交并推送 `origin/dev`，停止等待 Task 19 确认。
+
+已知限制：指纹依赖引用文件的大小与修改时间，同一内容被工具以完全相同的大小和修改时间重写时无法区分，后续可在 Task 19 之后按内容摘要加强；服务端停用模型与修改价格会改变估价或校验结果，但「停用/改价后旧确认框仍存在」的界面竞态只在用户重新确认或执行时被拦截，不主动轮询失效。
 
 ---
 

@@ -83,7 +83,7 @@
 import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from "vue";
 import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElMessage, ElLoading, ElImageViewer } from "element-plus";
 import { IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer } from "@tabler/icons-vue";
-import { groupNodeModels, nodeSkeleton, nodeTools, useNode, useNodeGeneration, useNodeReferences, z, type NodeMediaModel, type NodeHandle } from "@minifeel/nodes-scaffold/runtime";
+import { groupNodeModels, nodeReferenceKey, nodeSkeleton, nodeTools, useNode, useNodeGeneration, useNodeReferences, z, type GenerationReference, type NodeImageRequest, type NodeMediaModel, type NodeHandle } from "@minifeel/nodes-scaffold/runtime";
 import promptInput from "@minifeel/nodes-scaffold/promptInput";
 import referenceItem from "@minifeel/nodes-scaffold/referenceItem";
 import generationSettings from "./components/generationSettings.vue";
@@ -198,7 +198,32 @@ function loadModels() {
   return modelsRequest;
 }
 
-async function startGeneration() {
+// ACT: 开始生成与 node:prepareGeneration 共用这一个入口，避免估价与执行各写一套请求拼装。
+function buildImageRequest(): { request: Omit<NodeImageRequest, "projectId">; references: GenerationReference[] } {
+  const choice = selectedModel.value;
+  if (!choice) throw new Error("请先选择图片模型");
+  if (!generationPrompt.value) throw new Error("请输入生成提示词");
+  if (refList.value.some(item => item.value === undefined)) throw new Error("引用节点暂无内容，请先补充引用内容");
+  return {
+    request: {
+      providerId: choice.providerId,
+      modelId: choice.modelId,
+      prompt: generationPrompt.value,
+      size: data.value.size,
+      ratio: data.value.ratio,
+      outputDirectory: `assets/${id}`,
+      images: refList.value.flatMap((item) => (item.dataType === "IMAGE" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : [])),
+    },
+    references: refList.value.map(item => ({
+      key: nodeReferenceKey(item),
+      dataType: String(item.dataType),
+      role: "reference" as const,
+      ...(item.dataType === "IMAGE" && item.value ? { path: item.value.url } : {}),
+    })),
+  };
+}
+
+async function startGeneration(expectedFingerprint?: string) {
   const choice = selectedModel.value;
   if (generating.value) throw new Error("图片正在生成，请等待完成");
   if (uploading.value) throw new Error("图片正在替换，请等待完成");
@@ -208,22 +233,14 @@ async function startGeneration() {
   if (refList.value.some(item => item.value === undefined)) throw new Error("引用节点暂无内容，请先补充引用内容");
   const workspace = files.getWorkspaceFiles();
   const controller = new AbortController();
-  const input = {
-    providerId: choice.providerId,
-    modelId: choice.modelId,
-    prompt: generationPrompt.value,
-    size: data.value.size,
-    ratio: data.value.ratio,
-    outputDirectory: `assets/${id}`,
-    images: refList.value.flatMap((item) => (item.dataType === "IMAGE" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : [])),
-  };
+  const input = buildImageRequest().request;
   generationController = controller;
   // ACT: 工具立即返回，任务由节点持有；仅用户停止或删除节点时取消。
   generation = generationState.run(() => workspace
     .list()
     .then(({ projectId }) => {
       controller.signal.throwIfAborted();
-      return ai.generateImage({ ...input, projectId }, controller.signal);
+      return ai.generateImage({ ...input, projectId, ...(expectedFingerprint ? { expectedFingerprint } : {}) }, controller.signal);
     })
     .then(([result]) => {
       controller.signal.throwIfAborted();
@@ -361,12 +378,26 @@ nodeTools.register({
 });
 
 nodeTools.register({
-  name: "generateImage",
-  description: "启动此节点的后台图片生成，使用当前提示词、模型、分辨率、比例和参考图片；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止生成",
+  name: "prepareGeneration",
+  description: "按当前真实入边构建此节点将要执行的图片请求与引用摘要；只返回请求内容，不启动生成、不估价、不扣分",
   parameters: z.strictObject({}),
-  execute(_args, { signal }) {
+  async execute(_args, { signal }) {
     signal?.throwIfAborted();
-    return startGeneration();
+    await loadModels();
+    signal?.throwIfAborted();
+    return buildImageRequest();
+  },
+});
+
+nodeTools.register({
+  name: "generateImage",
+  description: "启动此节点的后台图片生成，使用当前提示词、模型、分辨率、比例和参考图片；传入 expectedFingerprint 时服务端会校验该指纹与当前请求一致，不一致则拒绝扣分；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止生成",
+  parameters: z.strictObject({
+    expectedFingerprint: z.string().min(8).max(200).optional(),
+  }),
+  execute(args, { signal }) {
+    signal?.throwIfAborted();
+    return startGeneration(args.expectedFingerprint);
   },
 });
 </script>

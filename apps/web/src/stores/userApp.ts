@@ -58,6 +58,8 @@ export type GenerationEstimate = {
   estimatedUsage: Record<string, number>;
   estimatedCredits: number;
   billable: boolean;
+  /** 服务端按真实请求与引用文件生成的指纹；执行前需原样回传。 */
+  fingerprint?: string;
 };
 
 export const useUserAppStore = defineStore("userApp", () => {

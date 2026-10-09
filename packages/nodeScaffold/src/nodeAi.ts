@@ -26,9 +26,16 @@ export type NodeImageRequest = {
   images?: { path: string; mimeType: string }[];
   ratio?: string;
   size?: string;
+  /** 普通工作台传入已确认的请求指纹；服务端不一致时拒绝扣分。高级画布不传。 */
+  expectedFingerprint?: string;
 };
 export type NodeImageResult = { path: string; mimeType: string; mediaType: "image" };
-export type NodeVideoRequest = Omit<MediaGenerationRequest, "size"> & { projectId: string; outputDirectory: string };
+export type NodeVideoRequest = Omit<MediaGenerationRequest, "size"> & {
+  projectId: string;
+  outputDirectory: string;
+  /** 普通工作台传入已确认的请求指纹；服务端不一致时拒绝扣分。高级画布不传。 */
+  expectedFingerprint?: string;
+};
 export type NodeVideoResult = { path: string; mimeType: string; mediaType: "video" };
 export type NodeAiRequest = {
   providerId: string;

@@ -132,7 +132,7 @@ const assetGroups = computed(() => assetTypes.flatMap(type => {
   const assets = props.assets.filter(asset => asset.assetType === type);
   return assets.length ? [{ type, assets }] : [];
 }));
-const batchNodeIds = computed(() => props.shots.filter(shot => !shot.output && !shot.assetReferences.length && shot.prompt.trim() && drafts[shot.nodeId] === shot.prompt && !isGenerating(shot)).map(shot => shot.nodeId));
+const batchNodeIds = computed(() => props.shots.filter(shot => !shot.output && shot.prompt.trim() && drafts[shot.nodeId] === shot.prompt && !isGenerating(shot)).map(shot => shot.nodeId));
 const batchCount = computed(() => batchNodeIds.value.length);
 const batchDisabled = computed(() => props.busy || !props.modelValue || batchCount.value === 0);
 
@@ -224,11 +224,10 @@ function isGenerating(shot: CreativeMediaCard) {
 }
 
 function generateDisabled(shot: CreativeMediaCard) {
-  return props.busy || isGenerating(shot) || !!shot.assetReferences.length || !props.modelValue || !shot.prompt.trim() || drafts[shot.nodeId] !== shot.prompt;
+  return props.busy || isGenerating(shot) || !props.modelValue || !shot.prompt.trim() || drafts[shot.nodeId] !== shot.prompt;
 }
 
 function generateHint(shot: CreativeMediaCard) {
-  if (shot.assetReferences.length) return "镜头含资产引用，当前版本尚不能安全估价，请在后续版本生成";
   if (!props.modelValue) return "管理员暂未启用图片模型";
   if (drafts[shot.nodeId] !== shot.prompt) return "请先保存镜头描述";
   if (isGenerating(shot)) return "分镜图片正在生成";

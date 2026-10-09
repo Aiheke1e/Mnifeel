@@ -6,7 +6,7 @@ import { getDatabase, type Database, type DatabaseTransaction } from "@/utils/da
 import type { MediaType, TaskStatus, UserRole } from "@/utils/database/types";
 import { publishGenerationEvent, subscribeGenerationEvent, type GenerationEvent } from "@/utils/generation/events";
 import { abortGenerationTask, executeGenerationTask, wakeGenerationWorker } from "@/utils/generation/worker";
-import { validateMediaGenerationRequest } from "@/utils/media/generation";
+import { buildGenerationFingerprint, validateMediaGenerationRequest, type GenerationReferenceSummary } from "@/utils/media/generation";
 import { redactSecretFields } from "@/utils/providers/redact";
 
 type GenerationTaskRow = {
@@ -20,6 +20,12 @@ type GenerationTaskRow = {
   requestSummary: {
     input: Record<string, unknown>;
     billing: { pricing: Pricing; estimatedUsage: GenerationUsage; billable: boolean };
+    /** 冻结时的请求指纹；执行前与当前请求不一致则拒绝扣分。 */
+    fingerprint?: string;
+    /** 冻结时生效的视频能力版本；未声明能力的模型为 undefined。 */
+    capabilityVersion?: number;
+    /** 冻结时的引用角色与顺序，只保存工作区相对路径。 */
+    references?: GenerationReferenceSummary[];
   };
   result: unknown;
   providerTaskId: string | null;
@@ -60,6 +66,9 @@ type GenerationEstimate = {
   estimatedUsage: GenerationUsage;
   estimatedCredits: number;
   billable: boolean;
+  fingerprint?: string;
+  capabilityVersion?: number;
+  references?: GenerationReferenceSummary[];
 };
 
 type GenerationOptions = {
@@ -68,6 +77,8 @@ type GenerationOptions = {
   estimatedUsage?: GenerationUsage;
   billable?: boolean;
   expectedTaskType?: MediaType;
+  /** 已确认的指纹；与当前请求不一致时拒绝创建任务，不冻结积分。 */
+  expectedFingerprint?: string;
 };
 
 const pendingTaskCancellations = new Map<string, number>();
@@ -165,14 +176,33 @@ async function prepareGeneration(
     invalid("所选模型尚未启用或供应商未通过连接测试", 409);
   }
   const safeRequest = safeInput(input.request);
-  const request = model.mediaType === "image" || model.mediaType === "video"
-    ? { ...validateMediaGenerationRequest(model.mediaType, safeRequest, model.capabilities, input.modelId) }
-    : safeRequest;
+  // ACT: 图片与视频走同一份已校验请求，指纹只在这份请求上计算。
+  const media = model.mediaType === "image" || model.mediaType === "video"
+    ? { mediaType: model.mediaType, request: { ...validateMediaGenerationRequest(model.mediaType, safeRequest, model.capabilities, input.modelId) } }
+    : undefined;
+  const request = media?.request ?? safeRequest;
   const pricing = parsePricing(model.mediaType, model.pricing);
   const estimatedUsage = options.estimatedUsage ?? estimateUsage(model.mediaType, request, model.capabilities);
   const billable = options.billable ?? !(model.mediaType === "video" && model.isWhitelist);
   const estimatedCredits = billable ? calculateCredits(model.mediaType, pricing, estimatedUsage) : 0;
-  return { taskType: model.mediaType, request, pricing, estimatedUsage, estimatedCredits, billable };
+  // ACT: 指纹在鉴权、Schema、路径与能力校验之后生成；已确认指纹不符时不创建任务、不冻结积分。
+  const frozen = media
+    ? await buildGenerationFingerprint(userId, { projectId: input.projectId, mediaType: media.mediaType, request: media.request, capabilities: model.capabilities })
+    : undefined;
+  if (options.expectedFingerprint !== undefined && frozen?.fingerprint !== options.expectedFingerprint) {
+    invalid("镜头素材、模型或参数已变化，请重新估价后再生成", 409);
+  }
+  return {
+    taskType: model.mediaType,
+    request,
+    pricing,
+    estimatedUsage,
+    estimatedCredits,
+    billable,
+    fingerprint: frozen?.fingerprint,
+    capabilityVersion: frozen?.capabilityVersion,
+    references: frozen?.references,
+  };
 }
 
 export async function estimateGenerationTask(userId: string, input: GenerationInput) {
@@ -182,6 +212,7 @@ export async function estimateGenerationTask(userId: string, input: GenerationIn
     estimatedUsage: estimate.estimatedUsage,
     estimatedCredits: estimate.estimatedCredits,
     billable: estimate.billable,
+    fingerprint: estimate.fingerprint,
   };
 }
 
@@ -190,6 +221,8 @@ export async function createGenerationTask(userId: string, input: {
   modelId: string;
   idempotencyKey: string;
   request: Record<string, unknown>;
+  /** 普通工作台传入已确认指纹；高级画布不传，行为与之前一致。 */
+  expectedFingerprint?: string;
 }, options: GenerationOptions = {}) {
   const result = await getDatabase().begin(async transaction => {
     const requestLock = `${userId}:request:${input.idempotencyKey}`;
@@ -218,13 +251,20 @@ export async function createGenerationTask(userId: string, input: {
       if (takeTaskCancellation(taskCancellationKey(userId, "output", `${input.projectId}:${outputDirectory}`))) invalid("生成已取消", 409);
     }
     if (takeTaskCancellation(taskCancellationKey(userId, "request", input.idempotencyKey))) invalid("生成已取消", 409);
-    const estimate = await prepareGeneration(transaction, userId, input, options);
-    const { taskType, request, pricing, estimatedUsage, billable, estimatedCredits } = estimate;
+    const estimate = await prepareGeneration(transaction, userId, input, { ...options, expectedFingerprint: options.expectedFingerprint ?? input.expectedFingerprint });
+    const { taskType, request, pricing, estimatedUsage, billable, estimatedCredits, fingerprint, capabilityVersion, references } = estimate;
     const taskId = randomUUID();
     const status = options.external ? "running" : "pending";
     const startedAt = options.external ? new Date() : null;
     const progress = options.external ? 1 : 0;
-    const requestSummary = { input: request, billing: { pricing, estimatedUsage, billable } };
+    // ACT: 快照只保留能力版本、引用角色顺序、工作区相对路径、指纹与计费快照，不含密钥、绝对路径或媒体内容。
+    const requestSummary = {
+      input: request,
+      billing: { pricing, estimatedUsage, billable },
+      ...(fingerprint ? { fingerprint } : {}),
+      ...(capabilityVersion === undefined ? {} : { capabilityVersion }),
+      ...(references ? { references } : {}),
+    };
     const rows = await transaction<GenerationTaskRow[]>`
       insert into "generationTasks" (
         "id", "userId", "projectId", "modelId", "taskType", "status", "idempotencyKey", "requestSummary",

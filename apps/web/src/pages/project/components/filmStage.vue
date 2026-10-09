@@ -143,11 +143,10 @@ function cardError(shot: CreativeMediaCard) {
 }
 
 function generateDisabled(shot: CreativeMediaCard) {
-  return props.busy || props.modelsLoading || !props.models.length || isGenerating(shot) || !!shot.assetReferences.length || !props.modelValue || !shot.confirmed || !shot.output;
+  return props.busy || props.modelsLoading || !props.models.length || isGenerating(shot) || !props.modelValue || !shot.confirmed || !shot.output;
 }
 
 function generateHint(shot: CreativeMediaCard) {
-  if (shot.assetReferences.length) return "镜头含资产引用，当前版本尚不能安全估价，请在后续版本生成";
   if (props.modelsLoading) return "正在读取兼容的视频模型";
   if (!props.models.length) return "暂无兼容的视频模型";
   if (!props.modelValue) return "请先选择视频模型";
