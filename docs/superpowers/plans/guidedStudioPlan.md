@@ -1067,41 +1067,41 @@ flowchart LR
 
 ### Task 15: 普通镜头制作安全基线
 
-**Status:** 待用户确认。本任务只修安全边界，不新增供应商、不调用图片或视频模型、不部署服务器。
+**Status:** 已完成（2026-10-09）。本任务只修安全边界，未新增供应商、未调用图片或视频模型、未部署服务器。
 
 **Files:**
 
 - Modify: `apps/web/src/pages/project/index.vue`
 - Modify: `apps/web/src/pages/project/components/projectStages.vue`
 - Modify: `apps/web/src/pages/project/components/filmStage.vue`
-- Modify: `apps/server/src/routes/generation/estimate.ts`
 - Modify: `apps/server/src/utils/generation/index.ts`
 - Modify: `apps/server/src/utils/media/generation.ts`
+- Modify: `docs/productExperienceIssues.md`
 - Modify: `docs/superpowers/plans/guidedStudioPlan.md`
 
 **Outcome:** 先阻止当前已确认的破坏和误导：普通页不再删除高级画布已有输入边；仅文生视频的 Agnes 不再出现在普通“镜头制作”可用路径中；明显不符合媒体 Schema 或模型能力的请求在创建任务和冻结积分前失败。第四阶段的可见名称改为“镜头制作”，不再把单个片段称为完整成片。
 
 **Confirmation gate:** 开始前需用户明确接受：在接入满足要求的图片生视频模型前，普通工作台的视频按钮会显示“暂无兼容模型”；高级画布和管理员调试仍可保留 Agnes 文生视频能力。
 
-- [ ] **Step 1: 固化失败证据与受影响调用方**
+- [x] **Step 1: 固化失败证据与受影响调用方**
 
-记录 `configureVideoGeneration` 删除其他入边、`startFrameOptional` 被映射成尾帧、普通页接受纯文本模式，以及估价在媒体能力校验前运行的现状。搜索 `configureVideoGeneration`、`estimateGenerationTask`、`createGenerationTask`、`generateVideo` 的全部调用方，确认修复落在共享边界。
+已确认 `configureVideoGeneration` 在估价前删除目标视频节点除当前分镜外的全部入边，普通页会把纯文本模式当作可用视频路径，通用估价与任务创建只校验任意 JSON 对象，媒体 Schema 与模型 mode 校验晚于任务入库和积分冻结。调用方核验同时证明 Toonflow 的既有语义是 `startFrameOptional` 单图作为尾帧、`endFrameOptional` 单图作为首帧，当前高级视频节点实现正确；本任务拒绝不满足普通流程的旧 mode，不改写 Toonflow 语义。
 
-- [ ] **Step 2: 停止破坏画布连接**
+- [x] **Step 2: 停止破坏画布连接**
 
-普通页只能增补自己明确缺少的连接，不能批量删除视频节点已有入边，也不能重排高级画布维护的自定义连接。未知连接保持原样并给出可读提示；本阶段不尝试猜测角色、场景或道具关系。
+普通页已移除读取并批量删除视频节点入边的逻辑；需要图片的路径只复用 Toonflow 现有幂等 `connectNodes` 补充当前分镜边，不删除或重排高级画布维护的连接与 `referenceOrder`。本阶段没有猜测角色、场景或道具关系。
 
-- [ ] **Step 3: 收紧普通视频模型入口**
+- [x] **Step 3: 收紧普通视频模型入口**
 
-普通“镜头制作”只显示显式满足组合能力契约的模型。当前只有 `text` 模式的 Agnes 显示为不兼容并阻止估价；高级画布与管理员调试不改变。修正单图帧语义，不能把首帧模型的输入放到 `lastFrame`。
+当前旧 `mode` 不能证明首帧与多图片参考可在同一请求生效，因此在 Task 17 建立组合能力契约前，普通“镜头制作”不展示任何旧视频模型，并在界面说明“暂无兼容模型”。模型查找也只使用过滤后的列表，避免绕过界面进入估价；高级画布与管理员调试继续保留 Agnes `text`。已核验 Toonflow 的 `startFrameOptional` 单图尾帧语义正确，本任务没有擅自改写。
 
-- [ ] **Step 4: 在扣分前执行最低限度的服务端校验**
+- [x] **Step 4: 在扣分前执行最低限度的服务端校验**
 
-估价、任务创建和媒体执行共享现有 `imageGenerationSchema`、`videoGenerationSchema` 与模型状态检查。无效字段、媒体类型不符、停用模型和已知不支持的引用组合在任务入库及积分冻结前失败；失败不创建任务、不产生流水。
+估价、任务创建和媒体执行已共享现有 `imageGenerationSchema`、`videoGenerationSchema` 与同一模型能力校验。校验覆盖托管供应商、内外模型 ID、图片参考上限与规格、视频旧 mode、引用组合、画幅、时长、分辨率及音频能力；`prepareGeneration` 在计价、任务入库和积分冻结前执行，媒体执行在读取文件和调用供应商前再次复验。
 
-- [ ] **Step 5: 本地验证、更新计划并提交**
+- [x] **Step 5: 本地验证、更新计划并提交**
 
-执行 Web、Server 类型检查与生产构建，使用现有画布副本验证自定义边数量和顺序不变；通过本地 HTTP 验证不兼容请求无任务、无冻结积分。运行 `git diff --check` 与 `git status --short --branch`，更新本任务状态后使用中文 Conventional Commit 提交并推送 `origin/dev`，然后停止等待 Task 16 确认。
+Web、Server 类型检查与生产构建均通过。Codex 浏览器在 1280px 与 720px 验证第四阶段为“镜头制作”、无兼容模型提示可见、所有生成按钮禁用、无横向溢出且控制台无错误；当前本地样本画布没有已有边，因此自定义边保留以删除代码消失、`connectNodes` 幂等实现和调用方复核验证。HTTP 验证合法 Agnes `text` 估价为 200，高级画布模型列表仍含 Agnes `text`；非法视频估价、非法视频创建和非法图片 Schema 均为 400，前后任务数、活动任务数、可用积分、冻结积分和流水数完全不变。完成差异检查后使用中文 Conventional Commit 提交并推送 `origin/dev`，然后停止等待 Task 16 确认。
 
 ---
 

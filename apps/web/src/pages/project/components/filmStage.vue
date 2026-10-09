@@ -1,7 +1,7 @@
 <template>
   <section class="filmStage">
     <el-alert v-if="errorMessage" :title="errorMessage" type="error" showIcon :closable="false" />
-    <div v-else-if="loading" class="stageLoading" v-loading="true" aria-label="正在读取成片" />
+    <div v-else-if="loading" class="stageLoading" v-loading="true" aria-label="正在读取镜头片段" />
     <div v-else-if="!storyboard.length" class="missingContent">
       <icon-movie-off :size="34" aria-hidden="true" />
       <h3>还没有可生成的分镜</h3>
@@ -10,9 +10,15 @@
     <template v-else>
       <div class="modelChoice">
         <label for="filmModel">视频生成模型</label>
-        <el-select id="filmModel" :modelValue="modelValue" :loading="modelsLoading" placeholder="暂无可用模型" @update:modelValue="emit('update:modelValue', String($event))">
+        <el-select id="filmModel" :modelValue="modelValue" :loading="modelsLoading" :disabled="modelsLoading || !models.length" placeholder="暂无兼容模型" @update:modelValue="emit('update:modelValue', String($event))">
           <el-option v-for="model in models" :key="model.id" :label="model.displayName" :value="model.id" />
         </el-select>
+        <el-alert
+          v-if="!modelsLoading && !models.length"
+          title="暂无兼容的视频模型，请联系管理员配置同时支持分镜首帧和多图片参考的模型。"
+          type="warning"
+          showIcon
+          :closable="false" />
       </div>
       <div class="filmList">
         <article v-for="shot in storyboard" :key="shot.nodeId" class="filmCard">
@@ -112,7 +118,9 @@ function statusText(shot: CreativeMediaCard) {
   if (film?.task?.status === "failed") return "生成失败";
   if (film?.task?.status === "cancelled") return "已取消";
   if (film?.output) return "已完成";
-  return shot.confirmed && shot.output ? "可生成" : "等待分镜确认";
+  if (!shot.confirmed || !shot.output) return "等待分镜确认";
+  if (!props.modelsLoading && !props.models.length) return "等待兼容模型";
+  return "可生成";
 }
 
 function statusType(shot: CreativeMediaCard) {
@@ -129,11 +137,13 @@ function cardError(shot: CreativeMediaCard) {
 }
 
 function generateDisabled(shot: CreativeMediaCard) {
-  return props.busy || isGenerating(shot) || !props.modelValue || !shot.confirmed || !shot.output;
+  return props.busy || props.modelsLoading || !props.models.length || isGenerating(shot) || !props.modelValue || !shot.confirmed || !shot.output;
 }
 
 function generateHint(shot: CreativeMediaCard) {
-  if (!props.modelValue) return "管理员暂未启用视频模型";
+  if (props.modelsLoading) return "正在读取兼容的视频模型";
+  if (!props.models.length) return "暂无兼容的视频模型";
+  if (!props.modelValue) return "请先选择视频模型";
   if (!shot.confirmed || !shot.output) return "请先生成并确认分镜图片";
   if (isGenerating(shot)) return "视频片段正在生成";
   return "查看预计积分并确认生成";

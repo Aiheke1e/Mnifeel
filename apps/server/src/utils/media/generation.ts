@@ -1,6 +1,8 @@
 import { mkdir, readFile, realpath, stat, unlink } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { imageGenerationSchema, videoGenerationSchema } from "@minifeel/tool-media-generation/runtime";
 import type { GeneratedMedia, MediaGenerationRequest, MediaModel, MediaReference } from "@minifeel/tools-scaffold/runtime";
+import { z } from "zod";
 import { getRunnableModel, listPublicModels } from "@/utils/providers";
 import type { ProviderMediaAsset, ProviderMediaInput, ProviderVideoTask } from "@/utils/providers/types";
 import { lockWorkspaceFiles, resolveWorkspacePath, writeWorkspaceFile } from "@/utils/workspace/files";
@@ -14,12 +16,125 @@ const mediaExtensions: Record<string, string> = {
   "audio/flac": "flac", "audio/aac": "aac", "audio/mp4": "m4a", "audio/opus": "opus", "audio/pcm": "pcm",
 };
 
-function invalid(message: string): never {
-  throw Object.assign(new Error(message), { status: 400 });
+const videoModesSchema = z.array(videoGenerationSchema.shape.mode.unwrap()).min(1).max(32);
+
+function invalid(message: string, status = 400): never {
+  throw Object.assign(new Error(message), { status });
 }
 
 function imageOptions(value: unknown, pattern: RegExp) {
   return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string" && item.length <= 64 && item === item.trim() && pattern.test(item)))] : undefined;
+}
+
+function numberOptions(value: unknown) {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((item): item is number => typeof item === "number" && Number.isFinite(item) && item > 0))]
+    : [];
+}
+
+function durationResolutionOptions(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const entry = item as Record<string, unknown>;
+    const duration = numberOptions(entry.duration);
+    const resolution = imageOptions(entry.resolution, /^[^\u0000-\u001f\u007f]+$/) ?? [];
+    return duration.length && resolution.length ? [{ duration, resolution }] : [];
+  });
+}
+
+function sameMode(left: MediaGenerationRequest["mode"], right: MediaGenerationRequest["mode"]) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function videoModeMatches(mode: NonNullable<MediaGenerationRequest["mode"]>, request: MediaGenerationRequest) {
+  const imageCount = request.images?.length ?? 0;
+  const videoCount = request.videos?.length ?? 0;
+  const audioCount = request.audios?.length ?? 0;
+  const hasFirstFrame = request.firstFrame !== undefined;
+  const hasLastFrame = request.lastFrame !== undefined;
+  const hasLooseReferences = imageCount + videoCount + audioCount > 0;
+  if (Array.isArray(mode)) {
+    if (!hasLooseReferences || hasFirstFrame || hasLastFrame) return false;
+    return ([
+      ["image", imageCount],
+      ["video", videoCount],
+      ["audio", audioCount],
+    ] as const).every(([type, count]) => count <= Number(mode.find(item => item.startsWith(`${type}Reference:`))?.split(":")[1] ?? 0));
+  }
+  if (hasLooseReferences && mode !== "singleImage") return false;
+  if ((videoCount || audioCount) && mode === "singleImage") return false;
+  if (mode === "text") return !hasLooseReferences && !hasFirstFrame && !hasLastFrame;
+  if (mode === "singleImage") return imageCount === 1 && !hasFirstFrame && !hasLastFrame;
+  if (hasLooseReferences) return false;
+  if (mode === "startEndRequired") return hasFirstFrame && hasLastFrame;
+  if (mode === "endFrameOptional") return hasFirstFrame;
+  return mode === "startFrameOptional" && hasLastFrame;
+}
+
+export function validateMediaGenerationRequest(
+  mediaType: "image" | "video",
+  value: unknown,
+  capabilities: Record<string, unknown>,
+  expectedModelId: string,
+): MediaGenerationRequest {
+  const parsed = (mediaType === "image" ? imageGenerationSchema : videoGenerationSchema).safeParse(value);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue?.path.length ? `（${issue.path.join(".")}）` : "";
+    invalid(`媒体生成参数无效${path}：${issue?.message ?? "请检查请求内容"}`);
+  }
+  const request = parsed.data as MediaGenerationRequest;
+  if (request.providerId !== "managed") invalid("所选媒体模型与供应商不匹配");
+  if (request.modelId !== expectedModelId) invalid("媒体请求中的模型与任务模型不匹配");
+
+  const ratios = imageOptions(capabilities.ratios, /^[1-9]\d{0,3}:[1-9]\d{0,3}$/) ?? [];
+  if (request.ratio && ratios.length && !ratios.includes(request.ratio)) invalid(`当前模型不支持画幅 ${request.ratio}`);
+  if (mediaType === "image") {
+    const sizes = imageOptions(capabilities.sizes, /^[^\u0000-\u001f\u007f]+$/) ?? [];
+    if (request.size && sizes.length && !sizes.includes(request.size)) invalid(`当前模型不支持图片尺寸 ${request.size}`);
+    const maxReferenceImages = capabilities.maxReferenceImages;
+    if (maxReferenceImages !== undefined && (!Number.isInteger(maxReferenceImages) || Number(maxReferenceImages) < 0)) {
+      invalid("图片模型的参考图能力配置无效", 409);
+    }
+    if ((request.images?.length ?? 0) > Number(maxReferenceImages ?? 64)) {
+      invalid(`当前模型最多支持 ${maxReferenceImages} 张参考图`);
+    }
+    return request;
+  }
+
+  const modes = videoModesSchema.safeParse(capabilities.modes);
+  if (!modes.success) invalid("视频模型的生成模式配置无效", 409);
+  if (request.mode !== undefined && !modes.data.some(mode => sameMode(mode, request.mode))) {
+    invalid("当前模型不支持所选视频生成模式");
+  }
+  const matchingModes = request.mode === undefined ? modes.data : [request.mode];
+  if (!matchingModes.some(mode => videoModeMatches(mode, request))) {
+    invalid("当前视频模型不支持这些参考素材的组合");
+  }
+  if (request.generateAudio === true && capabilities.audio !== true && capabilities.audio !== "optional") {
+    invalid("当前视频模型不支持生成音频");
+  }
+
+  const durations = numberOptions(capabilities.durations);
+  if (request.duration !== undefined && durations.length && !durations.includes(request.duration)) {
+    invalid(`当前模型不支持视频时长 ${request.duration}`);
+  }
+  const resolutions = imageOptions(capabilities.resolutions, /^[^\u0000-\u001f\u007f]+$/) ?? [];
+  if (request.resolution && resolutions.length && !resolutions.includes(request.resolution)) {
+    invalid(`当前模型不支持视频分辨率 ${request.resolution}`);
+  }
+  const mappings = durationResolutionOptions(capabilities.durationResolutionMap);
+  if (mappings.length && request.duration !== undefined) {
+    const durationMappings = mappings.filter(item => item.duration.includes(request.duration!));
+    if (!durationMappings.length) invalid(`当前模型不支持视频时长 ${request.duration}`);
+    if (request.resolution && !durationMappings.some(item => item.resolution.includes(request.resolution!))) {
+      invalid(`当前视频时长不支持分辨率 ${request.resolution}`);
+    }
+  } else if (mappings.length && request.resolution && !mappings.some(item => item.resolution.includes(request.resolution!))) {
+    invalid(`当前模型不支持视频分辨率 ${request.resolution}`);
+  }
+  return request;
 }
 
 export async function listMediaModels(): Promise<MediaModel[]> {
@@ -145,31 +260,31 @@ export async function generateMedia(
   },
 ): Promise<GeneratedMedia[]> {
   signal?.throwIfAborted();
-  if (!request.prompt.trim()) invalid("请输入生成提示词");
   if (mediaType === "audio") invalid("当前没有启用音频生成模型");
+  const configured = await getRunnableModel(request.modelId, mediaType);
+  const input = validateMediaGenerationRequest(mediaType, request, configured.model.capabilities ?? {}, request.modelId);
   const directory = await realpath(cwd);
-  const outputDirectory = request.outputDirectory ?? "assets/generated";
+  const outputDirectory = input.outputDirectory ?? "assets/generated";
   await resolveWorkspacePath(directory, outputDirectory, true);
   const references = async (items: MediaReference[] | undefined, type: string) => items ? Promise.all(items.map(item => readReference(directory, item, type, signal))) : undefined;
-  const images = await references(request.images, "image");
+  const images = await references(input.images, "image");
   signal?.throwIfAborted();
-  const configured = await getRunnableModel(request.modelId, mediaType);
   let assets: ProviderMediaAsset[];
   if (mediaType === "image") {
     if (!configured.adapter.runImage) invalid("此供应商不支持图片生成");
     assets = await configured.adapter.runImage(configured.provider, configured.model, {
-      prompt: request.prompt, images, ratio: request.ratio, size: request.size,
+      prompt: input.prompt, images, ratio: input.ratio, size: input.size,
     }, signal);
   } else {
     if (!configured.adapter.createVideo || !configured.adapter.getVideo) invalid("此供应商不支持视频生成");
     const operationSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(30 * 60_000)]) : AbortSignal.timeout(30 * 60_000);
     const task = await configured.adapter.createVideo(configured.provider, configured.model, {
-      prompt: request.prompt, images,
-      videos: await references(request.videos, "video"),
-      audios: await references(request.audios, "audio"),
-      firstFrame: request.firstFrame ? await readReference(directory, request.firstFrame, "image", signal) : undefined,
-      lastFrame: request.lastFrame ? await readReference(directory, request.lastFrame, "image", signal) : undefined,
-      ratio: request.ratio, resolution: request.resolution, duration: request.duration,
+      prompt: input.prompt, images,
+      videos: await references(input.videos, "video"),
+      audios: await references(input.audios, "audio"),
+      firstFrame: input.firstFrame ? await readReference(directory, input.firstFrame, "image", signal) : undefined,
+      lastFrame: input.lastFrame ? await readReference(directory, input.lastFrame, "image", signal) : undefined,
+      ratio: input.ratio, resolution: input.resolution, duration: input.duration,
     }, operationSignal);
     await events?.setProviderTaskId?.(task.id);
     try {

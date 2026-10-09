@@ -6,6 +6,7 @@ import { getDatabase, type Database, type DatabaseTransaction } from "@/utils/da
 import type { MediaType, TaskStatus, UserRole } from "@/utils/database/types";
 import { publishGenerationEvent, subscribeGenerationEvent, type GenerationEvent } from "@/utils/generation/events";
 import { abortGenerationTask, executeGenerationTask, wakeGenerationWorker } from "@/utils/generation/worker";
+import { validateMediaGenerationRequest } from "@/utils/media/generation";
 import { redactSecretFields } from "@/utils/providers/redact";
 
 type GenerationTaskRow = {
@@ -163,8 +164,11 @@ async function prepareGeneration(
   if (!model.modelEnabled || !model.providerEnabled || model.connectionStatus !== "passed") {
     invalid("所选模型尚未启用或供应商未通过连接测试", 409);
   }
+  const safeRequest = safeInput(input.request);
+  const request = model.mediaType === "image" || model.mediaType === "video"
+    ? { ...validateMediaGenerationRequest(model.mediaType, safeRequest, model.capabilities, input.modelId) }
+    : safeRequest;
   const pricing = parsePricing(model.mediaType, model.pricing);
-  const request = safeInput(input.request);
   const estimatedUsage = options.estimatedUsage ?? estimateUsage(model.mediaType, request, model.capabilities);
   const billable = options.billable ?? !(model.mediaType === "video" && model.isWhitelist);
   const estimatedCredits = billable ? calculateCredits(model.mediaType, pricing, estimatedUsage) : 0;

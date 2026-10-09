@@ -24,7 +24,7 @@ const stages: Array<{ id: ProjectStage; name: string; caption: string }> = [
   { id: "script", name: "写剧本", caption: "整理故事与对白" },
   { id: "characters", name: "定角色", caption: "确认人物形象" },
   { id: "storyboard", name: "做分镜", caption: "设计画面节奏" },
-  { id: "video", name: "生成视频", caption: "完成短剧片段" },
+  { id: "video", name: "镜头制作", caption: "生成视频片段" },
 ];
 const statusLabels: Record<ProjectStageStatus, string> = {
   notStarted: "未开始",

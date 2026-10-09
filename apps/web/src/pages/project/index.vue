@@ -134,7 +134,7 @@ import type { CanvasContext } from "@minifeel/tool-canvas/runtime";
 import { apiErrorMessage } from "@/lib/api";
 import { getProjectModel, setProjectMode, setProjectModel } from "@/lib/projectMode";
 import { useProjectSaveGuard } from "@/lib/projectSaveGuard";
-import { useUserAppStore, type GenerationEstimate } from "@/stores/userApp";
+import { useUserAppStore, type GenerationEstimate, type PublicModel } from "@/stores/userApp";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { formatDate, taskStatusLabels, taskStatusTypes, taskTypeLabels } from "@/pages/app/appFormat";
 import projectHeader from "./components/projectHeader.vue";
@@ -209,10 +209,15 @@ const stageContents = {
   script: { number: 1, title: "把灵感变成完整剧本", description: "先确定人物、冲突和结局，再补充场景与对白。", icon: IconFileText, mediaType: "text" },
   characters: { number: 2, title: "建立统一的角色形象", description: "为主要人物确定外貌、服装和情绪，让前后画面保持一致。", icon: IconPhoto, mediaType: "image" },
   storyboard: { number: 3, title: "把剧本拆成连续画面", description: "逐镜确认景别、构图和人物动作，提前看清故事节奏。", icon: IconPhoto, mediaType: "image" },
-  video: { number: 4, title: "生成可以剪辑的视频片段", description: "选择确认过的分镜，生成镜头片段并查看任务进度。", icon: IconVideo, mediaType: "video" },
+  video: { number: 4, title: "制作可以剪辑的镜头片段", description: "选择确认过的分镜，生成镜头片段并查看任务进度。", icon: IconVideo, mediaType: "video" },
 } as const;
 const stageContent = computed(() => stageContents[activeStage.value]);
-const stageModels = computed(() => userAppStore.models.filter(model => model.mediaType === stageContent.value.mediaType));
+const stageModels = computed<PublicModel[]>(() => {
+  const mediaType = stageContent.value.mediaType;
+  // ACT: 旧 mode 只能表达互斥模式；组合能力契约落地前普通镜头制作不开放视频模型，之后在此按已验证能力过滤。
+  if (mediaType === "video") return [];
+  return userAppStore.models.filter(model => model.mediaType === mediaType);
+});
 const projectTasks = computed(() => userAppStore.tasks.filter(task => task.projectId === workspaceStore.project?.id));
 const activeTasks = computed(() => projectTasks.value.filter(task => task.status === "pending" || task.status === "running"));
 const stageStatuses = computed<Record<ProjectStage, ProjectStageStatus>>(() => creativeView.value?.statuses ?? ({
@@ -441,7 +446,6 @@ async function configureImageGeneration(nodeId: string, modelId: string, prompt:
     providerId: "managed",
     modelId,
     prompt,
-    count: 1,
     outputDirectory: `assets/${nodeId}`,
   };
   if (configured.config.size) request.size = configured.config.size;
@@ -485,7 +489,7 @@ async function reorderStoryboard(nodeId: string, direction: -1 | 1) {
 async function prepareVideoGeneration(storyboardNodeId: string) {
   const projectId = workspaceStore.project?.id;
   const shot = creativeView.value?.storyboard.find(item => item.nodeId === storyboardNodeId);
-  const model = userAppStore.models.find(item => item.id === selectedModelId.value && item.mediaType === "video");
+  const model = stageModels.value.find(item => item.id === selectedModelId.value);
   if (!projectId || !shot || !shot.output || !shot.confirmed || !model || generationBusy.value) return;
   creativeBusy.value = true;
   try {
@@ -537,12 +541,7 @@ async function configureVideoGeneration(nodeId: string, modelId: string, prompt:
     ?? model.mode.find(item => item === "text");
   if (!mode) throw new Error("当前视频模型需要两张参考图，导演工作台暂不支持，请更换模型");
   const useImage = mode !== "text";
-  const canvasState = await canvas.call({ name: "getCanvas", args: {} });
-  const inputEdges = readInputEdges(canvasState, nodeId);
-  const retainedEdge = inputEdges.find(edge => edge.source === sourceNodeId && edge.sourceHandle === "image");
-  const removedEdgeIds = inputEdges.filter(edge => !useImage || edge !== retainedEdge).map(edge => edge.id);
-  if (removedEdgeIds.length) await canvas.call({ name: "deleteEdges", args: { edgeIds: removedEdgeIds } });
-  if (useImage && !retainedEdge) {
+  if (useImage) {
     await canvas.call({
       name: "connectNodes",
       args: { connections: [{ source: sourceNodeId, sourceHandle: "image", target: nodeId, targetHandle: "in" }] },
@@ -569,18 +568,6 @@ async function configureVideoGeneration(nodeId: string, modelId: string, prompt:
   else if (useImage && configured.config.mode === "startFrameOptional") request.lastFrame = reference;
   else if (useImage) request.images = [reference];
   return request;
-}
-
-function readInputEdges(value: unknown, nodeId: string) {
-  if (!isRecord(value) || !Array.isArray(value.edges)) throw new Error("画布连接读取失败");
-  return value.edges.flatMap(edge => isRecord(edge)
-    && typeof edge.id === "string"
-    && typeof edge.source === "string"
-    && typeof edge.sourceHandle === "string"
-    && edge.target === nodeId
-    && edge.targetHandle === "in"
-    ? [{ id: edge.id, source: edge.source, sourceHandle: edge.sourceHandle }]
-    : []);
 }
 
 function readImageNodeConfig(value: unknown) {
