@@ -42,26 +42,27 @@
           @confirmContent="confirmNode"
           @requestRepair="fillRepairPrompt('script')" />
 
-        <characterStage
+        <assetStage
           v-else-if="activeStage === 'characters'"
           v-model="selectedModelId"
           :projectId="workspaceStore.project.id"
-          :characters="creativeView?.characters ?? []"
+          :assets="creativeView?.assets ?? []"
           :models="stageModels"
           :modelsLoading="modelsLoading"
           :loading="creativeLoading"
           :errorMessage="creativeError"
           :busy="generationBusy"
-          @saveContent="saveCharacter"
+          @saveContent="saveAsset"
           @confirmContent="confirmNode"
-          @requestRepair="fillRepairPrompt('characters')"
-          @requestGenerate="prepareCharacterGeneration" />
+          @requestRepair="fillRepairPrompt('assets')"
+          @requestGenerate="prepareAssetGeneration" />
 
         <storyboardStage
           v-else-if="activeStage === 'storyboard'"
           v-model="selectedModelId"
           :projectId="workspaceStore.project.id"
           :shots="creativeView?.storyboard ?? []"
+          :assets="creativeView?.assets ?? []"
           :models="stageModels"
           :modelsLoading="modelsLoading"
           :loading="creativeLoading"
@@ -71,6 +72,7 @@
           @saveContent="saveStoryboard"
           @confirmContent="confirmNode"
           @reorder="reorderStoryboard"
+          @saveAssetReferences="saveStoryboardAssetReferences"
           @requestGenerate="prepareStoryboardGeneration"
           @requestGenerateAll="prepareStoryboardBatch" />
 
@@ -128,7 +130,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { IconFileText, IconPhoto, IconVideo } from "@tabler/icons-vue";
 import type { CanvasContext } from "@minifeel/tool-canvas/runtime";
 import { apiErrorMessage } from "@/lib/api";
@@ -142,11 +144,11 @@ import projectStages, { type ProjectStage, type ProjectStageStatus } from "./com
 import projectRuntime from "./components/projectRuntime.vue";
 import directorPanel from "./components/directorPanel.vue";
 import scriptStage from "./components/scriptStage.vue";
-import characterStage from "./components/characterStage.vue";
+import assetStage from "./components/assetStage.vue";
 import storyboardStage from "./components/storyboardStage.vue";
 import filmStage from "./components/filmStage.vue";
 import generationConfirm from "./components/generationConfirm.vue";
-import { creativeLabels, readCreativeView, type CreativeMediaCard, type CreativeView } from "./creativeViewAdapter";
+import { creativeLabels, readCreativeView, referenceKey, type CreativeMediaCard, type CreativeView } from "./creativeViewAdapter";
 
 type PreparedGeneration = {
   nodeId: string;
@@ -207,7 +209,7 @@ useProjectSaveGuard({
 });
 const stageContents = {
   script: { number: 1, title: "把灵感变成完整剧本", description: "先确定人物、冲突和结局，再补充场景与对白。", icon: IconFileText, mediaType: "text" },
-  characters: { number: 2, title: "建立统一的角色形象", description: "为主要人物确定外貌、服装和情绪，让前后画面保持一致。", icon: IconPhoto, mediaType: "image" },
+  characters: { number: 2, title: "设定可复用的视觉资产", description: "整理角色、场景、道具和风格，让每个镜头都有明确的视觉依据。", icon: IconPhoto, mediaType: "image" },
   storyboard: { number: 3, title: "把剧本拆成连续画面", description: "逐镜确认景别、构图和人物动作，提前看清故事节奏。", icon: IconPhoto, mediaType: "image" },
   video: { number: 4, title: "制作可以剪辑的镜头片段", description: "选择确认过的分镜，生成镜头片段并查看任务进度。", icon: IconVideo, mediaType: "video" },
 } as const;
@@ -316,7 +318,7 @@ async function refreshCreativeView(options: { silent?: boolean } = {}) {
     if (runtimeReady.value && await restoreTaskOutputs(view)) {
       view = await readCreativeView(projectId, userAppStore.tasks.filter(task => task.projectId === projectId));
     }
-    for (const card of [...view.characters, ...view.storyboard, ...view.films]) {
+    for (const card of [...view.assets, ...view.storyboard, ...view.films]) {
       if (card.outputPersisted) delete generationErrors[card.nodeId];
     }
     if (version !== creativeRefreshVersion || projectId !== workspaceStore.project?.id) return;
@@ -334,7 +336,7 @@ async function refreshCreativeView(options: { silent?: boolean } = {}) {
 
 async function restoreTaskOutputs(view: CreativeView) {
   let restored = false;
-  for (const card of [...view.characters, ...view.storyboard, ...view.films]) {
+  for (const card of [...view.assets, ...view.storyboard, ...view.films]) {
     if (!card.output || card.outputPersisted || taskDiscoveries.value.some(item => item.nodeId === card.nodeId)) continue;
     try {
       await getCanvas().call({
@@ -369,7 +371,7 @@ function saveScript(nodeId: string, text: string, draftLabel: string) {
   return updateNode(nodeId, draftLabel, { name: "node:setText", args: { text } });
 }
 
-function saveCharacter(nodeId: string, prompt: string, draftLabel: string) {
+function saveAsset(nodeId: string, prompt: string, draftLabel: string) {
   return updateNode(nodeId, draftLabel, { name: "node:setPrompt", args: { prompt } });
 }
 
@@ -377,24 +379,93 @@ function saveStoryboard(nodeId: string, prompt: string, draftLabel: string) {
   return updateNode(nodeId, draftLabel, { name: "node:setPrompt", args: { prompt } });
 }
 
+async function saveStoryboardAssetReferences(nodeId: string, assetNodeIds: string[]) {
+  if (creativeBusy.value) return;
+  const shot = creativeView.value?.storyboard.find(item => item.nodeId === nodeId);
+  const assets = creativeView.value?.assets ?? [];
+  const selectedIds = [...new Set(assetNodeIds)];
+  if (!shot || selectedIds.length !== assetNodeIds.length || selectedIds.some(nodeId => !assets.some(asset => asset.nodeId === nodeId))) {
+    return void ElMessage.error("资产选择已经变化，请刷新后重试");
+  }
+  const lockedIds = new Set(shot.assetReferences.filter(reference => !reference.managedByGuided).map(reference => reference.nodeId));
+  if (selectedIds.some(nodeId => lockedIds.has(nodeId))) return void ElMessage.error("高级画布连接由高级画布管理，普通创作页不会修改它");
+  const managedReferences = shot.assetReferences.filter(reference => reference.managedByGuided);
+  const existingIds = new Set(shot.assetReferences.map(reference => reference.nodeId));
+  const additions = selectedIds.filter(nodeId => !existingIds.has(nodeId));
+  const removals = managedReferences.filter(reference => !selectedIds.includes(reference.nodeId));
+  const orderChanged = JSON.stringify(selectedIds) !== JSON.stringify(managedReferences.map(reference => reference.nodeId));
+  if (!additions.length && !removals.length && !orderChanged) return;
+  const detail = [
+    additions.length ? `新增 ${additions.length} 条资产连接` : "",
+    removals.length ? `移除 ${removals.length} 条普通创作页管理的资产连接` : "",
+    !additions.length && !removals.length && orderChanged ? "调整普通创作页资产引用顺序" : "",
+  ].filter(Boolean).join("；");
+  try {
+    await ElMessageBox.confirm(`${detail}。高级画布建立的连接会保持不变。`, "确认本镜资产", {
+      confirmButtonText: "应用连接",
+      cancelButtonText: "取消",
+      type: "warning",
+    });
+  } catch {
+    return;
+  }
+  creativeBusy.value = true;
+  try {
+    const canvas = getCanvas();
+    if (additions.length) {
+      await canvas.call({
+        name: "connectNodes",
+        args: {
+          connections: additions.map(source => ({
+            source,
+            sourceHandle: "image",
+            target: shot.nodeId,
+            targetHandle: "in",
+            data: { minifeelRelationship: "assetReference" },
+          })),
+        },
+      });
+    }
+    if (removals.length) await canvas.call({ name: "deleteEdges", args: { edgeIds: removals.map(reference => reference.edgeId) } });
+    const removedKeys = new Set(removals.map(reference => reference.referenceKey));
+    const referenceOrder = shot.referenceOrder.filter(key => !removedKeys.has(key));
+    for (const nodeId of selectedIds) {
+      const key = referenceKey(nodeId);
+      if (!referenceOrder.includes(key)) referenceOrder.push(key);
+    }
+    await canvas.call({
+      name: "nodeTools",
+      args: { nodeId: shot.nodeId, name: "node:setReferenceOrder", args: { handleId: "in", referenceKeys: referenceOrder } },
+    });
+    await refreshCreativeView();
+    ElMessage.success("本镜资产连接已保存");
+  } catch (error) {
+    await refreshCreativeView().catch(() => undefined);
+    ElMessage.error(apiErrorMessage(error, "资产连接保存失败，请进入高级画布检查连线"));
+  } finally {
+    creativeBusy.value = false;
+  }
+}
+
 function confirmNode(nodeId: string, confirmedLabel: string) {
   return updateNode(nodeId, confirmedLabel);
 }
 
-function fillRepairPrompt(type: "script" | "characters") {
+function fillRepairPrompt(type: "script" | "assets") {
   const prompt = type === "script"
     ? "请检查当前画布中的故事内容，把合适的文本节点整理为 Minifeel/剧本；如果还没有完整剧本，请新建文本节点补齐。只整理文字草稿，不生成图片或视频，不删除其他节点。"
-    : "请根据 Minifeel/剧本 整理角色。每个角色使用一个图片生成节点，命名为 Minifeel/角色/<角色名>，只填写角色提示词，不生成图片，不删除其他节点。";
+    : "请根据 Minifeel/剧本 整理视觉资产。角色、场景、道具和风格分别使用图片生成节点，命名为 Minifeel/角色/<名称>、Minifeel/场景/<名称>、Minifeel/道具/<名称>、Minifeel/风格/<名称>，只填写提示词，不生成图片，不删除其他节点。";
   void directorRef.value?.fillPrompt(prompt);
 }
 
-async function prepareCharacterGeneration(nodeId: string) {
-  const character = creativeView.value?.characters.find(item => item.nodeId === nodeId);
-  if (character) await prepareImageGenerations([character], "角色图片");
+async function prepareAssetGeneration(nodeId: string) {
+  const asset = creativeView.value?.assets.find(item => item.nodeId === nodeId);
+  if (asset) await prepareImageGenerations([asset], "资产图片");
 }
 
 async function prepareStoryboardGeneration(nodeId: string) {
   const shot = creativeView.value?.storyboard.find(item => item.nodeId === nodeId);
+  if (shot?.assetReferences.length) return void ElMessage.warning("镜头已关联资产，当前版本尚不能安全冻结引用并估价");
   if (shot) await prepareImageGenerations([shot], "分镜图片");
 }
 
@@ -402,7 +473,7 @@ async function prepareStoryboardBatch(nodeIds: string[]) {
   if (new Set(nodeIds).size !== nodeIds.length) return void ElMessage.error("批量分镜列表无效，请刷新后重试");
   const shots = nodeIds.flatMap(nodeId => {
     const shot = creativeView.value?.storyboard.find(item => item.nodeId === nodeId);
-    return shot && !shot.output && shot.prompt.trim() && shot.task?.status !== "pending" && shot.task?.status !== "running" ? [shot] : [];
+    return shot && !shot.output && !shot.assetReferences.length && shot.prompt.trim() && shot.task?.status !== "pending" && shot.task?.status !== "running" ? [shot] : [];
   });
   if (shots.length !== nodeIds.length) return void ElMessage.error("分镜内容已经变化，请确认保存后重试");
   if (shots.length) await prepareImageGenerations(shots, "分镜图片");
@@ -412,6 +483,7 @@ async function prepareImageGenerations(cards: CreativeMediaCard[], generationTyp
   const projectId = workspaceStore.project?.id;
   const model = userAppStore.models.find(item => item.id === selectedModelId.value && item.mediaType === "image");
   if (!projectId || !model || generationBusy.value) return;
+  if (cards.some(card => card.assetReferences.length)) return void ElMessage.warning("包含资产引用的分镜尚不能安全冻结输入并估价");
   creativeBusy.value = true;
   try {
     const items: PreparedGeneration[] = [];
@@ -468,7 +540,7 @@ async function reorderStoryboard(nodeId: string, direction: -1 | 1) {
     const order = String(shotIndex + 1).padStart(3, "0");
     return [
       { nodeId: shot.nodeId, label: `${creativeLabels.storyboard}${order}${shot.confirmed ? "/已确认" : ""}` },
-      ...(film ? [{ nodeId: film.nodeId, label: `${creativeLabels.film}${order}${film.confirmed ? "/已确认" : ""}` }] : []),
+      ...(film ? [{ nodeId: film.nodeId, label: `${film.labelPrefix}${order}${film.confirmed ? "/已确认" : ""}` }] : []),
     ];
   });
   if (new Set(renames.map(item => item.nodeId)).size !== renames.length) {
@@ -490,6 +562,7 @@ async function prepareVideoGeneration(storyboardNodeId: string) {
   const projectId = workspaceStore.project?.id;
   const shot = creativeView.value?.storyboard.find(item => item.nodeId === storyboardNodeId);
   const model = stageModels.value.find(item => item.id === selectedModelId.value);
+  if (shot?.assetReferences.length) return void ElMessage.warning("镜头已关联资产，当前版本尚不能安全冻结引用并估价");
   if (!projectId || !shot || !shot.output || !shot.confirmed || !model || generationBusy.value) return;
   creativeBusy.value = true;
   try {
@@ -520,7 +593,7 @@ async function ensureFilmNode(shot: CreativeMediaCard) {
   if (!filmNodeId) {
     const created = await canvas.call({
       name: "addNode",
-      args: { type: "remote-videoGenerationNode", position: { x: 720, y: Math.max(0, (shot.order - 1) * 300) }, label: `${creativeLabels.film}${String(shot.order).padStart(3, "0")}` },
+      args: { type: "remote-videoGenerationNode", position: { x: 720, y: Math.max(0, (shot.order - 1) * 300) }, label: `${creativeLabels.clip}${String(shot.order).padStart(3, "0")}` },
     });
     if (!isRecord(created) || !isRecord(created.node) || typeof created.node.id !== "string") throw new Error("视频节点创建失败");
     filmNodeId = created.node.id;
@@ -676,13 +749,15 @@ async function confirmGeneration() {
 
 async function reconfigureGeneration(item: PreparedGeneration) {
   if (item.taskType === "image") {
-    const card = [...(creativeView.value?.characters ?? []), ...(creativeView.value?.storyboard ?? [])].find(value => value.nodeId === item.nodeId);
+    const card = [...(creativeView.value?.assets ?? []), ...(creativeView.value?.storyboard ?? [])].find(value => value.nodeId === item.nodeId);
     if (!card) throw new Error("待生成内容已经变化，请关闭确认框后重试");
+    if (card.assetReferences.length) throw new Error("分镜已关联资产，当前版本尚不能安全冻结输入并估价");
     return configureImageGeneration(item.nodeId, item.modelId, card.prompt);
   }
   const film = creativeView.value?.films.find(value => value.nodeId === item.nodeId);
   const shot = creativeView.value?.storyboard.find(value => value.order === film?.order);
   if (!shot?.output) throw new Error("分镜图片已经变化，请关闭确认框后重试");
+  if (shot.assetReferences.length) throw new Error("分镜已关联资产，当前版本尚不能安全冻结输入并估价");
   return configureVideoGeneration(item.nodeId, item.modelId, shot.prompt, shot.output, shot.nodeId);
 }
 
@@ -726,7 +801,7 @@ async function pollGenerationTasks() {
         continue;
       }
       const task = projectTasks.value.find(item => item.id === discovery.taskId);
-      const outputReady = [...(creativeView.value?.characters ?? []), ...(creativeView.value?.storyboard ?? []), ...(creativeView.value?.films ?? [])]
+      const outputReady = [...(creativeView.value?.assets ?? []), ...(creativeView.value?.storyboard ?? []), ...(creativeView.value?.films ?? [])]
         .some(item => item.nodeId === discovery.nodeId && item.output);
       const terminal = !!task && ["succeeded", "failed", "cancelled"].includes(task.status);
       if (outputReady || terminal && task.status !== "succeeded") continue;
@@ -790,10 +865,10 @@ async function openAdvanced() {
 
     .creativeWarning { margin-top: 18px; flex-shrink: 0; }
     :deep(.scriptStage),
-    :deep(.characterStage),
+    :deep(.assetStage),
     :deep(.storyboardStage),
     :deep(.filmStage) { margin-top: 24px; }
-    :deep(.characterStage),
+    :deep(.assetStage),
     :deep(.storyboardStage),
     :deep(.filmStage) { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
     :deep(.scriptStage) { flex: 1; min-height: 0; overflow: hidden; }
@@ -853,7 +928,7 @@ async function openAdvanced() {
       padding: 20px;
       overflow: visible;
       :deep(.scriptStage),
-      :deep(.characterStage),
+      :deep(.assetStage),
       :deep(.storyboardStage),
       :deep(.filmStage) { flex: initial; min-height: 0; overflow: visible; }
     }

@@ -188,7 +188,7 @@ export function useCanvasTools(options: {
           const id = crypto.randomUUID();
           // ACT: 候选边只参与本批校验，全部通过后再一次提交画布。
           edges.push({
-            ...connection, id, type: "default", selected: false, data: {}, events: {}, sourceNode, targetNode,
+            ...connection, id, type: "default", selected: false, data: connection.data ?? {}, events: {}, sourceNode, targetNode,
             sourceX: sourceNode.computedPosition.x, sourceY: sourceNode.computedPosition.y,
             targetX: targetNode.computedPosition.x, targetY: targetNode.computedPosition.y,
           });

@@ -14,7 +14,13 @@ export const canvasSchemas = {
   moveNodes: z.strictObject({ moves: z.array(z.strictObject({ nodeId, position })).min(1).max(64) }),
   renameNodes: z.strictObject({ renames: z.array(z.strictObject({ nodeId, label: z.string().trim().min(1).max(200) })).min(1).max(64) }),
   connectNodes: z.strictObject({
-    connections: z.array(z.strictObject({ source: nodeId, sourceHandle: z.string().min(1), target: nodeId, targetHandle: z.string().min(1) })).min(1).max(64),
+    connections: z.array(z.strictObject({
+      source: nodeId,
+      sourceHandle: z.string().min(1),
+      target: nodeId,
+      targetHandle: z.string().min(1),
+      data: z.record(z.string(), z.json()).optional(),
+    })).min(1).max(64),
   }),
   deleteEdges: z.strictObject({ edgeIds: z.array(z.string().min(1).max(256)).min(1).max(64) }),
   selectNodes: z.strictObject({ nodeIds: z.array(nodeId) }),

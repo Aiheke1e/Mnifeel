@@ -411,6 +411,21 @@ nodeTools.register({
 });
 
 nodeTools.register({
+  name: "setReferenceOrder",
+  description: "保存指定输入端口的参考素材顺序；只调整同一端口引用的显示与生成顺序，不新增或删除连线，不启动生成",
+  parameters: z.strictObject({
+    handleId: z.string().min(1).max(64).default("in"),
+    referenceKeys: z.array(z.string().min(1).max(1024)).max(64),
+  }),
+  execute({ handleId, referenceKeys }) {
+    if (deleting.value) throw new Error("节点正在删除，请稍后修改");
+    const nodeData = node.data as { referenceOrder?: Record<string, string[]> };
+    nodeData.referenceOrder = { ...nodeData.referenceOrder, [handleId]: referenceKeys };
+    return { handleId, referenceKeys };
+  },
+});
+
+nodeTools.register({
   name: "generateVideo",
   description: "启动此节点的后台视频生成，使用当前提示词、模型、模式、时长、分辨率、比例和参考素材；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止生成",
   parameters: z.strictObject({}),

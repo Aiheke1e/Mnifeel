@@ -32,6 +32,12 @@
               <el-tag :type="statusType(shot)" effect="light" round>{{ statusText(shot) }}</el-tag>
             </header>
             <p class="shotPrompt">{{ shot.prompt }}</p>
+            <el-alert
+              v-if="shot.assetReferences.length"
+              title="此镜头已关联资产，当前版本还不能冻结实际引用并安全估价；后续版本开放后可直接沿用这些画布连接。"
+              type="info"
+              showIcon
+              :closable="false" />
             <el-alert v-if="cardError(shot)" :title="cardError(shot)" type="error" showIcon :closable="false" />
             <p v-if="filmFor(shot)?.task" class="creditText">{{ taskCreditText(filmFor(shot)!.task!) }}</p>
             <footer>
@@ -137,10 +143,11 @@ function cardError(shot: CreativeMediaCard) {
 }
 
 function generateDisabled(shot: CreativeMediaCard) {
-  return props.busy || props.modelsLoading || !props.models.length || isGenerating(shot) || !props.modelValue || !shot.confirmed || !shot.output;
+  return props.busy || props.modelsLoading || !props.models.length || isGenerating(shot) || !!shot.assetReferences.length || !props.modelValue || !shot.confirmed || !shot.output;
 }
 
 function generateHint(shot: CreativeMediaCard) {
+  if (shot.assetReferences.length) return "镜头含资产引用，当前版本尚不能安全估价，请在后续版本生成";
   if (props.modelsLoading) return "正在读取兼容的视频模型";
   if (!props.models.length) return "暂无兼容的视频模型";
   if (!props.modelValue) return "请先选择视频模型";

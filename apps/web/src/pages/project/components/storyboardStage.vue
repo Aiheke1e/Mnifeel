@@ -37,6 +37,32 @@
             </header>
             <el-alert v-if="cardError(shot)" :title="cardError(shot)" type="error" showIcon :closable="false" />
             <el-input v-model="drafts[shot.nodeId]" type="textarea" :autosize="{ minRows: 4, maxRows: 8 }" :disabled="busy" aria-label="分镜生成提示词" />
+            <div v-if="assets.length" class="assetChoice">
+              <label :for="`shotAssets-${shot.nodeId}`">本镜资产</label>
+              <el-select
+                :id="`shotAssets-${shot.nodeId}`"
+                v-model="assetSelections[shot.nodeId]"
+                multiple
+                filterable
+                collapseTags
+                collapseTagsTooltip
+                :disabled="busy"
+                placeholder="选择需要出现在此镜的资产">
+                <el-option-group v-for="group in assetGroups" :key="group.type" :label="assetTypeLabels[group.type]">
+                  <el-option v-for="asset in group.assets" :key="asset.nodeId" :label="asset.title" :value="asset.nodeId" :disabled="lockedAssetIds(shot).includes(asset.nodeId)" />
+                </el-option-group>
+              </el-select>
+              <p v-if="shot.assetReferences.length" class="assetSummary">
+                当前引用：{{ shot.assetReferences.map(asset => `${assetTypeLabels[asset.assetType]}·${asset.title}`).join("、") }}
+              </p>
+              <el-alert
+                v-if="lockedAssetIds(shot).length"
+                title="此镜头包含高级画布建立的资产连接，普通创作页会保留它们；请在高级画布调整。"
+                type="info"
+                showIcon
+                :closable="false" />
+              <el-button type="primary" plain :disabled="busy || !assetSelectionChanged(shot)" @click="emit('saveAssetReferences', shot.nodeId, assetSelections[shot.nodeId] ?? [])">保存本镜资产</el-button>
+            </div>
             <footer>
               <span class="orderButtons">
                 <el-button circle :disabled="busy || index === 0" aria-label="向前移动镜头" @click="emit('reorder', shot.nodeId, -1)"><icon-arrow-up :size="16" /></el-button>
@@ -69,11 +95,12 @@ import { IconArrowDown, IconArrowUp, IconPhoto, IconPhotoOff } from "@tabler/ico
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { friendlyTaskError } from "@/pages/app/appFormat";
 import type { PublicModel } from "@/stores/userApp";
-import type { CreativeMediaCard } from "../creativeViewAdapter";
+import { assetTypeLabels, type CreativeAssetType, type CreativeMediaCard } from "../creativeViewAdapter";
 
 const props = defineProps<{
   projectId: string;
   shots: CreativeMediaCard[];
+  assets: CreativeMediaCard[];
   models: PublicModel[];
   modelValue: string;
   modelsLoading: boolean;
@@ -87,17 +114,25 @@ const emit = defineEmits<{
   saveContent: [nodeId: string, prompt: string, draftLabel: string];
   confirmContent: [nodeId: string, confirmedLabel: string];
   reorder: [nodeId: string, direction: -1 | 1];
+  saveAssetReferences: [nodeId: string, assetNodeIds: string[]];
   requestGenerate: [nodeId: string];
   requestGenerateAll: [nodeIds: string[]];
 }>();
 const drafts = reactive<Record<string, string>>({});
 const sourcePrompts = reactive<Record<string, string>>({});
+const assetSelections = reactive<Record<string, string[]>>({});
+const sourceAssetSelections = reactive<Record<string, string>>({});
 const previewUrls = reactive<Record<string, string>>({});
 const selectedPreviewUrl = ref("");
 const selectedPreviewTitle = ref("");
 let releases: Array<() => void> = [];
 let previewVersion = 0;
-const batchNodeIds = computed(() => props.shots.filter(shot => !shot.output && shot.prompt.trim() && drafts[shot.nodeId] === shot.prompt && !isGenerating(shot)).map(shot => shot.nodeId));
+const assetTypes: CreativeAssetType[] = ["character", "scene", "prop", "style"];
+const assetGroups = computed(() => assetTypes.flatMap(type => {
+  const assets = props.assets.filter(asset => asset.assetType === type);
+  return assets.length ? [{ type, assets }] : [];
+}));
+const batchNodeIds = computed(() => props.shots.filter(shot => !shot.output && !shot.assetReferences.length && shot.prompt.trim() && drafts[shot.nodeId] === shot.prompt && !isGenerating(shot)).map(shot => shot.nodeId));
 const batchCount = computed(() => batchNodeIds.value.length);
 const batchDisabled = computed(() => props.busy || !props.modelValue || batchCount.value === 0);
 
@@ -107,12 +142,18 @@ watch(() => props.shots, shots => {
     if (nodeIds.has(nodeId)) continue;
     delete drafts[nodeId];
     delete sourcePrompts[nodeId];
+    delete assetSelections[nodeId];
+    delete sourceAssetSelections[nodeId];
   }
   for (const shot of shots) {
     const sourcePrompt = sourcePrompts[shot.nodeId];
     const dirty = sourcePrompt !== undefined && drafts[shot.nodeId] !== sourcePrompt;
     sourcePrompts[shot.nodeId] = shot.prompt;
     if (!dirty) drafts[shot.nodeId] = shot.prompt;
+    const sourceAssets = JSON.stringify(guidedAssetIds(shot));
+    const assetsDirty = sourceAssetSelections[shot.nodeId] !== undefined && JSON.stringify(assetSelections[shot.nodeId] ?? []) !== sourceAssetSelections[shot.nodeId];
+    sourceAssetSelections[shot.nodeId] = sourceAssets;
+    if (!assetsDirty) assetSelections[shot.nodeId] = guidedAssetIds(shot);
   }
 }, { immediate: true });
 
@@ -183,14 +224,27 @@ function isGenerating(shot: CreativeMediaCard) {
 }
 
 function generateDisabled(shot: CreativeMediaCard) {
-  return props.busy || isGenerating(shot) || !props.modelValue || !shot.prompt.trim() || drafts[shot.nodeId] !== shot.prompt;
+  return props.busy || isGenerating(shot) || !!shot.assetReferences.length || !props.modelValue || !shot.prompt.trim() || drafts[shot.nodeId] !== shot.prompt;
 }
 
 function generateHint(shot: CreativeMediaCard) {
+  if (shot.assetReferences.length) return "镜头含资产引用，当前版本尚不能安全估价，请在后续版本生成";
   if (!props.modelValue) return "管理员暂未启用图片模型";
   if (drafts[shot.nodeId] !== shot.prompt) return "请先保存镜头描述";
   if (isGenerating(shot)) return "分镜图片正在生成";
   return "查看预计积分并确认生成";
+}
+
+function guidedAssetIds(shot: CreativeMediaCard) {
+  return shot.assetReferences.filter(asset => asset.managedByGuided).map(asset => asset.nodeId);
+}
+
+function lockedAssetIds(shot: CreativeMediaCard) {
+  return shot.assetReferences.filter(asset => !asset.managedByGuided).map(asset => asset.nodeId);
+}
+
+function assetSelectionChanged(shot: CreativeMediaCard) {
+  return JSON.stringify(assetSelections[shot.nodeId] ?? []) !== sourceAssetSelections[shot.nodeId];
 }
 </script>
 
@@ -225,6 +279,7 @@ function generateHint(shot: CreativeMediaCard) {
     }
   }
   .shotBody { display: grid; align-content: start; gap: 13px; padding: 18px; header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; h3 { margin: 4px 0 0; color: var(--studioText); } } footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; .orderButtons { margin-right: auto; } } :deep(.el-textarea__inner) { border-radius: 12px; line-height: 1.65; } }
+  .assetChoice { display: grid; gap: 8px; label { color: var(--studioText); font-size: 13px; font-weight: 650; } .assetSummary { margin: 0; color: var(--studioMuted); font-size: 12px; line-height: 1.6; } :deep(.el-alert) { padding: 8px 10px; } }
   .dialogPreviewImage { display: block; max-width: 100%; max-height: calc(100dvh - 180px); margin: 0 auto; object-fit: contain; }
 }
 @media (max-width: 720px) {

@@ -5,17 +5,58 @@ import type { ProjectStage, ProjectStageStatus } from "./components/projectStage
 export const creativeLabels = {
   script: "Minifeel/剧本",
   character: "Minifeel/角色/",
+  scene: "Minifeel/场景/",
+  prop: "Minifeel/道具/",
+  style: "Minifeel/风格/",
   storyboard: "Minifeel/分镜/",
-  film: "Minifeel/成片/",
+  clip: "Minifeel/片段/",
+  legacyFilm: "Minifeel/成片/",
+  finalFilm: "Minifeel/成片",
 } as const;
 
+export type CreativeAssetType = "character" | "scene" | "prop" | "style";
+
+export const assetTypeLabels: Record<CreativeAssetType, string> = {
+  character: "角色",
+  scene: "场景",
+  prop: "道具",
+  style: "风格",
+};
+
 type CreativeLabel = {
-  type: ProjectStage;
+  type: "script" | "asset" | "storyboard" | "video" | "finalFilm";
   title: string;
   order: number;
   confirmed: boolean;
   draftLabel: string;
   confirmedLabel: string;
+  labelPrefix: string;
+  assetType?: CreativeAssetType;
+  legacy?: boolean;
+};
+
+type CanvasNode = {
+  id: string;
+  type: string;
+  data: Record<string, unknown>;
+};
+
+type CanvasEdge = {
+  id: string;
+  source: string;
+  sourceHandle: string;
+  target: string;
+  targetHandle: string;
+  data: Record<string, unknown>;
+};
+
+export type CreativeAssetReference = {
+  nodeId: string;
+  title: string;
+  assetType: CreativeAssetType;
+  edgeId: string;
+  managedByGuided: boolean;
+  referenceKey: string;
 };
 
 export type CreativeMediaCard = {
@@ -26,6 +67,11 @@ export type CreativeMediaCard = {
   confirmed: boolean;
   draftLabel: string;
   confirmedLabel: string;
+  labelPrefix: string;
+  assetType?: CreativeAssetType;
+  legacy?: boolean;
+  assetReferences: CreativeAssetReference[];
+  referenceOrder: string[];
   output?: { path: string; mimeType: string };
   outputPersisted: boolean;
   task?: GenerationTask;
@@ -41,18 +87,20 @@ export type CreativeScript = {
 
 export type CreativeView = {
   script?: CreativeScript;
-  characters: CreativeMediaCard[];
+  assets: CreativeMediaCard[];
   storyboard: CreativeMediaCard[];
   films: CreativeMediaCard[];
+  finalFilm?: CreativeMediaCard;
   statuses: Record<ProjectStage, ProjectStageStatus>;
   warnings: string[];
 };
 
-type CanvasNode = {
-  id: string;
-  type: string;
-  data: Record<string, unknown>;
-};
+const assetPrefixes: Array<{ prefix: string; assetType: CreativeAssetType }> = [
+  { prefix: creativeLabels.character, assetType: "character" },
+  { prefix: creativeLabels.scene, assetType: "scene" },
+  { prefix: creativeLabels.prop, assetType: "prop" },
+  { prefix: creativeLabels.style, assetType: "style" },
+];
 
 export function parseCreativeLabel(label: unknown): CreativeLabel | undefined {
   if (typeof label !== "string") return;
@@ -60,20 +108,28 @@ export function parseCreativeLabel(label: unknown): CreativeLabel | undefined {
   const draftLabel = confirmed ? label.slice(0, -4) : label;
   const confirmedLabel = `${draftLabel}/已确认`;
   if (draftLabel === creativeLabels.script) {
-    return { type: "script", title: "剧本", order: 0, confirmed, draftLabel, confirmedLabel };
+    return { type: "script", title: "剧本", order: 0, confirmed, draftLabel, confirmedLabel, labelPrefix: creativeLabels.script };
   }
-  if (draftLabel.startsWith(creativeLabels.character)) {
-    const title = draftLabel.slice(creativeLabels.character.length);
-    if (title && !title.includes("/")) return { type: "characters", title, order: 0, confirmed, draftLabel, confirmedLabel };
+  if (draftLabel === creativeLabels.finalFilm) {
+    return { type: "finalFilm", title: "成片", order: 0, confirmed, draftLabel, confirmedLabel, labelPrefix: creativeLabels.finalFilm };
+  }
+  for (const { prefix, assetType } of assetPrefixes) {
+    if (!draftLabel.startsWith(prefix)) continue;
+    const title = draftLabel.slice(prefix.length);
+    if (title && !title.includes("/")) return { type: "asset", title, order: 0, confirmed, draftLabel, confirmedLabel, labelPrefix: prefix, assetType };
     return;
   }
-  for (const [type, prefix] of [["storyboard", creativeLabels.storyboard], ["video", creativeLabels.film]] as const) {
+  for (const [type, prefix, legacy] of [["storyboard", creativeLabels.storyboard, false], ["video", creativeLabels.clip, false], ["video", creativeLabels.legacyFilm, true]] as const) {
     if (!draftLabel.startsWith(prefix)) continue;
     const suffix = draftLabel.slice(prefix.length);
     if (!/^\d{3}$/.test(suffix)) return;
     const order = Number(suffix);
-    if (order > 0) return { type, title: suffix, order, confirmed, draftLabel, confirmedLabel };
+    if (order > 0) return { type, title: suffix, order, confirmed, draftLabel, confirmedLabel, labelPrefix: prefix, legacy };
   }
+}
+
+export function referenceKey(nodeId: string, handleId = "image") {
+  return encodeURIComponent(JSON.stringify([nodeId, handleId]));
 }
 
 export async function readCreativeView(projectId: string, tasks: GenerationTask[]): Promise<CreativeView> {
@@ -86,62 +142,128 @@ export async function readCreativeView(projectId: string, tasks: GenerationTask[
   }
   if (!isRecord(canvas) || canvas.minifeelCanvas !== true || !Array.isArray(canvas.nodes)) throw new Error("项目画布读取失败：文件不是有效的 Minifeel 画布");
   const nodes = canvas.nodes.map((value, index) => readNode(value, index));
-  const warnings: string[] = [];
-  const unmatchedCount = nodes.filter(node => !parseCreativeLabel(node.data.label)).length;
-  if (unmatchedCount) warnings.push(`有 ${unmatchedCount} 个画布节点尚未整理到创作流程，可进入高级画布查看。`);
+  const warnings = new Set<string>();
+  const parsedNodes = nodes.map(node => ({ node, label: parseCreativeLabel(node.data.label) }));
+  const unmatchedCount = parsedNodes.filter(item => !item.label).length;
+  if (unmatchedCount) warnings.add(`有 ${unmatchedCount} 个画布节点尚未整理到创作流程，可进入高级画布查看。`);
+  const edges = Array.isArray(canvas.edges) ? canvas.edges.flatMap((value, index) => {
+    const edge = readEdge(value);
+    if (!edge) warnings.add(`有 ${index + 1} 条画布连线格式无效，已在普通创作页忽略。`);
+    return edge ? [edge] : [];
+  }) : [];
 
   let script: CreativeScript | undefined;
-  const characters: CreativeMediaCard[] = [];
+  const assets: CreativeMediaCard[] = [];
   const storyboard: CreativeMediaCard[] = [];
   const films: CreativeMediaCard[] = [];
-  for (const node of nodes) {
-    const parsed = parseCreativeLabel(node.data.label);
-    if (!parsed) continue;
-    if (parsed.type === "script") {
+  let finalFilm: CreativeMediaCard | undefined;
+  const assetNodes = new Map<string, CreativeMediaCard>();
+
+  for (const { node, label } of parsedNodes) {
+    if (!label) continue;
+    if (label.type === "script") {
       if (script) {
-        warnings.push("检测到多个剧本节点，当前展示画布中的第一个。可进入高级画布整理重复节点。");
+        warnings.add("检测到多个剧本节点，当前展示画布中的第一个。可进入高级画布整理重复节点。");
         continue;
       }
       if (node.type !== "remote-textNode") throw new Error("项目画布读取失败：Minifeel/剧本 必须是文本节点");
       const textPath = safeWorkspacePath(node.data.textPath);
       if (!textPath) throw new Error("项目画布读取失败：剧本节点缺少有效的文本文件路径");
-      script = { nodeId: node.id, text: await files.readText(textPath), confirmed: parsed.confirmed, draftLabel: parsed.draftLabel, confirmedLabel: parsed.confirmedLabel };
+      script = { nodeId: node.id, text: await files.readText(textPath), confirmed: label.confirmed, draftLabel: label.draftLabel, confirmedLabel: label.confirmedLabel };
       continue;
     }
-    const expectedType = parsed.type === "video" ? "remote-videoGenerationNode" : "remote-imageGenerationNode";
-    if (node.type !== expectedType) throw new Error(`项目画布读取失败：${String(node.data.label)} 的节点类型无效`);
-    const persistedOutput = readMediaOutput(node.data.outputs, parsed.type === "video" ? "VIDEO" : "IMAGE");
+    const expectedTypes = label.type === "finalFilm"
+      ? ["remote-videoGenerationNode", "remote-videoNode"]
+      : [label.type === "video" ? "remote-videoGenerationNode" : "remote-imageGenerationNode"];
+    if (!expectedTypes.includes(node.type)) throw new Error(`项目画布读取失败：${String(node.data.label)} 的节点类型无效`);
+    const mediaType = label.type === "video" || label.type === "finalFilm" ? "video" : "image";
+    const persistedOutput = readMediaOutput(node.data.outputs, mediaType === "video" ? "VIDEO" : "IMAGE");
     const card: CreativeMediaCard = {
       nodeId: node.id,
-      title: parsed.title,
-      order: parsed.order,
+      title: label.title,
+      order: label.order,
       prompt: typeof node.data.prompt === "string" ? node.data.prompt : "",
-      confirmed: parsed.confirmed,
-      draftLabel: parsed.draftLabel,
-      confirmedLabel: parsed.confirmedLabel,
+      confirmed: label.confirmed,
+      draftLabel: label.draftLabel,
+      confirmedLabel: label.confirmedLabel,
+      labelPrefix: label.labelPrefix,
+      assetType: label.assetType,
+      legacy: label.legacy,
+      assetReferences: [],
+      referenceOrder: readReferenceOrder(node.data.referenceOrder),
       outputPersisted: !!persistedOutput,
       task: findNodeTask(tasks, node.id),
     };
-    card.output = persistedOutput ?? readTaskOutput(card.task, parsed.type === "video" ? "video" : "image");
-    if (parsed.type === "characters") characters.push(card);
-    else if (parsed.type === "storyboard") storyboard.push(card);
-    else films.push(card);
+    card.output = persistedOutput ?? readTaskOutput(card.task, mediaType);
+    if (label.type === "asset") {
+      assets.push(card);
+      assetNodes.set(node.id, card);
+    } else if (label.type === "storyboard") storyboard.push(card);
+    else if (label.type === "video") films.push(card);
+    else if (!finalFilm) finalFilm = card;
+    else warnings.add("检测到多个最终成片节点，当前展示画布中的第一个。可进入高级画布整理重复节点。");
+    if (label.legacy) warnings.add("检测到旧版 Minifeel/成片/编号 标签，当前按视频片段兼容读取，不会自动改名。");
   }
+
+  const knownNodeIds = new Set(nodes.map(node => node.id));
+  const incomingEdges = new Map<string, CanvasEdge[]>();
+  for (const edge of edges) {
+    if (!knownNodeIds.has(edge.source) || !knownNodeIds.has(edge.target)) {
+      warnings.add("检测到指向未知节点的画布连线，普通创作页不会修改它。");
+      continue;
+    }
+    const list = incomingEdges.get(edge.target) ?? [];
+    list.push(edge);
+    incomingEdges.set(edge.target, list);
+  }
+  for (const card of [...storyboard, ...films]) {
+    const references = (incomingEdges.get(card.nodeId) ?? []).flatMap(edge => {
+      const asset = assetNodes.get(edge.source);
+      if (!asset || !asset.assetType || edge.sourceHandle !== "image" || edge.targetHandle !== "in") return [];
+      return [{
+        nodeId: asset.nodeId,
+        title: asset.title,
+        assetType: asset.assetType,
+        edgeId: edge.id,
+        managedByGuided: edge.data.minifeelRelationship === "assetReference",
+        referenceKey: referenceKey(edge.source, edge.sourceHandle),
+      } satisfies CreativeAssetReference];
+    });
+    card.assetReferences = sortReferences(references, card.referenceOrder);
+    if (new Set(card.assetReferences.map(item => item.nodeId)).size !== card.assetReferences.length) warnings.add(`镜头 ${card.title} 存在重复资产引用，可在高级画布核对连线。`);
+  }
+  if (assets.length) {
+    for (const shot of storyboard) {
+      if (!shot.assetReferences.length) warnings.add(`镜头 ${shot.title} 尚未选择资产，可在分镜阶段补充。`);
+    }
+  }
+  addDuplicateOrderWarnings(storyboard, "分镜", warnings);
+  addDuplicateOrderWarnings(films, "视频片段", warnings);
   storyboard.sort((left, right) => left.order - right.order);
   films.sort((left, right) => left.order - right.order);
   return {
     script,
-    characters,
+    assets,
     storyboard,
     films,
+    finalFilm,
     statuses: {
       script: script ? script.confirmed ? "complete" : "review" : "notStarted",
-      characters: mediaStatus(characters),
+      characters: mediaStatus(assets),
       storyboard: mediaStatus(storyboard),
       video: filmStatus(storyboard, films),
     },
-    warnings,
+    warnings: [...warnings],
   };
+}
+
+function addDuplicateOrderWarnings(cards: CreativeMediaCard[], title: string, warnings: Set<string>) {
+  if (new Set(cards.map(card => card.order)).size !== cards.length) warnings.add(`${title}编号存在重复，普通创作页不会自动重排，请进入高级画布整理。`);
+}
+
+function sortReferences(references: CreativeAssetReference[], order: string[]) {
+  const orderMap = new Map(order.map((key, index) => [key, index]));
+  return references.toSorted((left, right) => (orderMap.get(left.referenceKey) ?? order.length) - (orderMap.get(right.referenceKey) ?? order.length));
 }
 
 function readNode(value: unknown, index: number): CanvasNode {
@@ -150,6 +272,16 @@ function readNode(value: unknown, index: number): CanvasNode {
   }
   if (!isRecord(value.data)) throw new Error(`项目画布读取失败：节点 ${value.id} 的 data 无效`);
   return { id: value.id, type: value.type, data: value.data };
+}
+
+function readEdge(value: unknown): CanvasEdge | undefined {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.source !== "string" || typeof value.sourceHandle !== "string" || typeof value.target !== "string" || typeof value.targetHandle !== "string") return;
+  return { id: value.id, source: value.source, sourceHandle: value.sourceHandle, target: value.target, targetHandle: value.targetHandle, data: isRecord(value.data) ? value.data : {} };
+}
+
+function readReferenceOrder(value: unknown) {
+  if (!isRecord(value) || !Array.isArray(value.in)) return [];
+  return value.in.filter(item => typeof item === "string");
 }
 
 function safeWorkspacePath(value: unknown) {

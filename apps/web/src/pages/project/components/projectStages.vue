@@ -22,7 +22,7 @@ defineProps<{ modelValue: ProjectStage; statuses: Record<ProjectStage, ProjectSt
 const emit = defineEmits<{ "update:modelValue": [value: ProjectStage] }>();
 const stages: Array<{ id: ProjectStage; name: string; caption: string }> = [
   { id: "script", name: "写剧本", caption: "整理故事与对白" },
-  { id: "characters", name: "定角色", caption: "确认人物形象" },
+  { id: "characters", name: "资产设定", caption: "确认角色、场景和道具" },
   { id: "storyboard", name: "做分镜", caption: "设计画面节奏" },
   { id: "video", name: "镜头制作", caption: "生成视频片段" },
 ];
