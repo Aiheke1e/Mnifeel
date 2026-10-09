@@ -59,6 +59,14 @@ export type CreativeAssetReference = {
   referenceKey: string;
 };
 
+export type CreativeAccepted = {
+  taskId: string;
+  path: string;
+  mimeType: string;
+  requestFingerprint: string;
+  acceptedAt: string;
+};
+
 export type CreativeMediaCard = {
   nodeId: string;
   title: string;
@@ -70,10 +78,19 @@ export type CreativeMediaCard = {
   labelPrefix: string;
   assetType?: CreativeAssetType;
   legacy?: boolean;
+  /** 节点当前选择的模型（JSON.stringify([providerId, modelId])），用于判断请求是否变化。 */
+  model: string;
   assetReferences: CreativeAssetReference[];
   referenceOrder: string[];
   output?: { path: string; mimeType: string };
   outputPersisted: boolean;
+  accepted?: CreativeAccepted;
+  /** 上游已采用输出或本镜参数变化后，本镜已采用版本需要更新。 */
+  stale?: boolean;
+  /** 当前上游引用（分镜首帧 + 资产），采用时据此计算创意指纹；仅视频片段有值。 */
+  upstreamRefs?: Array<{ key: string; nodeId: string; path: string }>;
+  /** 最新成功任务产出的候选输出；与 output 不同表示存在可采用的新候选。 */
+  latestCandidate?: { taskId: string; path: string; mimeType: string };
   task?: GenerationTask;
 };
 
@@ -203,12 +220,15 @@ export async function readCreativeView(projectId: string, tasks: GenerationTask[
       labelPrefix: label.labelPrefix,
       assetType: label.assetType,
       legacy: label.legacy,
+      model: typeof node.data.model === "string" ? node.data.model : "",
       assetReferences: [],
       referenceOrder: readReferenceOrder(node.data.referenceOrder),
       outputPersisted: !!persistedOutput,
+      accepted: readAccepted(node.data.accepted),
       task: findNodeTask(tasks, node.id),
     };
     card.output = persistedOutput ?? readTaskOutput(card.task, mediaType);
+    card.latestCandidate = readTaskCandidate(card.task, mediaType);
     if (label.type === "asset") {
       assets.push(card);
       assetNodes.set(node.id, card);
@@ -245,6 +265,17 @@ export async function readCreativeView(projectId: string, tasks: GenerationTask[
     });
     card.assetReferences = sortReferences(references, card.referenceOrder);
     if (new Set(card.assetReferences.map(item => item.nodeId)).size !== card.assetReferences.length) warnings.add(`镜头 ${card.title} 存在重复资产引用，可在高级画布核对连线。`);
+  }
+  // ACT: 视频片段按当前上游已采用输出与自身参数记录上游引用，并在已采用时重算指纹只标记需更新，不改写下游、不删文件、不自动重生成。
+  const cardsByNodeId = new Map([...assets, ...storyboard, ...films].map(card => [card.nodeId, card]));
+  for (const film of films) {
+    const upstream = (incomingEdges.get(film.nodeId) ?? []).flatMap(edge => {
+      const source = cardsByNodeId.get(edge.source);
+      if (!source || edge.sourceHandle !== "image" || edge.targetHandle !== "in") return [];
+      return [{ key: referenceKey(edge.source, edge.sourceHandle), nodeId: source.nodeId, path: source.accepted?.path ?? source.output?.path ?? "" }];
+    });
+    film.upstreamRefs = upstream;
+    if (film.accepted) film.stale = computeCreativeFingerprint(film, upstream) !== film.accepted.requestFingerprint;
   }
   if (assets.length) {
     for (const shot of storyboard) {
@@ -286,6 +317,20 @@ export function readConnectionGaps(view: CreativeView): CreativeConnectionGap[] 
           : []),
       };
     });
+}
+
+/**
+ * 普通创作页在采用时与读取时各算一次的「创意请求指纹」：由本镜提示词、模型，以及上游节点已采用输出的相对路径与顺序组成。
+ * 与 Task 18 的服务端估价指纹（sha256）相互独立：服务端指纹用于估价与执行一致性，这里的前端指纹用于判断上游采用版变化后本镜是否需要更新。
+ */
+export function computeCreativeFingerprint(card: { prompt: string; model: string; referenceOrder: string[] }, upstream: Array<{ key: string; nodeId: string; path: string }>) {
+  const orderMap = new Map(card.referenceOrder.map((key, index) => [key, index]));
+  const ordered = upstream.toSorted((left, right) => (orderMap.get(left.key) ?? card.referenceOrder.length) - (orderMap.get(right.key) ?? card.referenceOrder.length));
+  return JSON.stringify({
+    prompt: card.prompt,
+    model: card.model,
+    references: ordered.map(item => `${item.nodeId}:${item.path}`),
+  });
 }
 
 function addDuplicateOrderWarnings(cards: CreativeMediaCard[], title: string, warnings: Set<string>) {
@@ -330,6 +375,13 @@ function readMediaOutput(value: unknown, dataType: "IMAGE" | "VIDEO") {
   }
 }
 
+function readAccepted(value: unknown): CreativeAccepted | undefined {
+  if (!isRecord(value) || typeof value.taskId !== "string" || !value.taskId || typeof value.path !== "string" || !value.path
+    || typeof value.mimeType !== "string" || !value.mimeType || typeof value.requestFingerprint !== "string" || !value.requestFingerprint
+    || typeof value.acceptedAt !== "string" || !value.acceptedAt) return;
+  return { taskId: value.taskId, path: value.path, mimeType: value.mimeType, requestFingerprint: value.requestFingerprint, acceptedAt: value.acceptedAt };
+}
+
 function findNodeTask(tasks: GenerationTask[], nodeId: string) {
   return tasks
     .filter(task => task.requestSummary?.input?.outputDirectory === `assets/${nodeId}`)
@@ -340,6 +392,12 @@ function readTaskOutput(task: GenerationTask | undefined, mediaType: "image" | "
   const file = task?.status === "succeeded" ? task.result?.files?.find(item => item.mimeType.startsWith(`${mediaType}/`)) : undefined;
   const path = safeWorkspacePath(file?.path);
   return path && file?.mimeType ? { path, mimeType: file.mimeType } : undefined;
+}
+
+function readTaskCandidate(task: GenerationTask | undefined, mediaType: "image" | "video") {
+  const file = task?.status === "succeeded" ? task.result?.files?.find(item => item.mimeType.startsWith(`${mediaType}/`)) : undefined;
+  const path = safeWorkspacePath(file?.path);
+  return task && path && file?.mimeType ? { taskId: task.id, path, mimeType: file.mimeType } : undefined;
 }
 
 function mediaStatus(cards: CreativeMediaCard[], requireConfirmation = true): ProjectStageStatus {

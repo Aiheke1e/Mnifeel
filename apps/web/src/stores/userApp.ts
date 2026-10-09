@@ -18,8 +18,14 @@ export type GenerationTask = {
   requestSummary?: {
     input?: Record<string, unknown>;
     billing?: { billable?: boolean; estimatedUsage?: Record<string, number> };
+    /** 冻结时的请求指纹；执行前与当前请求不一致则拒绝扣分。 */
+    fingerprint?: string;
+    /** 冻结时生效的视频能力版本。 */
+    capabilityVersion?: number;
+    /** 冻结时的引用角色与顺序，只保存工作区相对路径。 */
+    references?: Array<{ role: string; dataType: string; path?: string }>;
   };
-  result?: { files?: Array<{ path: string; mimeType: string }> } | null;
+  result?: { files?: Array<{ path: string; mimeType: string; mediaType?: string }> } | null;
   progress: number;
   frozenCredits: number;
   actualCredits: number;
@@ -82,10 +88,24 @@ export const useUserAppStore = defineStore("userApp", () => {
     accountLoaded.value = true;
   }
 
-  async function loadTasks(signal?: AbortSignal) {
-    const { data } = await api.get<ApiResponse<GenerationTask[]>>("/generation/list", { params: { limit: 100, offset: 0 }, signal });
-    signal?.throwIfAborted();
-    tasks.value = data.data;
+  async function loadTasks(options: { projectId?: string; all?: boolean } = {}, signal?: AbortSignal) {
+    // ACT: 项目页需要读取该项目完整任务记录（含候选与历史采用），按 projectId 分页拉全；
+    // 任务中心与账户页保持单页最近记录。服务端单页上限 100。
+    const limit = 100;
+    let offset = 0;
+    const collected: GenerationTask[] = [];
+    for (;;) {
+      const { data } = await api.get<ApiResponse<GenerationTask[]>>("/generation/list", {
+        params: { ...(options.projectId ? { projectId: options.projectId } : {}), limit, offset },
+        signal,
+      });
+      signal?.throwIfAborted();
+      const page = data.data;
+      collected.push(...page);
+      if (!options.all || page.length < limit) break;
+      offset += limit;
+    }
+    tasks.value = collected;
     tasksLoaded.value = true;
   }
 

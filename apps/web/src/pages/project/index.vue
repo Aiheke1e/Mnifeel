@@ -102,7 +102,9 @@
           :errorMessage="creativeError"
           :generationErrors="generationErrors"
           :busy="generationBusy"
-          @requestGenerate="prepareVideoGeneration" />
+          @requestGenerate="prepareVideoGeneration"
+          @requestGenerateAll="prepareVideoBatch"
+          @accept="acceptFilm" />
       </main>
 
       <aside class="projectAside" aria-label="项目状态">
@@ -171,7 +173,7 @@ import storyboardStage from "./components/storyboardStage.vue";
 import filmStage from "./components/filmStage.vue";
 import generationConfirm from "./components/generationConfirm.vue";
 import { checkGuidedVideoCapability, type GenerationReference, type NodeGenerationPlan } from "@minifeel/tools-scaffold/runtime";
-import { creativeLabels, readConnectionGaps, readCreativeView, referenceKey, type CreativeMediaCard, type CreativeView } from "./creativeViewAdapter";
+import { computeCreativeFingerprint, creativeLabels, readConnectionGaps, readCreativeView, referenceKey, type CreativeMediaCard, type CreativeView } from "./creativeViewAdapter";
 
 type PreparedGeneration = {
   nodeId: string;
@@ -337,7 +339,7 @@ onMounted(async () => {
   try {
     await Promise.all([
       workspaceStore.project?.id === projectId ? Promise.resolve() : workspaceStore.openProject(projectId),
-      userAppStore.loadTasks(),
+      userAppStore.loadTasks({ projectId, all: true }),
       userAppStore.loadModels(),
       userAppStore.loadAccount(),
     ]);
@@ -677,38 +679,89 @@ async function reorderStoryboard(nodeId: string, direction: -1 | 1) {
 }
 
 async function prepareVideoGeneration(storyboardNodeId: string) {
-  const projectId = workspaceStore.project?.id;
   const shot = creativeView.value?.storyboard.find(item => item.nodeId === storyboardNodeId);
-  const model = stageModels.value.find(item => item.id === selectedModelId.value);
-  if (!projectId || !shot || !shot.output || !shot.confirmed || !model || generationBusy.value) return;
+  if (!shot || !shot.output || !shot.confirmed || generationBusy.value) return;
   creativeBusy.value = true;
   try {
-    const filmNodeId = await ensureFilmNode(shot);
-    const plan = await prepareVideoNode(filmNodeId, model.id, shot);
-    const [estimate] = await Promise.all([
-      userAppStore.estimateGeneration({ projectId, modelId: model.id, request: plan.request }),
-      userAppStore.loadAccount(),
-    ]);
-    if (estimate.taskType !== "video") throw new Error("所选模型已不再是视频模型，请重新选择");
-    if (!estimate.fingerprint) throw new Error("服务端未返回请求指纹，请稍后重试");
-    pendingGeneration.value = {
-      generationType: "视频片段",
-      modelName: model.displayName,
-      items: [{
-        nodeId: filmNodeId,
-        modelId: model.id,
-        taskType: "video",
-        label: shot.draftLabel,
-        request: plan.request,
-        estimate,
-        fingerprint: estimate.fingerprint,
-        references: plan.references,
-      }],
-    };
-    generationDialogVisible.value = true;
+    await prepareVideoItems([shot], "视频片段");
   } catch (error) {
     ElMessage.error(apiErrorMessage(error, "视频估价失败，请稍后重试"));
     await Promise.allSettled([userAppStore.loadAccount(), userAppStore.loadModels()]);
+  } finally {
+    creativeBusy.value = false;
+  }
+}
+
+// ACT: 样片采用后，把其余「已确认分镜且尚未采用视频」的镜头一次性估价并确认批量生成。
+async function prepareVideoBatch() {
+  if (generationBusy.value) return;
+  const shots = creativeView.value?.storyboard.filter(shot => {
+    const film = creativeView.value?.films.find(item => item.order === shot.order);
+    return shot.confirmed && shot.output && !film?.accepted && film?.task?.status !== "pending" && film?.task?.status !== "running";
+  }) ?? [];
+  if (!shots.length) return void ElMessage.info("没有可批量生成的其余镜头");
+  creativeBusy.value = true;
+  try {
+    await prepareVideoItems(shots, "视频片段");
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, "视频估价失败，请稍后重试"));
+    await Promise.allSettled([userAppStore.loadAccount(), userAppStore.loadModels()]);
+  } finally {
+    creativeBusy.value = false;
+  }
+}
+
+async function prepareVideoItems(shots: CreativeMediaCard[], generationType: string) {
+  const projectId = workspaceStore.project?.id;
+  const model = stageModels.value.find(item => item.id === selectedModelId.value);
+  if (!projectId || !model) throw new Error("请先选择视频模型");
+  const items: PreparedGeneration[] = [];
+  for (const shot of shots) {
+    const filmNodeId = await ensureFilmNode(shot);
+    const plan = await prepareVideoNode(filmNodeId, model.id, shot);
+    const estimate = await userAppStore.estimateGeneration({ projectId, modelId: model.id, request: plan.request });
+    if (estimate.taskType !== "video") throw new Error("所选模型已不再是视频模型，请重新选择");
+    if (!estimate.fingerprint) throw new Error("服务端未返回请求指纹，请稍后重试");
+    items.push({
+      nodeId: filmNodeId,
+      modelId: model.id,
+      taskType: "video",
+      label: shot.draftLabel,
+      request: plan.request,
+      estimate,
+      fingerprint: estimate.fingerprint,
+      references: plan.references,
+    });
+  }
+  await userAppStore.loadAccount();
+  pendingGeneration.value = { generationType, modelName: model.displayName, items };
+  generationDialogVisible.value = true;
+}
+
+// ACT: 采用镜头候选：优先采用最新候选（重新生成产物），否则采用当前公开输出；指纹按当前上游已采用输出重算。
+async function acceptFilm(filmNodeId: string) {
+  if (creativeBusy.value) return;
+  const film = creativeView.value?.films.find(item => item.nodeId === filmNodeId);
+  if (!film || !film.output) return void ElMessage.error("镜头片段还没有可采用的候选");
+  const candidate = film.latestCandidate && film.latestCandidate.path !== film.output.path
+    ? film.latestCandidate
+    : { taskId: film.task?.id ?? "", path: film.output.path, mimeType: film.output.mimeType };
+  if (!candidate.taskId) return void ElMessage.error("镜头候选缺少任务记录，请刷新后重试");
+  const requestFingerprint = computeCreativeFingerprint(film, film.upstreamRefs ?? []);
+  creativeBusy.value = true;
+  try {
+    await getCanvas().call({
+      name: "nodeTools",
+      args: {
+        nodeId: filmNodeId,
+        name: "node:acceptOutput",
+        args: { taskId: candidate.taskId, path: candidate.path, mimeType: candidate.mimeType, requestFingerprint },
+      },
+    });
+    await refreshCreativeView();
+    ElMessage.success("已采用该镜头片段");
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, "镜头采用失败，请稍后重试"));
   } finally {
     creativeBusy.value = false;
   }
@@ -862,7 +915,8 @@ async function confirmGeneration() {
           args: {
             nodeId: item.nodeId,
             name: item.taskType === "video" ? "node:generateVideo" : "node:generateImage",
-            args: { expectedFingerprint: item.fingerprint },
+            // ACT: 镜头走候选模式，生成成功不覆盖已采用版本；资产与分镜图片生成即采用，维持覆盖旧输出。
+            args: { expectedFingerprint: item.fingerprint, ...(item.taskType === "video" ? { candidateOnly: true } : {}) },
           },
         });
         startedCount++;
@@ -879,7 +933,8 @@ async function confirmGeneration() {
     } else ElMessage.error("生成任务均未能启动，请检查模型配置后重试");
   } catch (error) {
     ElMessage.error(apiErrorMessage(error, "生成任务未能启动"));
-    await Promise.allSettled([userAppStore.loadAccount(), userAppStore.loadModels(), userAppStore.loadTasks()]);
+    const projectId = workspaceStore.project?.id;
+    await Promise.allSettled([userAppStore.loadAccount(), userAppStore.loadModels(), userAppStore.loadTasks(projectId ? { projectId, all: true } : {})]);
     await refreshCreativeView();
     if (activeTasks.value.length) scheduleTaskPoll();
   } finally {
@@ -919,7 +974,8 @@ async function pollGenerationTasks() {
   if (disposed || taskPolling) return;
   taskPolling = true;
   try {
-    await Promise.all([userAppStore.loadTasks(), userAppStore.loadAccount()]);
+    const projectId = workspaceStore.project?.id;
+    await Promise.all([userAppStore.loadTasks(projectId ? { projectId, all: true } : {}), userAppStore.loadAccount()]);
     await refreshCreativeView({ silent: true });
     const remaining: TaskDiscovery[] = [];
     for (const discovery of taskDiscoveries.value) {

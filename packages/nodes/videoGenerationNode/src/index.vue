@@ -289,7 +289,7 @@ function buildVideoRequest(): { request: Omit<NodeVideoRequest, "projectId">; re
   return { request, references };
 }
 
-async function startGeneration(expectedFingerprint?: string) {
+async function startGeneration(expectedFingerprint?: string, candidateOnly = false) {
   const choice = selectedModel.value;
   if (generating.value) throw new Error("视频正在生成，请等待完成");
   if (uploading.value) throw new Error("视频正在替换，请等待完成");
@@ -311,13 +311,25 @@ async function startGeneration(expectedFingerprint?: string) {
     .then(([result]) => {
       controller.signal.throwIfAborted();
       if (!result) throw new Error("供应商未返回视频");
-      outputs.value.video = { dataType: "VIDEO", value: { url: result.path, mimeType: result.mimeType } };
+      // ACT: 候选模式下不覆盖已采用的输出，新结果作为候选留在生成任务里等用户采用。
+      if (!candidateOnly || !readAcceptedPath()) {
+        outputs.value.video = { dataType: "VIDEO", value: { url: result.path, mimeType: result.mimeType } };
+      }
     }))
     .catch((error) => showError(error, "视频生成失败"))
     .finally(() => {
       generationController = undefined;
     });
   return { status: "generating" };
+}
+
+function readAcceptedPath() {
+  const accepted = (node.data as { accepted?: unknown }).accepted;
+  return isRecord(accepted) && typeof accepted.path === "string" ? accepted.path : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 nodeEvent.on("save", (reason) => {
@@ -447,6 +459,24 @@ nodeTools.register({
 });
 
 nodeTools.register({
+  name: "acceptOutput",
+  description: "采用本节点工作区目录内某次成功生成任务的结果为公开输出，并写入采用元数据（任务 ID、相对路径、MIME、请求指纹、采用时间）；只接受本节点素材目录中的视频文件，不启动生成",
+  parameters: z.strictObject({
+    taskId: z.string().min(1).max(200),
+    path: z.string().min(1).max(1024),
+    mimeType: z.string().startsWith("video/"),
+    requestFingerprint: z.string().min(8).max(200),
+  }),
+  execute({ taskId, path, mimeType, requestFingerprint }) {
+    if (generating.value || deleting.value || uploading.value) throw new Error("节点正在处理，请稍后采用结果");
+    if (!path.startsWith(`assets/${id}/`) || path.includes("\0") || path.split(/[\\/]/).includes("..")) throw new Error("任务结果不属于当前节点");
+    outputs.value.video = { dataType: "VIDEO", value: { url: path, mimeType } };
+    (node.data as { accepted?: unknown }).accepted = { taskId, path, mimeType, requestFingerprint, acceptedAt: new Date().toISOString() };
+    return { taskId, path, mimeType, requestFingerprint };
+  },
+});
+
+nodeTools.register({
   name: "setReferenceOrder",
   description: "保存指定输入端口的参考素材顺序；只调整同一端口引用的显示与生成顺序，不新增或删除连线，不启动生成",
   parameters: z.strictObject({
@@ -475,13 +505,14 @@ nodeTools.register({
 
 nodeTools.register({
   name: "generateVideo",
-  description: "启动此节点的后台视频生成，使用当前提示词、模型、模式、时长、分辨率、比例和参考素材；传入 expectedFingerprint 时服务端会校验该指纹与当前请求一致，不一致则拒绝扣分；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止生成",
+  description: "启动此节点的后台视频生成，使用当前提示词、模型、模式、时长、分辨率、比例和参考素材；传入 expectedFingerprint 时服务端会校验该指纹与当前请求一致，不一致则拒绝扣分；candidateOnly 为真时生成成功不覆盖已采用输出；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止生成",
   parameters: z.strictObject({
     expectedFingerprint: z.string().min(8).max(200).optional(),
+    candidateOnly: z.boolean().optional(),
   }),
   execute(args, { signal }) {
     signal?.throwIfAborted();
-    return startGeneration(args.expectedFingerprint);
+    return startGeneration(args.expectedFingerprint, args.candidateOnly === true);
   },
 });
 </script>
