@@ -32,6 +32,20 @@
           showIcon
           :closable="false" />
 
+        <el-alert
+          v-if="connectionGaps.length"
+          class="creativeWarning"
+          type="info"
+          showIcon
+          :closable="false">
+          <template #title>
+            <div class="gapAlert">
+              <span>有 {{ connectionGaps.length }} 个镜头尚未关联资产，可查看建议后补全连接。</span>
+              <el-button size="small" type="primary" plain :disabled="creativeBusy" @click="repairDialogVisible = true">查看并补全</el-button>
+            </div>
+          </template>
+        </el-alert>
+
         <scriptStage
           v-if="activeStage === 'script'"
           :script="creativeView?.script"
@@ -124,6 +138,12 @@
       :loading="generationLoading"
       @confirm="confirmGeneration"
       @cancel="cancelGeneration" />
+
+    <connectionRepairDialog
+      v-model="repairDialogVisible"
+      :gaps="connectionGaps"
+      :busy="creativeBusy"
+      @apply="applyConnectionRepair" />
   </div>
 </template>
 
@@ -145,10 +165,11 @@ import projectRuntime from "./components/projectRuntime.vue";
 import directorPanel from "./components/directorPanel.vue";
 import scriptStage from "./components/scriptStage.vue";
 import assetStage from "./components/assetStage.vue";
+import connectionRepairDialog from "./components/connectionRepairDialog.vue";
 import storyboardStage from "./components/storyboardStage.vue";
 import filmStage from "./components/filmStage.vue";
 import generationConfirm from "./components/generationConfirm.vue";
-import { creativeLabels, readCreativeView, referenceKey, type CreativeMediaCard, type CreativeView } from "./creativeViewAdapter";
+import { creativeLabels, readConnectionGaps, readCreativeView, referenceKey, type CreativeMediaCard, type CreativeView } from "./creativeViewAdapter";
 
 type PreparedGeneration = {
   nodeId: string;
@@ -186,6 +207,7 @@ const creativeLoading = ref(false);
 const creativeError = ref("");
 const creativeBusy = ref(false);
 const creativeView = ref<CreativeView>();
+const repairDialogVisible = ref(false);
 const generationDialogVisible = ref(false);
 const generationLoading = ref(false);
 const pendingGeneration = ref<PendingGeneration>();
@@ -230,6 +252,7 @@ const stageStatuses = computed<Record<ProjectStage, ProjectStageStatus>>(() => c
 }));
 const completedStageCount = computed(() => Object.values(stageStatuses.value).filter(status => status === "complete").length);
 const generationBusy = computed(() => creativeBusy.value || taskDiscoveries.value.length > 0);
+const connectionGaps = computed(() => creativeView.value ? readConnectionGaps(creativeView.value) : []);
 const pendingEstimatedCredits = computed(() => pendingGeneration.value?.items.reduce((total, item) => total + item.estimate.estimatedCredits, 0) ?? 0);
 
 function savedModelId(projectId: string) {
@@ -379,6 +402,44 @@ function saveStoryboard(nodeId: string, prompt: string, draftLabel: string) {
   return updateNode(nodeId, draftLabel, { name: "node:setPrompt", args: { prompt } });
 }
 
+function planShotAssetReferences(shot: CreativeMediaCard, selectedIds: string[]) {
+  const managedReferences = shot.assetReferences.filter(reference => reference.managedByGuided);
+  const existingIds = new Set(shot.assetReferences.map(reference => reference.nodeId));
+  const additions = selectedIds.filter(nodeId => !existingIds.has(nodeId));
+  const removals = managedReferences.filter(reference => !selectedIds.includes(reference.nodeId));
+  const removedKeys = new Set(removals.map(reference => reference.referenceKey));
+  const referenceOrder = shot.referenceOrder.filter(key => !removedKeys.has(key));
+  for (const nodeId of selectedIds) {
+    const key = referenceKey(nodeId);
+    if (!referenceOrder.includes(key)) referenceOrder.push(key);
+  }
+  const orderChanged = JSON.stringify(selectedIds) !== JSON.stringify(managedReferences.map(reference => reference.nodeId));
+  return { selectedIds, additions, removals, referenceOrder, orderChanged };
+}
+
+async function writeShotAssetReferences(shot: CreativeMediaCard, plan: ReturnType<typeof planShotAssetReferences>) {
+  const canvas = getCanvas();
+  if (plan.additions.length) {
+    await canvas.call({
+      name: "connectNodes",
+      args: {
+        connections: plan.additions.map(source => ({
+          source,
+          sourceHandle: "image",
+          target: shot.nodeId,
+          targetHandle: "in",
+          data: { minifeelRelationship: "assetReference" },
+        })),
+      },
+    });
+  }
+  if (plan.removals.length) await canvas.call({ name: "deleteEdges", args: { edgeIds: plan.removals.map(reference => reference.edgeId) } });
+  await canvas.call({
+    name: "nodeTools",
+    args: { nodeId: shot.nodeId, name: "node:setReferenceOrder", args: { handleId: "in", referenceKeys: plan.referenceOrder } },
+  });
+}
+
 async function saveStoryboardAssetReferences(nodeId: string, assetNodeIds: string[]) {
   if (creativeBusy.value) return;
   const shot = creativeView.value?.storyboard.find(item => item.nodeId === nodeId);
@@ -389,16 +450,12 @@ async function saveStoryboardAssetReferences(nodeId: string, assetNodeIds: strin
   }
   const lockedIds = new Set(shot.assetReferences.filter(reference => !reference.managedByGuided).map(reference => reference.nodeId));
   if (selectedIds.some(nodeId => lockedIds.has(nodeId))) return void ElMessage.error("高级画布连接由高级画布管理，普通创作页不会修改它");
-  const managedReferences = shot.assetReferences.filter(reference => reference.managedByGuided);
-  const existingIds = new Set(shot.assetReferences.map(reference => reference.nodeId));
-  const additions = selectedIds.filter(nodeId => !existingIds.has(nodeId));
-  const removals = managedReferences.filter(reference => !selectedIds.includes(reference.nodeId));
-  const orderChanged = JSON.stringify(selectedIds) !== JSON.stringify(managedReferences.map(reference => reference.nodeId));
-  if (!additions.length && !removals.length && !orderChanged) return;
+  const plan = planShotAssetReferences(shot, selectedIds);
+  if (!plan.additions.length && !plan.removals.length && !plan.orderChanged) return;
   const detail = [
-    additions.length ? `新增 ${additions.length} 条资产连接` : "",
-    removals.length ? `移除 ${removals.length} 条普通创作页管理的资产连接` : "",
-    !additions.length && !removals.length && orderChanged ? "调整普通创作页资产引用顺序" : "",
+    plan.additions.length ? `新增 ${plan.additions.length} 条资产连接` : "",
+    plan.removals.length ? `移除 ${plan.removals.length} 条普通创作页管理的资产连接` : "",
+    !plan.additions.length && !plan.removals.length && plan.orderChanged ? "调整普通创作页资产引用顺序" : "",
   ].filter(Boolean).join("；");
   try {
     await ElMessageBox.confirm(`${detail}。高级画布建立的连接会保持不变。`, "确认本镜资产", {
@@ -411,37 +468,52 @@ async function saveStoryboardAssetReferences(nodeId: string, assetNodeIds: strin
   }
   creativeBusy.value = true;
   try {
-    const canvas = getCanvas();
-    if (additions.length) {
-      await canvas.call({
-        name: "connectNodes",
-        args: {
-          connections: additions.map(source => ({
-            source,
-            sourceHandle: "image",
-            target: shot.nodeId,
-            targetHandle: "in",
-            data: { minifeelRelationship: "assetReference" },
-          })),
-        },
-      });
-    }
-    if (removals.length) await canvas.call({ name: "deleteEdges", args: { edgeIds: removals.map(reference => reference.edgeId) } });
-    const removedKeys = new Set(removals.map(reference => reference.referenceKey));
-    const referenceOrder = shot.referenceOrder.filter(key => !removedKeys.has(key));
-    for (const nodeId of selectedIds) {
-      const key = referenceKey(nodeId);
-      if (!referenceOrder.includes(key)) referenceOrder.push(key);
-    }
-    await canvas.call({
-      name: "nodeTools",
-      args: { nodeId: shot.nodeId, name: "node:setReferenceOrder", args: { handleId: "in", referenceKeys: referenceOrder } },
-    });
+    await writeShotAssetReferences(shot, plan);
     await refreshCreativeView();
     ElMessage.success("本镜资产连接已保存");
   } catch (error) {
     await refreshCreativeView().catch(() => undefined);
     ElMessage.error(apiErrorMessage(error, "资产连接保存失败，请进入高级画布检查连线"));
+  } finally {
+    creativeBusy.value = false;
+  }
+}
+
+async function applyConnectionRepair(selections: Record<string, string[]>) {
+  if (creativeBusy.value) return;
+  const view = creativeView.value;
+  if (!view) return;
+  const assets = view.assets;
+  const entries: Array<{ shot: CreativeMediaCard; plan: ReturnType<typeof planShotAssetReferences> }> = [];
+  for (const [nodeId, assetNodeIds] of Object.entries(selections)) {
+    const shot = view.storyboard.find(item => item.nodeId === nodeId);
+    if (!shot) continue;
+    const selectedIds = [...new Set(assetNodeIds)].filter(id => assets.some(asset => asset.nodeId === id));
+    const lockedIds = new Set(shot.assetReferences.filter(reference => !reference.managedByGuided).map(reference => reference.nodeId));
+    if (selectedIds.some(id => lockedIds.has(id))) continue;
+    const plan = planShotAssetReferences(shot, selectedIds);
+    if (plan.additions.length || plan.removals.length || plan.orderChanged) entries.push({ shot, plan });
+  }
+  const additions = entries.reduce((sum, entry) => sum + entry.plan.additions.length, 0);
+  if (!additions) return void ElMessage.info("没有需要新增的资产连接");
+  try {
+    await ElMessageBox.confirm(
+      `将为 ${entries.length} 个镜头新增 ${additions} 条资产连接。高级画布建立的连线、节点与排序保持不变。`,
+      "确认补全资产连接",
+      { confirmButtonText: "应用补连", cancelButtonText: "取消", type: "warning" },
+    );
+  } catch {
+    return;
+  }
+  repairDialogVisible.value = false;
+  creativeBusy.value = true;
+  try {
+    for (const entry of entries) await writeShotAssetReferences(entry.shot, entry.plan);
+    await refreshCreativeView();
+    ElMessage.success(`已为 ${entries.length} 个镜头补全资产连接`);
+  } catch (error) {
+    await refreshCreativeView().catch(() => undefined);
+    ElMessage.error(apiErrorMessage(error, "资产连接补全失败，请进入高级画布检查连线"));
   } finally {
     creativeBusy.value = false;
   }
@@ -864,6 +936,7 @@ async function openAdvanced() {
     overflow: hidden;
 
     .creativeWarning { margin-top: 18px; flex-shrink: 0; }
+    .gapAlert { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     :deep(.scriptStage),
     :deep(.assetStage),
     :deep(.storyboardStage),

@@ -95,6 +95,20 @@ export type CreativeView = {
   warnings: string[];
 };
 
+export type CreativeGapCandidate = {
+  nodeId: string;
+  title: string;
+  assetType: CreativeAssetType;
+  suggested: boolean;
+};
+
+export type CreativeConnectionGap = {
+  shotNodeId: string;
+  shotTitle: string;
+  currentNodeIds: string[];
+  candidates: CreativeGapCandidate[];
+};
+
 const assetPrefixes: Array<{ prefix: string; assetType: CreativeAssetType }> = [
   { prefix: creativeLabels.character, assetType: "character" },
   { prefix: creativeLabels.scene, assetType: "scene" },
@@ -255,6 +269,23 @@ export async function readCreativeView(projectId: string, tasks: GenerationTask[
     },
     warnings: [...warnings],
   };
+}
+
+export function readConnectionGaps(view: CreativeView): CreativeConnectionGap[] {
+  if (!view.assets.length) return [];
+  return view.storyboard
+    .filter(shot => !shot.assetReferences.length)
+    .map(shot => {
+      const text = `${shot.title} ${shot.prompt}`;
+      return {
+        shotNodeId: shot.nodeId,
+        shotTitle: shot.title,
+        currentNodeIds: shot.assetReferences.map(reference => reference.nodeId),
+        candidates: view.assets.flatMap(asset => asset.assetType
+          ? [{ nodeId: asset.nodeId, title: asset.title, assetType: asset.assetType, suggested: !!asset.title && text.includes(asset.title) } satisfies CreativeGapCandidate]
+          : []),
+      };
+    });
 }
 
 function addDuplicateOrderWarnings(cards: CreativeMediaCard[], title: string, warnings: Set<string>) {
