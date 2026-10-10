@@ -64,7 +64,7 @@
 | 19. 合格图片生视频模型适配 | 进行中（Step 1 完成） | 形成供应商能力对照：按官方一手文档把 Seedance 2.x 与可灵 Omni / Kling O3 映射到 `videoCapability` v1；核实异步查询与取消、base64 体积限制、结果时效、RPM 与并发、计费口径 | 对照表只采用火山方舟官方一手文档（A 级）与腾讯云 Kling-Omni-Video 文档（B 级），第三方转述单列待核实；已核对本地 `providers/types.ts`、`readReference`、`workerConcurrency` 确认适配缺口 | Seedance 首帧与参考图官方明确互斥，`combineFrameWithReferences` 只能为 false；可灵看似满足但依据为 B/C 级；未拿到官方一手文档、测试 Key 与授权前不写适配器代码 |
 | 20. 样片优先的镜头制作 | 已完成（2026-10-09） | 图片与视频节点新增 `node:acceptOutput`（校验节点素材目录并写入 outputs 与 `accepted` 元数据：任务 ID、相对路径、MIME、请求指纹、采用时间）；`node:generateImage`/`generateVideo` 新增 `candidateOnly`，镜头生成不覆盖已采用输出、高级画布无参数行为不变；`creativeViewAdapter` 读取 `accepted` 并按当前提示词、模型与上游已采用输出重算创意指纹，与采用时冻结指纹比对只标记“需更新”；第四阶段新增样片推荐、候选采用、按当前上游指纹采用新候选与“生成其余镜头”批量门槛；项目页按 projectId 分页拉全任务记录 | 20 个包类型检查通过，Web 生产构建通过；浏览器验证 1280px/390px 无横向溢出、6 个分镜卡片与样片引导正常、无 pageerror；高级画布 9 节点与 4 条资产引用边读取同一数据无错误；分镜未确认时样片推荐正确置空 | 本地暂无满足准入的视频模型（Task 19 未接入供应商），真实“生成→采用→批量→定向失效”端到端未实机验证，待 Task 19 就绪后复验 |
 | 21. FFmpeg 单一成片与人工交付 | 已完成（2026-10-10） | 新增 `projectRenderTasks` 表与迁移；`utils/render`（create/get/list/cancel + validateClips）与可恢复 worker（排队、心跳、取消、失联恢复）；FFprobe 预检片段（视频流/宽高/时长/帧率），FFmpeg 归一化（统一画幅、帧率、yuv420p、libx264）后 concat filter 硬切成片；统一无音轨（-an，因工作区 FFmpeg 封装不接受 lavfi 源无法补静音）；输出写 `projectAssets`，前端轮询成功后创建/复用 `remote-videoNode` 并经 `node:setVideo` 标记 `Minifeel/成片`；新增第五阶段 `finalStage.vue`（片段顺序、合成状态、错误、预览、下载、重合成、返回镜头制作）与 filmStage 全部采用引导 | Server、Web 类型检查与生产构建通过；本地运行迁移创建 `projectRenderTasks` 并核对列结构；HTTP 实测 mock 登录后 create 输入快照规范化、worker 领取后因无 FFmpeg 失败且错误信息正确、get/list/cancel 状态流转正确、非法 UUID 与越权项目分别 400/404 | 本地无 FFmpeg/FFprobe，真实合成、混合分辨率/帧率、有/无音轨、取消中断、坏文件与服务重启恢复未实机验证；无音轨统一去掉而非补静音（与 Step 3 差异，见章节说明） |
-| 22. 核心闭环验收 | 进行中（Step 1 完成） | Step 1 旧项目兼容矩阵：浏览器打开完整项目（9 节点 4 边）、legacy 成片项目（旧 `Minifeel/成片/<编号>` 标签 + 零连接）、两个零标签项目与空项目，核对五阶段导航与兼容警告；发现并修复“打开有边项目时 `saveCanvas` 把 edge 运行时端点坐标写回文件导致静默改写”的问题（剥离 `sourceX/sourceY/targetX/targetY` + 内容未变跳过写入） | Web 类型检查通过；浏览器验证四类项目阶段导航与兼容警告正确、无 pageerror；修复后画布 md5 稳定不再因打开而变化（完整项目 `94fbdff4`，其余 `1ec25749`/`4413187c`/`b1011eba` 不变），唯一 404 为 favicon.ico 无实际影响 | Step 2/3 依赖 Task 19 视频模型未就绪（待 Seedance/可灵 Omni 官方文档、测试 Key、额度与账号类型），暂缓推进 |
+| 22. 核心闭环验收 | 进行中（Step 1、4 完成） | Step 1 旧项目兼容矩阵：浏览器打开完整项目（9 节点 4 边）、legacy 成片项目（旧 `Minifeel/成片/<编号>` 标签 + 零连接）、两个零标签项目与空项目，核对五阶段导航与兼容警告；发现并修复“打开有边项目时 `saveCanvas` 把 edge 运行时端点坐标写回文件导致静默改写”的问题（剥离 `sourceX/sourceY/targetX/targetY` + 内容未变跳过写入）。Step 4 界面与可访问性：五档 viewport 无横向溢出、截图核对无空白遮挡、图片可放大、关键操作键盘可达且有可见焦点、空/加载/失败/重试反馈齐全 | Web 类型检查通过；浏览器验证四类项目阶段导航与兼容警告正确、无 pageerror；修复后画布 md5 稳定不再因打开而变化（完整项目 `94fbdff4`，其余 `1ec25749`/`4413187c`/`b1011eba` 不变），唯一 404 为 favicon.ico 无实际影响；Step 4 截图与键盘焦点核对通过 | Step 2/3 依赖 Task 19 视频模型未就绪（待 Seedance/可灵 Omni 官方文档、测试 Key、额度与账号类型），视频播放反馈随 Step 3 复验 |
 
 ---
 
@@ -1512,7 +1512,7 @@ Task 17 的 `combineFrameWithReferences` 正是短剧镜头的核心门槛：一
 
 ### Task 22: 核心闭环验收
 
-**Status:** 进行中（Step 1 完成，2026-10-10）。Step 2/3 依赖 Task 19 视频模型就绪（待供应商官方文档、测试 Key、额度与账号类型），Step 4/5 可在无视频模型下继续。部署服务器不包含在本任务内。
+**Status:** 进行中（Step 1、4 完成，2026-10-10）。Step 2/3 依赖 Task 19 视频模型就绪（待供应商官方文档、测试 Key、额度与账号类型），Step 5 随 Step 2/3 一并收尾。部署服务器不包含在本任务内。
 
 **Files:**
 
@@ -1543,9 +1543,18 @@ Task 17 的 `combineFrameWithReferences` 正是短剧镜头的核心门槛：一
 
 至少验证一个新项目和一个旧项目的资产连接、分镜生成请求、样片、采用、批量片段、定向失效、FFmpeg 合成、最终预览和下载；同时核对普通/高级两种入口、任务中心、资产库和账户流水的一致性。
 
-- [ ] **Step 4: 执行界面与可访问性检查**
+- [x] **Step 4: 执行界面与可访问性检查**
 
 检查宽屏桌面、普通桌面和移动端；确认无横向溢出、异常空白、遮挡或旧 UI 混用，图片和视频完整展示且可放大/播放，所有关键操作可用键盘完成并有可见焦点、加载、空、失败、超时和重试反馈。
+
+验证结果（2026-10-10，完整项目 `670029b6` 与零标签项目，vite dev）：
+
+- **响应式**：2552/2048/1280/720/390px 五档 viewport 打开完整项目，`scrollWidth == clientWidth` 全部无横向溢出，五阶段导航与内容渲染正常，无 pageerror。
+- **视觉确认**（截图核对 1280px 资产/分镜/成片阶段、390px 资产阶段）：无异常空白、遮挡或旧 UI 混用；390px 正常切换为底部移动导航。
+- **图片**：资产 2 张、分镜 6 张按原始比例完整展示；放大按钮为原生 `<button>` + `aria-label`，点击后放大 dialog 正常打开，Esc 可关闭。
+- **键盘与焦点**：关键操作（阶段导航、图片放大、保存/锁定/生成、重排序）均为原生 `<button>` 可 Tab 聚焦；阶段导航有 `:focus-visible` outline，图片放大按钮与输入框均有 `aria-label`，状态提示使用 `role="status"`/`role="alert"`。
+- **状态反馈**：空态（如成片页「还没有可合成的镜头」+ 返回镜头制作按钮）、加载态（`v-loading` + aria-label）、失败态（`el-alert` + generationErrors）与重试按钮均存在且可用。
+- 视频播放反馈本地无样本（Task 19 未就绪），待 Task 19 就绪后随 Step 3 复验。
 
 - [ ] **Step 5: 完成仓库验证和交付记录**
 
