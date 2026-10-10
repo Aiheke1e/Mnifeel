@@ -25,6 +25,7 @@ import * as providers from "@/utils/providers";
 import * as secrets from "@/utils/secrets";
 import * as billing from "@/utils/billing";
 import * as generation from "@/utils/generation";
+import * as render from "@/utils/render";
 
 export default {
   assets,
@@ -55,4 +56,5 @@ export default {
   secrets,
   billing,
   generation,
+  render,
 };

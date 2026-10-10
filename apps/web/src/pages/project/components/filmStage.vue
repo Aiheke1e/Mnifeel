@@ -43,6 +43,15 @@
         </template>
       </el-alert>
 
+      <el-alert v-if="allAccepted" class="finalHint" type="success" showIcon :closable="false">
+        <template #title>
+          <div class="finalAlert">
+            <span>所有镜头已采用，可以合成完整成片。</span>
+            <el-button size="small" type="primary" @click="emit('goFinal')">进入成片</el-button>
+          </div>
+        </template>
+      </el-alert>
+
       <div class="filmList">
         <article v-for="shot in storyboard" :key="shot.nodeId" class="filmCard" :class="{ sampleCard: !hasAccepted && shot.nodeId === sampleShot?.nodeId }">
           <div class="filmPreview">
@@ -104,6 +113,7 @@ const emit = defineEmits<{
   requestGenerate: [storyboardNodeId: string];
   requestGenerateAll: [];
   accept: [filmNodeId: string];
+  goFinal: [];
 }>();
 const previewUrls = reactive<Record<string, string>>({});
 let releases: Array<() => void> = [];
@@ -118,6 +128,13 @@ const pendingShots = computed(() => props.storyboard.filter(shot => {
   const film = filmFor(shot);
   return shot.confirmed && shot.output && !film?.accepted && film?.task?.status !== "pending" && film?.task?.status !== "running";
 }));
+const allAccepted = computed(() => {
+  const readyShots = props.storyboard.filter(shot => shot.confirmed && shot.output);
+  return readyShots.length > 0 && readyShots.every(shot => {
+    const film = filmFor(shot);
+    return !!film?.accepted && film.task?.status !== "pending" && film.task?.status !== "running";
+  });
+});
 
 watch(() => [props.projectId, ...props.films.map(film => `${film.nodeId}:${film.output?.path ?? ""}:${film.output?.mimeType ?? ""}`)], async () => {
   const version = ++previewVersion;
@@ -230,7 +247,7 @@ async function downloadFilm(film: CreativeMediaCard) {
   .stageLoading { min-height: 320px; }
   .missingContent { display: grid; min-height: 320px; place-items: center; align-content: center; gap: 10px; color: var(--studioMuted); text-align: center; h3, p { margin: 0; } h3 { color: var(--studioText); } }
   .modelChoice { display: grid; max-width: 420px; gap: 7px; label { color: var(--studioText); font-size: 13px; font-weight: 650; } }
-  .sampleHint, .batchHint { .sampleAlert, .batchAlert { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; } }
+  .sampleHint, .batchHint, .finalHint { .sampleAlert, .batchAlert, .finalAlert { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; } }
   .filmList { display: grid; gap: 15px; }
   .filmCard { display: grid; grid-template-columns: minmax(220px, 42%) minmax(0, 1fr); overflow: hidden; border: 1px solid var(--studioBorder); border-radius: 16px; background: var(--studioSurface); }
   .sampleCard { border-color: var(--studioAccent); }

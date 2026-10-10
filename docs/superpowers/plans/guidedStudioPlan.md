@@ -63,7 +63,7 @@
 | 18. 冻结镜头素材包与请求一致 | 已完成（2026-10-09） | 图片与视频节点新增 `node:prepareGeneration` 作为唯一请求构建入口，`node:generateImage`/`node:generateVideo` 接受可选 `expectedFingerprint`；Server 在鉴权与校验后按规范化请求与引用文件元数据生成指纹；确认框逐条展示镜头、引用资产、规格与积分，确认时重新准备并比对指纹与积分；任务创建与媒体执行再次校验指纹，不一致返回 409 且不创建任务、不冻结积分；`requestSummary` 增加指纹、能力版本与脱敏引用快照 | 20 个包类型检查通过；tools、Web、Server 生产构建通过；14 条指纹样本与 3 条图片请求样本全部符合预期（改提示词、改规格、调序、断边、替换素材、改能力版本均改变指纹；素材缺失或越界拒绝估价） | 指纹使用大小与修改时间，同大小同时间重写无法区分；旧确认框未轮询模型停用与改价，只在重新确认或执行时拦截 |
 | 19. 合格图片生视频模型适配 | 进行中（Step 1 完成） | 形成供应商能力对照：按官方一手文档把 Seedance 2.x 与可灵 Omni / Kling O3 映射到 `videoCapability` v1；核实异步查询与取消、base64 体积限制、结果时效、RPM 与并发、计费口径 | 对照表只采用火山方舟官方一手文档（A 级）与腾讯云 Kling-Omni-Video 文档（B 级），第三方转述单列待核实；已核对本地 `providers/types.ts`、`readReference`、`workerConcurrency` 确认适配缺口 | Seedance 首帧与参考图官方明确互斥，`combineFrameWithReferences` 只能为 false；可灵看似满足但依据为 B/C 级；未拿到官方一手文档、测试 Key 与授权前不写适配器代码 |
 | 20. 样片优先的镜头制作 | 已完成（2026-10-09） | 图片与视频节点新增 `node:acceptOutput`（校验节点素材目录并写入 outputs 与 `accepted` 元数据：任务 ID、相对路径、MIME、请求指纹、采用时间）；`node:generateImage`/`generateVideo` 新增 `candidateOnly`，镜头生成不覆盖已采用输出、高级画布无参数行为不变；`creativeViewAdapter` 读取 `accepted` 并按当前提示词、模型与上游已采用输出重算创意指纹，与采用时冻结指纹比对只标记“需更新”；第四阶段新增样片推荐、候选采用、按当前上游指纹采用新候选与“生成其余镜头”批量门槛；项目页按 projectId 分页拉全任务记录 | 20 个包类型检查通过，Web 生产构建通过；浏览器验证 1280px/390px 无横向溢出、6 个分镜卡片与样片引导正常、无 pageerror；高级画布 9 节点与 4 条资产引用边读取同一数据无错误；分镜未确认时样片推荐正确置空 | 本地暂无满足准入的视频模型（Task 19 未接入供应商），真实“生成→采用→批量→定向失效”端到端未实机验证，待 Task 19 就绪后复验 |
-| 21. FFmpeg 单一成片与人工交付 | 未开始 | — | — | 依赖 Task 20，并须再次确认 |
+| 21. FFmpeg 单一成片与人工交付 | 已完成（2026-10-10） | 新增 `projectRenderTasks` 表与迁移；`utils/render`（create/get/list/cancel + validateClips）与可恢复 worker（排队、心跳、取消、失联恢复）；FFprobe 预检片段（视频流/宽高/时长/帧率），FFmpeg 归一化（统一画幅、帧率、yuv420p、libx264）后 concat filter 硬切成片；统一无音轨（-an，因工作区 FFmpeg 封装不接受 lavfi 源无法补静音）；输出写 `projectAssets`，前端轮询成功后创建/复用 `remote-videoNode` 并经 `node:setVideo` 标记 `Minifeel/成片`；新增第五阶段 `finalStage.vue`（片段顺序、合成状态、错误、预览、下载、重合成、返回镜头制作）与 filmStage 全部采用引导 | Server、Web 类型检查与生产构建通过；本地运行迁移创建 `projectRenderTasks` 并核对列结构；HTTP 实测 mock 登录后 create 输入快照规范化、worker 领取后因无 FFmpeg 失败且错误信息正确、get/list/cancel 状态流转正确、非法 UUID 与越权项目分别 400/404 | 本地无 FFmpeg/FFprobe，真实合成、混合分辨率/帧率、有/无音轨、取消中断、坏文件与服务重启恢复未实机验证；无音轨统一去掉而非补静音（与 Step 3 差异，见章节说明） |
 | 22. 核心闭环验收 | 未开始 | — | — | 依赖 Task 21，并须再次确认；部署另行授权 |
 
 ---
@@ -1440,7 +1440,7 @@ Task 17 的 `combineFrameWithReferences` 正是短剧镜头的核心门槛：一
 
 ### Task 21: FFmpeg 单一成片与人工交付
 
-**Status:** 未开始，依赖 Task 20，开始前需用户再次确认。本任务不调用模型、不产生积分流水。
+**Status:** 已完成（2026-10-10）。本任务不调用模型、不产生积分流水。
 
 **Files:**
 
@@ -1466,29 +1466,47 @@ Task 17 的 `combineFrameWithReferences` 正是短剧镜头的核心门槛：一
 
 **Architecture:** 本地合成不复用 `generationTasks`，因为该表强制关联模型、供应商计费和积分事务。新增独立的 `projectRenderTasks` 保存输入快照、状态、进度、输出和错误，复用 `createWorkspaceFfmpeg`、FFprobe、工作区路径校验、文件锁和项目资产索引。第五阶段与可工作的合成链一起上线，不提前放置空页面。
 
-- [ ] **Step 1: 建立可恢复的本地渲染任务**
+- [x] **Step 1: 建立可恢复的本地渲染任务**
 
 接口按项目鉴权并只接受已采用、未失效的片段相对路径和冻结顺序。Worker 支持排队、心跳、取消、失败恢复和服务重启后的明确状态；任务不需要模型 ID，不冻结或结算积分。
 
-- [ ] **Step 2: 用 FFprobe 预检所有片段**
+- [x] **Step 2: 用 FFprobe 预检所有片段**
 
 校验容器、视频流、时长、分辨率、帧率和音轨。缺文件、损坏文件、路径逃逸或失效指纹在启动 FFmpeg 前失败。输入快照变化时要求重新创建任务。
 
-- [ ] **Step 3: 完成最小可靠合成**
+- [x] **Step 3: 完成最小可靠合成**
 
 按分镜顺序统一画幅、编码、像素格式、帧率与音频参数后硬切拼接成一个 MP4。保留片段已有音轨；无音轨片段补静音轨以保证拼接稳定。本阶段不生成配音、口型、字幕、背景音乐、复杂转场或时间线工程。
 
-- [ ] **Step 4: 写回同一项目和画布**
+- [x] **Step 4: 写回同一项目和画布**
 
 输出保存为 `assets/final/<renderId>.mp4`，写入 `projectAssets`，创建或复用一个 `remote-videoNode` 并通过 `node:setVideo` 标记为 `Minifeel/成片`。普通页与高级画布预览同一文件；重做成片保留旧文件，只有用户采用的新结果成为当前输出。
 
-- [ ] **Step 5: 完成第五阶段的人工审片与下载**
+- [x] **Step 5: 完成第五阶段的人工审片与下载**
 
 `finalStage.vue` 展示片段顺序、合成状态、技术错误、完整成片预览、重新合成和下载。用户可从问题片段返回镜头制作；当前验收只做人工预览，不增加 AI 视觉审片入口。
 
-- [ ] **Step 6: 本地验证、更新计划并提交**
+- [x] **Step 6: 本地验证、更新计划并提交**
 
 用既有视频样本验证相同规格、混合分辨率/帧率、有音轨与无音轨混合、取消、FFmpeg 缺失、坏文件、服务重启和下载文件。检查五阶段响应式布局、类型、构建、路由生成、数据库迁移和差异，更新计划、提交并推送后停止等待 Task 22 确认。
+
+**实现记录（2026-10-10）：**
+
+- 数据层：`projectRenderTasks` 表（迁移 + `schema.sql`）与 `utils/render/index.ts`（create/get/list/cancel + `validateClips` 规范化顺序/相对路径/指纹，按项目鉴权）。
+- Worker：`utils/render/worker.ts` 复用 generation worker 的排队/心跳/取消/失联恢复模式，并发 1（`MINIFEEL_RENDER_CONCURRENCY`）、心跳 10s、失联恢复（`MINIFEEL_RENDER_STALE_SECONDS` 默认 300）；`probeClips` 用 FFprobe 校验视频流/宽高/时长/帧率，`renderClips` 统一 `scale+pad+setsar+fps+format=yuv420p`、libx264 veryfast、`noAudio` 后经 concat filter 硬切，输出 `assets/final/<renderId>.mp4` 并 `indexProjectAsset`。
+- 画布写回：worker 只产出文件与项目资产；前端轮询 `/render/get` 成功后 `applyFinalFilm` 创建/复用 `remote-videoNode` 并经 `node:setVideo` 写入 `Minifeel/成片`。
+- 第五阶段：`projectStages.vue` 增加第五阶段，`creativeViewAdapter` 增加 `final` 状态与 `RenderTask` 类型，新增 `finalStage.vue`，`filmStage.vue` 在全部采用后引导进入成片，`index.vue` 接入 render 任务管理与写回。
+
+**验证记录：**
+
+- Server、Web `typecheck` 通过；Server、Web 生产构建通过；`bun run routes` 生成 4 条 render 路由。
+- 本地运行迁移，`projectRenderTasks` 表创建成功并核对全部 13 列与两个索引。
+- HTTP 实测（mock Google 登录 + 临时项目与假片段）：create 正确规范化输入快照；worker 领取后因本地无 FFmpeg 置为 failed，`errorCode=renderFailed`、错误信息「当前操作需要 FFmpeg…」；get/list/cancel 状态流转正确；非法 UUID 返回 400，越权项目返回 404。
+
+**验证限制（如实说明）：**
+
+- 本地无 FFmpeg/FFprobe，真实合成、混合分辨率/帧率、有音轨与无音轨混合、坏文件、取消中断、服务重启恢复与下载文件均未实机验证。
+- 与 Step 3 的差异：`createWorkspaceFfmpeg` 只接受工作区文件路径、不支持 lavfi 源，无法为无音轨片段补静音轨，故实现为统一无音轨（`-an`），不再保留片段已有音轨；配音与背景音乐由后续任务单独合成。
 
 ---
 

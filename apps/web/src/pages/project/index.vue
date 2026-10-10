@@ -91,7 +91,7 @@
           @requestGenerateAll="prepareStoryboardBatch" />
 
         <filmStage
-          v-else
+          v-else-if="activeStage === 'video'"
           v-model="selectedModelId"
           :projectId="workspaceStore.project.id"
           :storyboard="creativeView?.storyboard ?? []"
@@ -104,7 +104,21 @@
           :busy="generationBusy"
           @requestGenerate="prepareVideoGeneration"
           @requestGenerateAll="prepareVideoBatch"
-          @accept="acceptFilm" />
+          @accept="acceptFilm"
+          @goFinal="activeStage = 'final'" />
+
+        <finalStage
+          v-else
+          :projectId="workspaceStore.project.id"
+          :storyboard="creativeView?.storyboard ?? []"
+          :films="creativeView?.films ?? []"
+          :finalFilm="creativeView?.finalFilm"
+          :renderTask="renderTask"
+          :loading="creativeLoading"
+          :errorMessage="creativeError"
+          :busy="creativeBusy"
+          @requestRender="prepareRender"
+          @backToFilm="activeStage = 'video'" />
       </main>
 
       <aside class="projectAside" aria-label="项目状态">
@@ -112,8 +126,8 @@
 
         <section class="panelCard progressCard">
           <p class="eyebrow">项目进度</p>
-          <strong>{{ completedStageCount }} / 4</strong>
-          <el-progress :percentage="completedStageCount * 25" :showText="false" :strokeWidth="7" />
+          <strong>{{ completedStageCount }} / 5</strong>
+          <el-progress :percentage="completedStageCount * 20" :showText="false" :strokeWidth="7" />
           <p>{{ activeTasks.length ? `${activeTasks.length} 个任务正在进行` : "当前没有等待中的任务" }}</p>
         </section>
 
@@ -154,9 +168,9 @@
 import { computed, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { IconFileText, IconPhoto, IconVideo } from "@tabler/icons-vue";
+import { IconFileText, IconMovie, IconPhoto, IconVideo } from "@tabler/icons-vue";
 import type { CanvasContext } from "@minifeel/tool-canvas/runtime";
-import { apiErrorMessage } from "@/lib/api";
+import api, { apiErrorMessage } from "@/lib/api";
 import { getProjectModel, setProjectMode, setProjectModel } from "@/lib/projectMode";
 import { useProjectSaveGuard } from "@/lib/projectSaveGuard";
 import { useUserAppStore, type GenerationEstimate, type PublicModel } from "@/stores/userApp";
@@ -171,9 +185,10 @@ import assetStage from "./components/assetStage.vue";
 import connectionRepairDialog from "./components/connectionRepairDialog.vue";
 import storyboardStage from "./components/storyboardStage.vue";
 import filmStage from "./components/filmStage.vue";
+import finalStage from "./components/finalStage.vue";
 import generationConfirm from "./components/generationConfirm.vue";
 import { checkGuidedVideoCapability, type GenerationReference, type NodeGenerationPlan } from "@minifeel/tools-scaffold/runtime";
-import { computeCreativeFingerprint, creativeLabels, readConnectionGaps, readCreativeView, referenceKey, type CreativeMediaCard, type CreativeView } from "./creativeViewAdapter";
+import { computeCreativeFingerprint, creativeLabels, readConnectionGaps, readCreativeView, referenceKey, type CreativeMediaCard, type CreativeView, type RenderClip, type RenderTask } from "./creativeViewAdapter";
 
 type PreparedGeneration = {
   nodeId: string;
@@ -205,6 +220,8 @@ type TaskDiscovery = {
   settleDeadline?: number;
 };
 
+type ApiResponse<T> = { code: number; data: T; message: string };
+
 const route = useRoute();
 const router = useRouter();
 const workspaceStore = useWorkspaceStore();
@@ -229,6 +246,9 @@ let creativeRefreshVersion = 0;
 let creativeLoadingVersion = 0;
 let taskPollTimer: number | undefined;
 let taskPolling = false;
+let renderPollTimer: number | undefined;
+let renderPolling = false;
+const renderTask = ref<RenderTask>();
 const taskDiscoveries = ref<TaskDiscovery[]>([]);
 let disposed = false;
 const runtimeReady = computed(() => runtimeRef.value?.canvasReady ?? false);
@@ -243,6 +263,7 @@ const stageContents = {
   characters: { number: 2, title: "设定可复用的视觉资产", description: "整理角色、场景、道具和风格，让每个镜头都有明确的视觉依据。", icon: IconPhoto, mediaType: "image" },
   storyboard: { number: 3, title: "把剧本拆成连续画面", description: "逐镜确认景别、构图和人物动作，提前看清故事节奏。", icon: IconPhoto, mediaType: "image" },
   video: { number: 4, title: "制作可以剪辑的镜头片段", description: "选择确认过的分镜，生成镜头片段并查看任务进度。", icon: IconVideo, mediaType: "video" },
+  final: { number: 5, title: "合成并交付成片", description: "确认镜头顺序，合成完整成片并下载。", icon: IconMovie, mediaType: "video" },
 } as const;
 const stageContent = computed(() => stageContents[activeStage.value]);
 // ACT: 普通创作的视频硬门槛：分镜图作首帧、可同时附加本镜所需参考图、支持 9:16 与至少 720p。
@@ -265,6 +286,7 @@ const stageStatuses = computed<Record<ProjectStage, ProjectStageStatus>>(() => c
   characters: "notStarted",
   storyboard: "notStarted",
   video: "notStarted",
+  final: "notStarted",
 }));
 const completedStageCount = computed(() => Object.values(stageStatuses.value).filter(status => status === "complete").length);
 const generationBusy = computed(() => creativeBusy.value || taskDiscoveries.value.length > 0);
@@ -344,7 +366,9 @@ onMounted(async () => {
       userAppStore.loadAccount(),
     ]);
     await refreshCreativeView();
+    await loadRenderTasks();
     if (activeTasks.value.length) scheduleTaskPoll();
+    if (renderTask.value && ["pending", "running"].includes(renderTask.value.status)) scheduleRenderPoll(0);
   } catch (error) {
     errorMessage.value = apiErrorMessage(error, "项目加载失败");
   } finally {
@@ -357,15 +381,19 @@ onBeforeUnmount(() => {
   disposed = true;
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   if (taskPollTimer !== undefined) window.clearTimeout(taskPollTimer);
+  if (renderPollTimer !== undefined) window.clearTimeout(renderPollTimer);
 });
 
 function handleVisibilityChange() {
   if (document.hidden) {
     if (taskPollTimer !== undefined) window.clearTimeout(taskPollTimer);
+    if (renderPollTimer !== undefined) window.clearTimeout(renderPollTimer);
     taskPollTimer = undefined;
+    renderPollTimer = undefined;
     return;
   }
   if (activeTasks.value.length || taskDiscoveries.value.length) scheduleTaskPoll(0);
+  if (renderTask.value && ["pending", "running"].includes(renderTask.value.status)) scheduleRenderPoll(0);
 }
 
 function getCanvas(): CanvasContext {
@@ -1020,6 +1048,96 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+async function loadRenderTasks() {
+  const projectId = workspaceStore.project?.id;
+  if (!projectId) return;
+  const { data } = await api.get<ApiResponse<RenderTask[]>>("/render/list", { params: { projectId, limit: 1, offset: 0 } });
+  renderTask.value = data.data[0];
+}
+
+function collectRenderClips(): RenderClip[] {
+  const storyboard = creativeView.value?.storyboard ?? [];
+  const films = creativeView.value?.films ?? [];
+  const clips: RenderClip[] = [];
+  for (const shot of storyboard) {
+    if (!shot.confirmed || !shot.output) continue;
+    const film = films.find(item => item.order === shot.order);
+    if (!film?.accepted) continue;
+    clips.push({ order: shot.order, path: film.accepted.path, fingerprint: film.accepted.requestFingerprint });
+  }
+  return clips.sort((left, right) => left.order - right.order);
+}
+
+async function prepareRender() {
+  const projectId = workspaceStore.project?.id;
+  if (!projectId || creativeBusy.value) return;
+  const clips = collectRenderClips();
+  const storyboard = creativeView.value?.storyboard ?? [];
+  const films = creativeView.value?.films ?? [];
+  const readyShots = storyboard.filter(shot => shot.confirmed && shot.output);
+  const acceptedOrders = new Set(films.filter(film => film.accepted).map(film => film.order));
+  if (!readyShots.length || readyShots.some(shot => !acceptedOrders.has(shot.order))) {
+    ElMessage.error("请先采用所有分镜对应的视频片段");
+    return;
+  }
+  creativeBusy.value = true;
+  try {
+    const { data } = await api.post<ApiResponse<RenderTask>>("/render/create", { projectId, clips });
+    renderTask.value = data.data;
+    ElMessage.success("成片合成任务已创建");
+    scheduleRenderPoll(300);
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, "成片合成未能启动"));
+  } finally {
+    creativeBusy.value = false;
+  }
+}
+
+function scheduleRenderPoll(delay = 2_000) {
+  if (disposed || document.hidden || renderPollTimer !== undefined || renderPolling) return;
+  renderPollTimer = window.setTimeout(() => {
+    renderPollTimer = undefined;
+    void pollRenderTask();
+  }, delay);
+}
+
+async function pollRenderTask() {
+  if (disposed || renderPolling) return;
+  const taskId = renderTask.value?.id;
+  if (!taskId) return;
+  renderPolling = true;
+  try {
+    const { data } = await api.get<ApiResponse<RenderTask>>("/render/get", { params: { taskId } });
+    renderTask.value = data.data;
+    const task = renderTask.value;
+    if (task.status === "succeeded" && task.outputPath && creativeView.value?.finalFilm?.output?.path !== task.outputPath) {
+      await applyFinalFilm(task.outputPath);
+    }
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, "成片状态刷新失败"));
+  } finally {
+    renderPolling = false;
+  }
+  const status = renderTask.value?.status;
+  if (status === "pending" || status === "running") scheduleRenderPoll();
+}
+
+// ACT: 成片节点固定使用 remote-videoNode（自带 node:setVideo）；旧项目若用 remote-videoGenerationNode 作最终成片，则另建一个 videoNode 承载合成结果。
+async function applyFinalFilm(outputPath: string) {
+  const canvas = getCanvas();
+  let finalNodeId = creativeView.value?.finalFilm?.nodeType === "remote-videoNode" ? creativeView.value.finalFilm.nodeId : undefined;
+  if (!finalNodeId) {
+    const created = await canvas.call({
+      name: "addNode",
+      args: { type: "remote-videoNode", position: { x: 1080, y: 0 }, label: creativeLabels.finalFilm },
+    });
+    if (!isRecord(created) || !isRecord(created.node) || typeof created.node.id !== "string") throw new Error("成片节点创建失败");
+    finalNodeId = created.node.id;
+  }
+  await canvas.call({ name: "nodeTools", args: { nodeId: finalNodeId, name: "node:setVideo", args: { path: outputPath, mimeType: "video/mp4" } } });
+  await refreshCreativeView();
+}
+
 async function openAdvanced() {
   if (!workspaceStore.project) return;
   setProjectMode("advanced");
@@ -1064,10 +1182,12 @@ async function openAdvanced() {
     :deep(.scriptStage),
     :deep(.assetStage),
     :deep(.storyboardStage),
-    :deep(.filmStage) { margin-top: 24px; }
+    :deep(.filmStage),
+    :deep(.finalStage) { margin-top: 24px; }
     :deep(.assetStage),
     :deep(.storyboardStage),
-    :deep(.filmStage) { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+    :deep(.filmStage),
+    :deep(.finalStage) { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
     :deep(.scriptStage) { flex: 1; min-height: 0; overflow: hidden; }
 
     .stageHeading {
@@ -1127,7 +1247,8 @@ async function openAdvanced() {
       :deep(.scriptStage),
       :deep(.assetStage),
       :deep(.storyboardStage),
-      :deep(.filmStage) { flex: initial; min-height: 0; overflow: visible; }
+      :deep(.filmStage),
+      :deep(.finalStage) { flex: initial; min-height: 0; overflow: visible; }
     }
     .projectAside { height: auto; overflow: visible; }
   }

@@ -15,7 +15,7 @@
 </template>
 
 <script setup lang="ts">
-export type ProjectStage = "script" | "characters" | "storyboard" | "video";
+export type ProjectStage = "script" | "characters" | "storyboard" | "video" | "final";
 export type ProjectStageStatus = "notStarted" | "running" | "review" | "complete" | "failed";
 
 defineProps<{ modelValue: ProjectStage; statuses: Record<ProjectStage, ProjectStageStatus> }>();
@@ -25,6 +25,7 @@ const stages: Array<{ id: ProjectStage; name: string; caption: string }> = [
   { id: "characters", name: "资产设定", caption: "确认角色、场景和道具" },
   { id: "storyboard", name: "做分镜", caption: "设计画面节奏" },
   { id: "video", name: "镜头制作", caption: "生成视频片段" },
+  { id: "final", name: "成片", caption: "合成并交付成片" },
 ];
 const statusLabels: Record<ProjectStageStatus, string> = {
   notStarted: "未开始",
@@ -38,7 +39,7 @@ const statusLabels: Record<ProjectStageStatus, string> = {
 <style scoped lang="scss">
 .projectStages {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 9px;
 
   button {
@@ -101,7 +102,7 @@ const statusLabels: Record<ProjectStageStatus, string> = {
 
 @media (max-width: 720px) {
   .projectStages {
-    grid-template-columns: repeat(4, minmax(172px, 1fr));
+    grid-template-columns: repeat(5, minmax(172px, 1fr));
     overflow-x: auto;
     padding-bottom: 5px;
   }

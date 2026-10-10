@@ -124,6 +124,7 @@ export async function createApp({
   const ffmpegStatus = await (await import("@/utils/ffmpeg")).getStatus();
   if (!ffmpegStatus.available) console.warn(`[FFmpeg 不可用]: ${ffmpegStatus.error}`);
   await startGenerationWorker();
+  await (await import("@/utils/render/worker")).startRenderWorker();
 
   return app;
 }

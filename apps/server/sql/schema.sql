@@ -345,6 +345,29 @@ comment on column "authRateLimits"."updatedAt" is '最近计数更新时间';
 
 create index "authRateLimitsUpdatedIndex" on "authRateLimits" ("updatedAt");
 
+create table "projectRenderTasks" (
+  "id" uuid primary key,
+  "userId" uuid not null references "users" ("id") on delete restrict,
+  "projectId" uuid not null references "projects" ("id") on delete restrict,
+  "status" text not null default 'pending' check ("status" in ('pending', 'running', 'succeeded', 'failed', 'cancelled')),
+  "inputSnapshot" jsonb not null default '{}'::jsonb,
+  "outputPath" text,
+  "progress" integer not null default 0 check ("progress" between 0 and 100),
+  "errorCode" varchar(120),
+  "errorMessage" text,
+  "createdAt" timestamptz not null default now(),
+  "startedAt" timestamptz,
+  "heartbeatAt" timestamptz,
+  "completedAt" timestamptz,
+  "cancelRequestedAt" timestamptz
+);
+
+comment on table "projectRenderTasks" is '本地 FFmpeg 成片合成任务，不关联模型、供应商或积分';
+comment on column "projectRenderTasks"."inputSnapshot" is '冻结的已采用片段相对路径、顺序与指纹快照';
+
+create index "projectRenderTasksQueueIndex" on "projectRenderTasks" ("status", "createdAt") where "status" in ('pending', 'running');
+create index "projectRenderTasksProjectIndex" on "projectRenderTasks" ("projectId", "createdAt" desc);
+
 create function "preventImmutableMutation"() returns trigger language plpgsql as $$
 begin
   raise exception '% 不允许修改或删除', tg_table_name;

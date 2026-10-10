@@ -69,6 +69,8 @@ export type CreativeAccepted = {
 
 export type CreativeMediaCard = {
   nodeId: string;
+  /** 画布节点类型，用于判断是否可复用节点工具（例如成片节点须为 remote-videoNode 才有 node:setVideo）。 */
+  nodeType: string;
   title: string;
   order: number;
   prompt: string;
@@ -124,6 +126,26 @@ export type CreativeConnectionGap = {
   shotTitle: string;
   currentNodeIds: string[];
   candidates: CreativeGapCandidate[];
+};
+
+export type RenderClip = { order: number; path: string; fingerprint: string };
+
+export type RenderTaskStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type RenderTask = {
+  id: string;
+  projectId: string;
+  status: RenderTaskStatus;
+  inputSnapshot: { clips: RenderClip[] };
+  outputPath: string | null;
+  progress: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  heartbeatAt: string | null;
+  completedAt: string | null;
+  cancelRequestedAt: string | null;
 };
 
 const assetPrefixes: Array<{ prefix: string; assetType: CreativeAssetType }> = [
@@ -211,6 +233,7 @@ export async function readCreativeView(projectId: string, tasks: GenerationTask[
     const persistedOutput = readMediaOutput(node.data.outputs, mediaType === "video" ? "VIDEO" : "IMAGE");
     const card: CreativeMediaCard = {
       nodeId: node.id,
+      nodeType: node.type,
       title: label.title,
       order: label.order,
       prompt: typeof node.data.prompt === "string" ? node.data.prompt : "",
@@ -297,6 +320,7 @@ export async function readCreativeView(projectId: string, tasks: GenerationTask[
       characters: mediaStatus(assets),
       storyboard: mediaStatus(storyboard),
       video: filmStatus(storyboard, films),
+      final: finalStatus(storyboard, films, finalFilm),
     },
     warnings: [...warnings],
   };
@@ -414,6 +438,14 @@ function filmStatus(storyboard: CreativeMediaCard[], films: CreativeMediaCard[])
   if (films.some(card => card.task?.status === "failed")) return "failed";
   if (storyboard.length && storyboard.every(shot => films.some(film => film.order === shot.order && film.output))) return "complete";
   return "review";
+}
+
+// ACT: 成片阶段不产生任务，只有画布上的最终成片节点；已确认分镜全部采用后进入可合成状态。
+function finalStatus(storyboard: CreativeMediaCard[], films: CreativeMediaCard[], finalFilm: CreativeMediaCard | undefined): ProjectStageStatus {
+  if (finalFilm?.output) return "complete";
+  const readyShots = storyboard.filter(shot => shot.confirmed && shot.output);
+  if (readyShots.length && readyShots.every(shot => films.some(film => film.order === shot.order && film.accepted))) return "review";
+  return "notStarted";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,9 +1,10 @@
 import initialSchema from "@/utils/database/migrations/initialSchema";
 import authRateLimits from "@/utils/database/migrations/authRateLimits";
+import projectRenderTasks from "@/utils/database/migrations/projectRenderTasks";
 import { checkDatabase, closeDatabase, getDatabase } from "@/utils/database";
 import type { Migration } from "@/utils/database/types";
 
-const migrations: Migration[] = [initialSchema, authRateLimits];
+const migrations: Migration[] = [initialSchema, authRateLimits, projectRenderTasks];
 
 export default async function migrateDatabase() {
   const database = getDatabase();
