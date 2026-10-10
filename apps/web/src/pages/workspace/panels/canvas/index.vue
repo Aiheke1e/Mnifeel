@@ -117,7 +117,7 @@
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowReactive, shallowRef, watch } from "vue";
 import axios from "axios";
-import { debounce } from "lodash-es";
+import { cloneDeep, debounce, isEqual } from "lodash-es";
 import { ElMessage } from "element-plus";
 import { storeToRefs } from "pinia";
 import { IconUnlink } from "@tabler/icons-vue";
@@ -436,12 +436,23 @@ let savePaused = false;
 let saveCancelled = false;
 let changedWhilePaused = false;
 let saveRevision = 0;
+const lastSavedPayloads = new Map<string, unknown>();
+// ACT: 边端点坐标是 Vue Flow 渲染时按节点位置计算的运行态缓存，不持久化；否则打开画布
+// 时重算坐标会触发一次“无变化却改写文件”的静默保存，破坏“打开项目不得改写画布”的约定。
+function stripEdgeRuntimeFields(edge: Edge) {
+  const { sourceX, sourceY, targetX, targetY, ...rest } = edge as Edge & { sourceX?: number; sourceY?: number; targetX?: number; targetY?: number };
+  return rest;
+}
 const saveCanvas = debounce((projectId: string, fileName: string) => {
   const flow = toObject();
   // ACT: 同页保存按顺序完成，防止慢请求覆盖后续修改；不处理多个客户端的并发编辑。
   saving = saving.then(async () => {
     try {
-      await useWorkspaceFiles(projectId).writeJson(fileName, { minifeelCanvas: true, nodes: flow.nodes, edges: flow.edges, viewport: flow.viewport });
+      const payload = cloneDeep({ minifeelCanvas: true, nodes: flow.nodes, edges: flow.edges.map(stripEdgeRuntimeFields), viewport: flow.viewport });
+      // ACT: 内容与上次落盘一致时跳过写入，避免打开/初始化触发的保存无意义地触碰文件。
+      if (isEqual(payload, lastSavedPayloads.get(fileName))) return;
+      await useWorkspaceFiles(projectId).writeJson(fileName, payload);
+      lastSavedPayloads.set(fileName, payload);
       saveError = undefined;
     } catch (err) {
       saveError = err;
