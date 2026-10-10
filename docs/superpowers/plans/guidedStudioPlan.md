@@ -1306,7 +1306,9 @@ Web、Server、图片/视频节点和管理员页面复用同一套类型与匹�
 
 ### Task 19: 合格图片生视频模型适配
 
-**Status:** 开发完成（2026-10-10，代码已提交推送 `e78067e`）：用户选定 Agnes（Base URL 现用国内镜像 `apihub.agnes-ai.cn/v1`，原 `apihub.agnes-ai.com/v1` 被本地网络拦截，后续可换回）。Step 1–5 全部完成；真实成片被 Agnes 视频队列满载（`video_queue_full` 503）阻塞，属外部容量问题，待队列恢复后由用户复测。依赖 Task 18。
+**Status:** 开发完成（2026-10-10，代码已提交推送 `e78067e`，后续本地图片改造见下）：用户选定 Agnes（Base URL 现用国内镜像 `apihub.agnes-ai.cn/v1`，原 `apihub.agnes-ai.com/v1` 被本地网络拦截，后续可换回）。Step 1–5 全部完成；真实成片被 Agnes 视频队列满载（`video_queue_full` 503）阻塞，属外部容量问题，待队列恢复后由用户复测。依赖 Task 18。
+
+**本地图片（base64）改造（2026-10-10）**：官方文档称首帧/参考图「只收公网 URL」，实测纯 base64 与 data URI 均通过 Agnes 入队前参数校验（返回 503 队列满而非 400 参数错误），证明本地图片可直接传。故将适配器与管理员调试从「URL-only」改为「本地图片 base64」，既支持文生视频也支持图生视频，普通画布与高级画布均可直接供给本地图片。
 
 **Files:**
 
@@ -1368,7 +1370,7 @@ Web、Server、图片/视频节点和管理员页面复用同一套类型与匹�
 
 **关键约束（官方明确）**：`keyframe`（首帧/尾帧）与 `reference`（图片参考）**互斥**——`keyframe` 禁止 `images`/`audios`/`videos`，`reference` 禁止 `first_frame`/`last_frame`/`videos`。故映射到能力 Schema：`firstFrame: true`、`lastFrame: true`、`maxImageReferences: 5`、`combineFrameWithReferences: false`。与 Seedance 一样**不满足**「首帧 + 图片参考同一次请求」的 `combineFrameWithReferences` 门槛。
 
-**另一关键约束（官方明确）**：首帧/尾帧/参考图只接受**公网 HTTP(S) URL**（「All media URLs must be publicly accessible」），不接受 base64。而平台媒体链路 `readReference` 产出的是 base64，普通画布无法供给公网 URL，故 Agnes 图生视频当前**只能通过管理员调试（URL 输入）验证**，暂不能直接接入普通创作链路。
+**另一约束（官方文档 vs 实测）**：官方文档称首帧/尾帧/参考图「只接受公网 HTTP(S) URL」（「All media URLs must be publicly accessible」），但**实测纯 base64 与 data URI 均能通过 Agnes 入队前参数校验**（返回 503 队列满而非 400 参数错误），第三方「Base64 or URL」才是准确描述。平台媒体链路 `readReference` 产出的是 base64，因此本地图片可直接传入适配器（由适配器按 `mimeType` 拼成 data URI），无需先上传公网。
 
 **对照结论（决定性门槛）**
 
@@ -1397,15 +1399,17 @@ Task 17 的 `combineFrameWithReferences` 正是短剧镜头的核心门槛：一
 
 - [x] **Step 2: 接入单一最小适配器**
 
-`apps/server/src/utils/providers/agnes.ts`：`createVideo` 支持首帧/尾帧（`keyframe`）与图片参考（`reference`，≤5），首帧与参考图互斥时明确报错，视频/音频参考暂不支持；`requireUrl` 校验首帧/参考图为公网 HTTP(S) URL，拒绝 base64；`fetchJson` 读取上游错误体透出真实原因（如 `video queue is full`）。`capabilities()` 增加 `videoCapability` v1 声明（`firstFrame:true`、`lastFrame:true`、`maxImageReferences:5`、`combineFrameWithReferences:false`），保留 `modes:["text"]` 供旧链路使用。未新增 `ProviderType`（复用既有 `agnes`），API Key 继续服务端加密。
+`apps/server/src/utils/providers/agnes.ts`：`createVideo` 支持首帧/尾帧（`keyframe`）与图片参考（`reference`，≤5），首帧与参考图互斥时明确报错，视频/音频参考暂不支持；`requireImageRef` 接受公网 HTTP(S) URL、data URI 或纯 base64（纯 base64 按 `mimeType` 拼成 data URI），本地图片可直接传入；`fetchJson` 读取上游错误体透出真实原因（如 `video queue is full`）。`capabilities()` 增加 `videoCapability` v1 声明（`firstFrame:true`、`lastFrame:true`、`maxImageReferences:5`、`combineFrameWithReferences:false`），`modes` 从 `["text"]` 扩展为 `["text","startEndRequired","endFrameOptional","startFrameOptional",["imageReference:5"]]` 以支持文生视频与图生视频。未新增 `ProviderType`（复用既有 `agnes`），API Key 继续服务端加密。
 
 - [x] **Step 3: 扩展管理员最小调试**
 
-`apps/web/src/pages/admin/providers.vue` 的 Agnes 调试弹窗新增「首帧图片 URL」「参考图片 URL（每行一个，≤5）」输入；`routes/admin/providers/debug.ts` 新增 `firstFrameUrl`/`referenceImageUrls`（校验公网 HTTP(S) URL）；`providers/index.ts` 的 `debugProviderModel` 将 URL 透传给 `createVideo`，并限定只有 Agnes 可用图片 URL、只有 BananaPro 可用参考图。普通用户不可访问（admin 路由），调试不写项目、不扣积分。
+`apps/web/src/pages/admin/providers.vue` 的 Agnes 调试弹窗改为本地图片文件上传：「首帧图片（本地，单选）」「参考图片（本地，多选 ≤5）」，复用 FileReader 读成 base64；`routes/admin/providers/debug.ts` 新增 `firstFrame`/`referenceImages`（`{data, mimeType}` base64，校验内容与格式一致且 ≤10 MB）；`providers/index.ts` 的 `debugProviderModel` 将 base64 透传给 `createVideo`，并限定只有 Agnes 可用首帧/参考图、只有 BananaPro 可用参考图。普通用户不可访问（admin 路由），调试不写项目、不扣积分。
 
 - [x] **Step 4: 分层验证并执行一次获批真实调用**
 
-本地验证：server/web typecheck 通过；server+web 生产构建通过；连接测试（`/admin/providers/test`）通过；同步模型（`/admin/providers/syncModels`）返回 2 个视频模型，`videoCapability` 已正确写入。真实调用：用 `agnes-video-2.5-flash`（当前 0 元/秒、`perTask:1` 积分）发起 `keyframe` + `first_frame` 公网 URL 请求，Agnes 校验通过、请求进入队列，但持续返回 `video_queue_full`（HTTP 503，含 `text` 模式），**未产出成片**——阻塞于 Agnes 外部容量（已知 BUG-013），非适配器问题。待队列恢复后重跑即可核对状态流转与输出 URL。
+本地验证：server/web typecheck 通过；server+web 生产构建通过；连接测试（`/admin/providers/test`）通过；同步模型（`/admin/providers/syncModels`）返回 2 个视频模型，`videoCapability` 已正确写入。真实调用：用 `agnes-video-2.5-flash`（当前 0 元/秒、`perTask:1` 积分）发起 `keyframe` + `first_frame` 请求，Agnes 校验通过、请求进入队列，但持续返回 `video_queue_full`（HTTP 503，含 `text` 模式），**未产出成片**——阻塞于 Agnes 外部容量（已知 BUG-013），非适配器问题。待队列恢复后重跑即可核对状态流转与输出 URL。
+
+base64 实证（本地图片改造）：用本地 PNG 以纯 base64 与 `data:image/png;base64,...` 两种格式直接 POST `/v1/videos`，均返回 503 `video_queue_full`（而非 400 参数错误），证明 base64 通过入队前校验；对照传非法字符串则触发免费用户 429 限频，印证免费额度已接近耗尽。真实调用验证需等队列恢复与限频解除。
 
 - [x] **Step 5: 更新计划并提交**
 
@@ -1414,10 +1418,11 @@ Task 17 的 `combineFrameWithReferences` 正是短剧镜头的核心门槛：一
 **待用户测试清单（开发已完成，由用户自行验收）**
 
 1. 登录管理员账号（`+8613800000000 / MinifeelAdmin2026`），访问 `/#/admin/providers`。
-2. 确认 Agnes 卡片「已通过」（Base URL 现为 `https://apihub.agnes-ai.cn/v1`；如后续换回 `.com`，先「保存」再「连接测试」）。
-3. 点「功能调试」，模型选 `agnes-video-2.5-flash`（已启用、默认），输入提示词，可选填「首帧图片 URL」（须公网可访问，例如 `https://picsum.photos/seed/minifeel/720/1280`）与「参考图片 URL」。
-4. 点「开始调试」，等待视频生成（调试不写项目、不扣积分）。若返回 `video queue is full`，为 Agnes 外部容量限制（已知 BUG-013），稍后重试即可。
-5. 注意：首帧与参考图不能同时填（Agnes 官方互斥）；两者都填会直接报错。
+2. 确认 Agnes 卡片「已通过」（Base URL 现为 `https://apihub.agnes-ai.cn/v1`；如后续换回 `.com`，先「保存」再「连接测试」）。若需新能力生效，先点「同步模型」一次。
+3. 点「功能调试」，模型选 `agnes-video-2.5-flash`（已启用、默认），输入提示词。
+4. 文生视频：不选任何图片，直接「开始调试」。
+5. 图生视频：可「选择首帧图片」（本地 JPG/PNG/WebP，单选）或「选择参考图片」（本地多选 ≤5），二者互斥、不能同时填；填好后「开始调试」。
+6. 等待视频生成（调试不写项目、不扣积分）。若返回 `video queue is full`，为 Agnes 外部容量限制（已知 BUG-013），稍后重试即可；若返回 429，为免费额度限频，需等额度恢复。
 
 ---
 

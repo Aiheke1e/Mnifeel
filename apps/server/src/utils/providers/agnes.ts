@@ -94,8 +94,8 @@ function capabilities(modelId: string) {
   const resolutions = flash ? ["720P"] : ["720P", "1080P", "1K", "2K"];
   const ratios = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"];
   return {
-    // ACT: 仅文生视频走 base64 素材链路；图生视频（首帧/参考图）要求公网 URL，普通画布暂无法供给，故保留 text 单模式。
-    modes: ["text"],
+    // ACT: 支持文生视频（text）与图生视频（keyframe 首帧/尾帧、reference 参考图 ≤5）；本地图片以 base64 传入，普通与高级画布均可供给。
+    modes: ["text", "startEndRequired", "endFrameOptional", "startFrameOptional", ["imageReference:5"]],
     durations,
     resolutions,
     durationResolutionMap: [{ duration: durations, resolution: resolutions }],
@@ -114,14 +114,19 @@ function capabilities(modelId: string) {
   };
 }
 
-// ACT: Agnes 的首帧/尾帧/参考图只接受公网 HTTP(S) URL，不接受 base64 或本地路径。
-function requireUrl(input: ProviderMediaInput | undefined): string | undefined {
+// ACT: Agnes 的首帧/尾帧/参考图接受公网 HTTP(S) URL，也接受 base64 图片数据。
+// 平台媒体链路 readReference 产出的是纯 base64，这里统一拼成 data URI 再交给 Agnes。
+// 实测纯 base64 与 data URI 均能通过 Agnes 入队前参数校验（返回 503 队列满而非 400 参数错误），官方文档「只收公网 URL」并不完整。
+function requireImageRef(input: ProviderMediaInput | undefined): string | undefined {
   if (!input) return undefined;
-  const url = input.data.trim();
-  if (!/^https?:\/\//i.test(url) || !URL.canParse(url)) {
-    throw Object.assign(new Error("Agnes 参考图必须为公网 HTTP(S) URL，本地图片请先上传到可公网访问的地址"), { status: 400 });
+  const value = input.data.trim();
+  if (!value) return undefined;
+  if (/^https?:\/\//i.test(value) && URL.canParse(value)) return value; // 公网 URL 原样透传
+  if (/^data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,/i.test(value)) return value; // 已是 data URI 原样透传
+  if (/^[A-Za-z0-9+/=\r\n]+$/.test(value)) { // 纯 base64 → data URI
+    return `data:${input.mimeType || "image/png"};base64,${value.replace(/\s+/g, "")}`;
   }
-  return url;
+  throw Object.assign(new Error("Agnes 图片参考仅接受公网 HTTP(S) URL 或 base64 图片数据"), { status: 400 });
 }
 
 const agnes: ProviderAdapter = {
@@ -152,9 +157,9 @@ const agnes: ProviderAdapter = {
     if (!capabilities(model.upstreamModelId).resolutions.includes(resolution)) throw Object.assign(new Error("Agnes 模型不支持所选分辨率"), { status: 400 });
     if (!capabilities(model.upstreamModelId).ratios.includes(ratio)) throw Object.assign(new Error("Agnes 模型不支持所选画幅"), { status: 400 });
 
-    const firstFrame = requireUrl(input.firstFrame);
-    const lastFrame = requireUrl(input.lastFrame);
-    const images = (input.images ?? []).map(requireUrl);
+    const firstFrame = requireImageRef(input.firstFrame);
+    const lastFrame = requireImageRef(input.lastFrame);
+    const images = (input.images ?? []).map(requireImageRef);
     if (images.length > 5) throw Object.assign(new Error("Agnes 单次最多使用 5 张参考图"), { status: 400 });
 
     const hasFrame = Boolean(firstFrame || lastFrame);

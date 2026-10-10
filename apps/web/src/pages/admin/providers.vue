@@ -23,8 +23,14 @@
           </el-select>
         </el-form-item>
         <el-form-item label="提示词"><el-input v-model="debugPrompt" type="textarea" :rows="5" maxlength="100000" showWordLimit /></el-form-item>
-        <el-form-item v-if="debugProvider?.type === 'agnes'" label="首帧图片 URL（可选，须公网可访问）"><el-input v-model="debugFirstFrameUrl" placeholder="https://example.com/first.png" /></el-form-item>
-        <el-form-item v-if="debugProvider?.type === 'agnes'" label="参考图片 URL（可选，每行一个，最多 5 张）"><el-input v-model="debugReferenceUrls" type="textarea" :rows="3" placeholder="https://example.com/character.png" /></el-form-item>
+        <el-form-item v-if="debugProvider?.type === 'agnes'" label="首帧图片（可选，本地图片）">
+          <input ref="firstFrameInput" class="fileInput" type="file" accept="image/jpeg,image/png,image/webp" aria-label="选择首帧图片" @change="selectFirstFrame" />
+          <div class="referenceActions"><el-button @click="firstFrameInput?.click()">选择首帧图片</el-button><span v-if="firstFrame">{{ firstFrame.name }}</span><el-button v-if="firstFrame" text type="danger" @click="clearFirstFrame">移除</el-button></div>
+        </el-form-item>
+        <el-form-item v-if="debugProvider?.type === 'agnes'" label="参考图片（可选，本地图片，最多 5 张）">
+          <input ref="referenceImagesInput" class="fileInput" type="file" multiple accept="image/jpeg,image/png,image/webp" aria-label="选择参考图片" @change="selectReferenceImages" />
+          <div class="referenceActions"><el-button @click="referenceImagesInput?.click()">选择参考图片</el-button><span v-if="referenceImages.length">{{ referenceImages.length }} 张</span><el-button v-if="referenceImages.length" text type="danger" @click="clearReferenceImages">移除</el-button></div>
+        </el-form-item>
         <el-form-item v-if="debugProvider?.type === 'bananaPro'" label="参考图（可选，最多 10 MB）">
           <input ref="referenceInput" class="fileInput" type="file" accept="image/jpeg,image/png,image/webp" aria-label="选择参考图" @change="selectReference" />
           <div class="referenceActions"><el-button @click="referenceInput?.click()">选择图片</el-button><span v-if="referenceImage">{{ referenceImage.name }}</span><el-button v-if="referenceImage" text type="danger" @click="clearReference">移除</el-button></div>
@@ -66,13 +72,15 @@ const debugProvider = ref<Provider>();
 const debugModels = ref<Model[]>([]);
 const debugModelId = ref("");
 const debugPrompt = ref("");
-const debugFirstFrameUrl = ref("");
-const debugReferenceUrls = ref("");
 const debugResult = ref<DebugResult>();
 const modelLoading = ref(false);
 const debugging = ref(false);
 const referenceInput = ref<HTMLInputElement>();
 const referenceImage = ref<{ name: string; data: string; mimeType: string }>();
+const firstFrameInput = ref<HTMLInputElement>();
+const firstFrame = ref<{ name: string; data: string; mimeType: string }>();
+const referenceImagesInput = ref<HTMLInputElement>();
+const referenceImages = ref<{ name: string; data: string; mimeType: string }[]>([]);
 let debugController: AbortController | undefined;
 
 function formatTime(value: string) { return new Date(value).toLocaleString("zh-CN", { hour12: false }); }
@@ -90,10 +98,10 @@ async function openDebugger(provider: Provider) {
   debugModels.value = [];
   debugModelId.value = "";
   debugPrompt.value = "";
-  debugFirstFrameUrl.value = "";
-  debugReferenceUrls.value = "";
   debugResult.value = undefined;
   clearReference();
+  clearFirstFrame();
+  clearReferenceImages();
   debugVisible.value = true;
   modelLoading.value = true;
   try {
@@ -112,21 +120,53 @@ function clearReference() {
   if (referenceInput.value) referenceInput.value.value = "";
 }
 
+function clearFirstFrame() {
+  firstFrame.value = undefined;
+  if (firstFrameInput.value) firstFrameInput.value.value = "";
+}
+
+function clearReferenceImages() {
+  referenceImages.value = [];
+  if (referenceImagesInput.value) referenceImagesInput.value.value = "";
+}
+
+async function readImageFile(file: File): Promise<{ name: string; data: string; mimeType: string } | undefined> {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { ElMessage.error("请选择 JPG、PNG 或 WebP 图片"); return; }
+  if (file.size > 10 * 1024 * 1024) { ElMessage.error("图片不能超过 10 MB"); return; }
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("读取图片失败"));
+    reader.onerror = () => reject(reader.error ?? new Error("读取图片失败"));
+    reader.readAsDataURL(file);
+  }).catch(error => { ElMessage.error(apiErrorMessage(error, "读取图片失败")); return ""; });
+  if (!dataUrl) return;
+  const separator = dataUrl.indexOf(",");
+  if (separator < 0) { ElMessage.error("图片格式无效"); return; }
+  return { name: file.name, mimeType: file.type, data: dataUrl.slice(separator + 1) };
+}
+
 async function selectReference(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
   if (!file) return clearReference();
-  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { clearReference(); return ElMessage.error("请选择 JPG、PNG 或 WebP 图片"); }
-  if (file.size > 10 * 1024 * 1024) { clearReference(); return ElMessage.error("参考图不能超过 10 MB"); }
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("读取参考图失败"));
-    reader.onerror = () => reject(reader.error ?? new Error("读取参考图失败"));
-    reader.readAsDataURL(file);
-  }).catch(error => { ElMessage.error(apiErrorMessage(error, "读取参考图失败")); return ""; });
-  if (!dataUrl) return clearReference();
-  const separator = dataUrl.indexOf(",");
-  if (separator < 0) { clearReference(); return ElMessage.error("参考图格式无效"); }
-  referenceImage.value = { name: file.name, mimeType: file.type, data: dataUrl.slice(separator + 1) };
+  const image = await readImageFile(file);
+  if (!image) return clearReference();
+  referenceImage.value = image;
+}
+
+async function selectFirstFrame(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (!file) return clearFirstFrame();
+  const image = await readImageFile(file);
+  if (!image) return clearFirstFrame();
+  firstFrame.value = image;
+}
+
+async function selectReferenceImages(event: Event) {
+  const files = Array.from((event.target as HTMLInputElement).files ?? []);
+  if (!files.length) return clearReferenceImages();
+  const images = (await Promise.all(files.map(readImageFile))).filter((image): image is { name: string; data: string; mimeType: string } => Boolean(image));
+  if (images.length > 5) { clearReferenceImages(); return ElMessage.error("参考图片最多 5 张"); }
+  referenceImages.value = images;
 }
 
 async function runDebug() {
@@ -144,8 +184,8 @@ async function runDebug() {
       prompt,
       ...(provider.type === "bananaPro" && referenceImage.value ? { referenceImage: { data: referenceImage.value.data, mimeType: referenceImage.value.mimeType } } : {}),
       ...(provider.type === "agnes" ? {
-        firstFrameUrl: debugFirstFrameUrl.value.trim() || undefined,
-        referenceImageUrls: debugReferenceUrls.value.split("\n").map(item => item.trim()).filter(Boolean),
+        firstFrame: firstFrame.value ? { data: firstFrame.value.data, mimeType: firstFrame.value.mimeType } : undefined,
+        referenceImages: referenceImages.value.map(image => ({ data: image.data, mimeType: image.mimeType })),
       } : {}),
     }, { signal: controller.signal });
     debugResult.value = response.data.data;

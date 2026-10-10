@@ -13,21 +13,18 @@ function referenceMimeType(data: string) {
   if (bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
 }
 
-const imageUrlSchema = z.string().trim().min(1).max(2048).refine(
-  url => /^https?:\/\//i.test(url) && URL.canParse(url),
-  "图片必须为公网 HTTP(S) URL",
-);
+const imageRefSchema = z.object({
+  data: z.string().min(1).max(Math.ceil(maxReferenceBytes / 3) * 4).base64(),
+  mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+}).strict().refine(image => referenceMimeType(image.data) === image.mimeType, "参考图内容与格式不一致或超过 10 MB");
 
 const inputSchema = z.object({
   providerId: z.uuid(),
   modelId: z.uuid(),
   prompt: z.string().trim().min(1).max(100_000),
-  referenceImage: z.object({
-    data: z.string().min(1).max(Math.ceil(maxReferenceBytes / 3) * 4).base64(),
-    mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
-  }).strict().refine(image => referenceMimeType(image.data) === image.mimeType, "参考图内容与格式不一致或超过 10 MB").optional(),
-  firstFrameUrl: imageUrlSchema.optional(),
-  referenceImageUrls: z.array(imageUrlSchema).max(5).optional(),
+  referenceImage: imageRefSchema.optional(),
+  firstFrame: imageRefSchema.optional(),
+  referenceImages: z.array(imageRefSchema).max(5).optional(),
 });
 
 export default Router().post("/", validateFields(inputSchema.shape), async (req, res) => {

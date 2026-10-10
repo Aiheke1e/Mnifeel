@@ -263,8 +263,8 @@ export async function debugProviderModel(adminUserId: string, input: {
   modelId: string;
   prompt: string;
   referenceImage?: { data: string; mimeType: string };
-  firstFrameUrl?: string;
-  referenceImageUrls?: string[];
+  firstFrame?: { data: string; mimeType: string };
+  referenceImages?: { data: string; mimeType: string }[];
 }, signal?: AbortSignal) {
   let provider: ProviderRow | undefined;
   let model: ModelRow | undefined;
@@ -280,7 +280,7 @@ export async function debugProviderModel(adminUserId: string, input: {
     `;
     model = rows[0] ?? invalid("该供应商下不存在这个模型", 404);
     if (input.referenceImage && provider.type !== "bananaPro") invalid("只有 BananaPro 图片调试支持参考图");
-    if ((input.firstFrameUrl || input.referenceImageUrls?.length) && provider.type !== "agnes") invalid("只有 Agnes 视频调试支持图片 URL");
+    if ((input.firstFrame || input.referenceImages?.length) && provider.type !== "agnes") invalid("只有 Agnes 视频调试支持首帧与参考图");
     config = runtimeProvider(provider);
     const adapter = requireAdapter(provider.type);
     const definition = {
@@ -311,9 +311,9 @@ export async function debugProviderModel(adminUserId: string, input: {
       if (model.mediaType !== "video" || !adapter.createVideo || !adapter.getVideo) invalid("所选模型不支持视频调试");
       const task = await adapter.createVideo(config, definition, {
         prompt: input.prompt,
-        // ACT: Agnes 首帧/参考图只收公网 URL；mimeType 仅占位，适配器按 data 中的 URL 判断，不校验其真实内容类型。
-        firstFrame: input.firstFrameUrl ? { data: input.firstFrameUrl, mimeType: "image/png" } : undefined,
-        images: input.referenceImageUrls?.map(url => ({ data: url, mimeType: "image/png" })),
+        // ACT: Agnes 首帧/参考图支持本地图片（base64）；适配器按 mimeType 拼成 data URI，公网 URL 则原样透传。
+        firstFrame: input.firstFrame,
+        images: input.referenceImages,
       }, signal);
       while (!result) {
         signal?.throwIfAborted();
