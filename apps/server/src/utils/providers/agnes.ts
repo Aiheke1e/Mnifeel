@@ -1,6 +1,6 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { z } from "zod";
-import type { ProviderAdapter, ProviderRuntimeConfig } from "@/utils/providers/types";
+import type { ProviderAdapter, ProviderMediaInput, ProviderRuntimeConfig } from "@/utils/providers/types";
 
 const requestInterval = 60_000;
 let nextRequestAt = 0;
@@ -73,7 +73,18 @@ async function fetchJson(config: ProviderRuntimeConfig, url: string, init: Reque
     signal: requestSignal(signal, timeout),
     redirect: "error",
   });
-  if (!response.ok) throw Object.assign(new Error(`Agnes 请求失败（HTTP ${response.status}）`), { status: 502 });
+  if (!response.ok) {
+    // ACT: 读取上游错误体，把「队列已满 / 限频 / 参数非法」等真实原因透出给管理员，而不是只报 HTTP 状态码。
+    const detail = await response.text().then(text => {
+      try {
+        const body = JSON.parse(text) as { message?: unknown; error?: unknown; detail?: unknown };
+        return [body.message, body.error, body.detail].find(value => typeof value === "string" && value.trim()) as string | undefined;
+      } catch {
+        return undefined;
+      }
+    }).catch(() => undefined);
+    throw Object.assign(new Error(detail ? `Agnes 请求失败：${detail}` : `Agnes 请求失败（HTTP ${response.status}）`), { status: 502 });
+  }
   return response.json();
 }
 
@@ -81,13 +92,36 @@ function capabilities(modelId: string) {
   const flash = modelId.includes("flash");
   const durations = [4, 5, 6, 7, 8, 9, 10, 11, 12];
   const resolutions = flash ? ["720P"] : ["720P", "1080P", "1K", "2K"];
+  const ratios = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"];
   return {
+    // ACT: 仅文生视频走 base64 素材链路；图生视频（首帧/参考图）要求公网 URL，普通画布暂无法供给，故保留 text 单模式。
     modes: ["text"],
     durations,
     resolutions,
     durationResolutionMap: [{ duration: durations, resolution: resolutions }],
-    ratios: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+    ratios,
+    // ACT: 官方文档明确 keyframe（首帧/尾帧）与 reference（图片参考 ≤5）互斥，不能同一次请求混用，故 combineFrameWithReferences 为 false。
+    videoCapability: {
+      version: 1,
+      firstFrame: true,
+      lastFrame: true,
+      maxImageReferences: 5,
+      combineFrameWithReferences: false,
+      durations,
+      ratios,
+      resolutions,
+    },
   };
+}
+
+// ACT: Agnes 的首帧/尾帧/参考图只接受公网 HTTP(S) URL，不接受 base64 或本地路径。
+function requireUrl(input: ProviderMediaInput | undefined): string | undefined {
+  if (!input) return undefined;
+  const url = input.data.trim();
+  if (!/^https?:\/\//i.test(url) || !URL.canParse(url)) {
+    throw Object.assign(new Error("Agnes 参考图必须为公网 HTTP(S) URL，本地图片请先上传到可公网访问的地址"), { status: 400 });
+  }
+  return url;
 }
 
 const agnes: ProviderAdapter = {
@@ -108,8 +142,8 @@ const agnes: ProviderAdapter = {
   },
 
   async createVideo(config, model, input, signal) {
-    if (input.firstFrame || input.lastFrame || input.images?.length || input.videos?.length || input.audios?.length) {
-      throw Object.assign(new Error("Agnes 参考素材要求公网 URL，本地项目素材暂不直接外传；当前仅支持文生视频"), { status: 400 });
+    if (input.videos?.length || input.audios?.length) {
+      throw Object.assign(new Error("Agnes 当前仅支持首帧/尾帧与图片参考，暂不支持视频或音频参考"), { status: 400 });
     }
     const duration = input.duration ?? 5;
     const resolution = (input.resolution ?? "720P").toUpperCase();
@@ -117,6 +151,26 @@ const agnes: ProviderAdapter = {
     if (!Number.isInteger(duration) || duration < 4 || duration > 12) throw Object.assign(new Error("Agnes 视频时长须为 4 到 12 秒的整数"), { status: 400 });
     if (!capabilities(model.upstreamModelId).resolutions.includes(resolution)) throw Object.assign(new Error("Agnes 模型不支持所选分辨率"), { status: 400 });
     if (!capabilities(model.upstreamModelId).ratios.includes(ratio)) throw Object.assign(new Error("Agnes 模型不支持所选画幅"), { status: 400 });
+
+    const firstFrame = requireUrl(input.firstFrame);
+    const lastFrame = requireUrl(input.lastFrame);
+    const images = (input.images ?? []).map(requireUrl);
+    if (images.length > 5) throw Object.assign(new Error("Agnes 单次最多使用 5 张参考图"), { status: 400 });
+
+    const hasFrame = Boolean(firstFrame || lastFrame);
+    if (hasFrame && images.length) throw Object.assign(new Error("Agnes 首帧/尾帧与图片参考不能在同一次请求中混用"), { status: 400 });
+
+    let mode = "text";
+    const media: Record<string, unknown> = {};
+    if (hasFrame) {
+      mode = "keyframe";
+      if (firstFrame) media.first_frame = firstFrame;
+      if (lastFrame) media.last_frame = lastFrame;
+    } else if (images.length) {
+      mode = "reference";
+      media.images = images;
+    }
+
     await waitForVideoRequest(signal);
     const result = createSchema.parse(await fetchJson(config, endpoint(config, "videos"), {
       method: "POST",
@@ -124,11 +178,12 @@ const agnes: ProviderAdapter = {
       body: JSON.stringify({
         model: model.upstreamModelId,
         prompt: input.prompt,
-        mode: "text",
+        mode,
         seconds: String(duration),
         size: resolution,
         aspect_ratio: ratio,
         n: 1,
+        ...media,
       }),
     }, signal, 60000));
     return {

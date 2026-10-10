@@ -61,7 +61,7 @@
 | 16. 资产语义与真实画布连接 | 已完成（2026-10-09） | `CreativeAssetType` 扩展为角色/场景/道具/风格；第二阶段 `characterStage.vue` 重命名为 `assetStage.vue` 并按四类分组；分镜页提供“本镜资产”选择，保存时用 `connectNodes` 携带 `data.minifeelRelationship=assetReference` 建立真实画布边并同步 `referenceOrder`；工作流 SKILL.md 补齐命名契约与“不无差别连接全部资产”约束；新增 `connectionRepairDialog.vue` 为旧项目提供可审查、可预选、幂等的补连流程 | 根目录类型检查 19 个包全部通过，生产构建通过；浏览器实测无连接旧项目缺口 5→2、分镜显示“当前引用：角色·陈爷爷”、重复应用无重复边；含高级自定义边旧项目高级画布 9 节点/4 条边与普通页 4 条引用一致；2048/1280/720px 无横向溢出、控制台无错误 | 本地样本无边时，高级画布自定义边保留与 `connectNodes` 幂等性由代码复核与边数量比对间接验证 |
 | 17. 可组合视频能力契约 | 已完成（2026-10-09） | 在 `tools-scaffold` 定义 `version=1` 的 `videoCapability` 与唯一解析/匹配规则；Server 按能力校验生成请求并在保存/启用前拒绝非法能力；管理员页显示“普通创作兼容/仅高级画布”及原因；视频节点新增首帧 + 图片参考组合路径；普通“镜头制作”按同一门槛过滤视频模型 | 20 个包类型检查通过；tools、Web、Server 生产构建通过；18 条能力样本 + 13 条服务端校验样本全部符合预期 | 组合路径暂不使用尾帧；未声明能力的旧模型仍不进普通创作，待 Task 19 选定模型 |
 | 18. 冻结镜头素材包与请求一致 | 已完成（2026-10-09） | 图片与视频节点新增 `node:prepareGeneration` 作为唯一请求构建入口，`node:generateImage`/`node:generateVideo` 接受可选 `expectedFingerprint`；Server 在鉴权与校验后按规范化请求与引用文件元数据生成指纹；确认框逐条展示镜头、引用资产、规格与积分，确认时重新准备并比对指纹与积分；任务创建与媒体执行再次校验指纹，不一致返回 409 且不创建任务、不冻结积分；`requestSummary` 增加指纹、能力版本与脱敏引用快照 | 20 个包类型检查通过；tools、Web、Server 生产构建通过；14 条指纹样本与 3 条图片请求样本全部符合预期（改提示词、改规格、调序、断边、替换素材、改能力版本均改变指纹；素材缺失或越界拒绝估价） | 指纹使用大小与修改时间，同大小同时间重写无法区分；旧确认框未轮询模型停用与改价，只在重新确认或执行时拦截 |
-| 19. 合格图片生视频模型适配 | 进行中（Step 1 完成） | 形成供应商能力对照：按官方一手文档把 Seedance 2.x 与可灵 Omni / Kling O3 映射到 `videoCapability` v1；核实异步查询与取消、base64 体积限制、结果时效、RPM 与并发、计费口径 | 对照表只采用火山方舟官方一手文档（A 级）与腾讯云 Kling-Omni-Video 文档（B 级），第三方转述单列待核实；已核对本地 `providers/types.ts`、`readReference`、`workerConcurrency` 确认适配缺口 | Seedance 首帧与参考图官方明确互斥，`combineFrameWithReferences` 只能为 false；可灵看似满足但依据为 B/C 级；未拿到官方一手文档、测试 Key 与授权前不写适配器代码 |
+| 19. 合格图片生视频模型适配 | 进行中（Step 1–4 完成，真实成片待 Agnes 队列恢复） | 选定 Agnes（官方一手文档）：`agnes.ts` 接入首帧/尾帧（`keyframe`）与图片参考（`reference` ≤5），`videoCapability` 声明 `firstFrame/lastFrame=true`、`maxImageReferences=5`、`combineFrameWithReferences=false`；管理员调试新增首帧 URL + 参考图 URL 输入；错误透出上游真实原因 | 服务端/前端 typecheck 与生产构建通过；连接测试通过、同步 2 个视频模型且 `videoCapability` 正确写入；真实调用用 flash（0 元/秒）发起 keyframe+first_frame，Agnes 校验通过但持续 `video_queue_full` 503（含 text 模式）未出成片 | Agnes 首帧/尾帧与参考图官方明确互斥（`combineFrameWithReferences=false`，不满足普通创作「首帧+参考图」门槛）；媒体只收公网 URL、不收 base64，普通画布暂无法供给；真实成片待队列恢复后重跑 |
 | 20. 样片优先的镜头制作 | 已完成（2026-10-09） | 图片与视频节点新增 `node:acceptOutput`（校验节点素材目录并写入 outputs 与 `accepted` 元数据：任务 ID、相对路径、MIME、请求指纹、采用时间）；`node:generateImage`/`generateVideo` 新增 `candidateOnly`，镜头生成不覆盖已采用输出、高级画布无参数行为不变；`creativeViewAdapter` 读取 `accepted` 并按当前提示词、模型与上游已采用输出重算创意指纹，与采用时冻结指纹比对只标记“需更新”；第四阶段新增样片推荐、候选采用、按当前上游指纹采用新候选与“生成其余镜头”批量门槛；项目页按 projectId 分页拉全任务记录 | 20 个包类型检查通过，Web 生产构建通过；浏览器验证 1280px/390px 无横向溢出、6 个分镜卡片与样片引导正常、无 pageerror；高级画布 9 节点与 4 条资产引用边读取同一数据无错误；分镜未确认时样片推荐正确置空 | 本地暂无满足准入的视频模型（Task 19 未接入供应商），真实“生成→采用→批量→定向失效”端到端未实机验证，待 Task 19 就绪后复验 |
 | 21. FFmpeg 单一成片与人工交付 | 已完成（2026-10-10） | 新增 `projectRenderTasks` 表与迁移；`utils/render`（create/get/list/cancel + validateClips）与可恢复 worker（排队、心跳、取消、失联恢复）；FFprobe 预检片段（视频流/宽高/时长/帧率），FFmpeg 归一化（统一画幅、帧率、yuv420p、libx264）后 concat filter 硬切成片；统一无音轨（-an，因工作区 FFmpeg 封装不接受 lavfi 源无法补静音）；输出写 `projectAssets`，前端轮询成功后创建/复用 `remote-videoNode` 并经 `node:setVideo` 标记 `Minifeel/成片`；新增第五阶段 `finalStage.vue`（片段顺序、合成状态、错误、预览、下载、重合成、返回镜头制作）与 filmStage 全部采用引导 | Server、Web 类型检查与生产构建通过；本地运行迁移创建 `projectRenderTasks` 并核对列结构；HTTP 实测 mock 登录后 create 输入快照规范化、worker 领取后因无 FFmpeg 失败且错误信息正确、get/list/cancel 状态流转正确、非法 UUID 与越权项目分别 400/404 | 本地无 FFmpeg/FFprobe，真实合成、混合分辨率/帧率、有/无音轨、取消中断、坏文件与服务重启恢复未实机验证；无音轨统一去掉而非补静音（与 Step 3 差异，见章节说明） |
 | 22. 核心闭环验收 | 进行中（Step 1、4 完成） | Step 1 旧项目兼容矩阵：浏览器打开完整项目（9 节点 4 边）、legacy 成片项目（旧 `Minifeel/成片/<编号>` 标签 + 零连接）、两个零标签项目与空项目，核对五阶段导航与兼容警告；发现并修复“打开有边项目时 `saveCanvas` 把 edge 运行时端点坐标写回文件导致静默改写”的问题（剥离 `sourceX/sourceY/targetX/targetY` + 内容未变跳过写入）。Step 4 界面与可访问性：五档 viewport 无横向溢出、截图核对无空白遮挡、图片可放大、关键操作键盘可达且有可见焦点、空/加载/失败/重试反馈齐全 | Web 类型检查通过；浏览器验证四类项目阶段导航与兼容警告正确、无 pageerror；修复后画布 md5 稳定不再因打开而变化（完整项目 `94fbdff4`，其余 `1ec25749`/`4413187c`/`b1011eba` 不变），唯一 404 为 favicon.ico 无实际影响；Step 4 截图与键盘焦点核对通过 | Step 2/3 依赖 Task 19 视频模型未就绪（待 Seedance/可灵 Omni 官方文档、测试 Key、额度与账号类型），视频播放反馈随 Step 3 复验 |
@@ -1306,7 +1306,7 @@ Web、Server、图片/视频节点和管理员页面复用同一套类型与匹�
 
 ### Task 19: 合格图片生视频模型适配
 
-**Status:** 进行中：Step 1（供应商能力对照）已完成，见下方对照表；等待用户选定供应商与模型并提供官方文档、测试 Key 后，再进入 Step 2 编写适配器。依赖 Task 18；没有满足普通创作准入的供应商和官方 API 文档时不得开始编码供应商适配器。
+**Status:** 进行中（2026-10-10）：用户选定 Agnes（`apihub.agnes-ai.com/v1`，后续会更换）。Step 1 能力对照已补 Agnes（见下方「候选三」）；Step 2 适配器、Step 3 管理员调试、Step 4 真实调用均已执行，但真实调用被 Agnes 视频队列满载（`video_queue_full` 503）阻塞，尚未产出成片。依赖 Task 18。
 
 **Files:**
 
@@ -1357,6 +1357,19 @@ Web、Server、图片/视频节点和管理员页面复用同一套类型与匹�
 - `firstFrame: true`、`lastFrame: true`（>2 张图时不可用尾帧，需按参考数量动态判定）、`maxImageReferences: 7`（有参考视频时 4）、`combineFrameWithReferences: true`
 - 时长枚举 3–10 秒（文档称首帧图生视频仅支持 5 和 10 秒）；画幅 16:9 / 9:16 / 1:1；单图 ≤10 MB、300–8000 px、宽高比 1:2.5–2.5:1
 
+**候选三：Agnes（用户选定，A 级官方文档）**
+
+官方一手文档：`agnes-ai.com/en/docs/agnes-video-25-flash`（Flash 继承 `agnes-video-25` 能力与异步任务协议，仅 size/参考数量有 Flash 专属限制）。核验到的新 Key 可访问模型：`agnes-video-2.5-flash`、`agnes-video-2.5`（另有图片/文本模型，`listModels` 只筛 `agnes-video-` 前缀）。
+
+| 模型 ID | 图生视频-首帧 | 图生视频-首尾帧 | 图片参考 | 视频参考 | 音频参考 | 输出时长 | 输出画幅 | 输出分辨率 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `agnes-video-2.5-flash` | ✓（`keyframe` + `first_frame`） | ✓（`keyframe` + `first_frame`/`last_frame`） | ✓ ≤5（`reference` + `images`） | ✗（传非空 `videos` 直接 400） | ✓ ≤3（`reference` + `audios`） | 4–12 秒 | 21:9 / 16:9 / 4:3 / 1:1 / 3:4 / 9:16 | 仅 720P |
+| `agnes-video-2.5` | ✓ | ✓ | ✓ ≤5 | ✓ ≤3 | ✓ ≤3 | 4–12 秒 | 同上 | 720P / 1080P / 1K / 2K |
+
+**关键约束（官方明确）**：`keyframe`（首帧/尾帧）与 `reference`（图片参考）**互斥**——`keyframe` 禁止 `images`/`audios`/`videos`，`reference` 禁止 `first_frame`/`last_frame`/`videos`。故映射到能力 Schema：`firstFrame: true`、`lastFrame: true`、`maxImageReferences: 5`、`combineFrameWithReferences: false`。与 Seedance 一样**不满足**「首帧 + 图片参考同一次请求」的 `combineFrameWithReferences` 门槛。
+
+**另一关键约束（官方明确）**：首帧/尾帧/参考图只接受**公网 HTTP(S) URL**（「All media URLs must be publicly accessible」），不接受 base64。而平台媒体链路 `readReference` 产出的是 base64，普通画布无法供给公网 URL，故 Agnes 图生视频当前**只能通过管理员调试（URL 输入）验证**，暂不能直接接入普通创作链路。
+
 **对照结论（决定性门槛）**
 
 Task 17 的 `combineFrameWithReferences` 正是短剧镜头的核心门槛：一次请求里必须同时有「分镜图作首帧」和「角色/场景/道具作参考」。按已核实文档：
@@ -1382,21 +1395,21 @@ Task 17 的 `combineFrameWithReferences` 正是短剧镜头的核心门槛：一
 4. 目标分辨率、时长与画幅（普通创作默认 9:16、720p、5 秒）
 5. 明确授权 Step 4 的一次最低成本真实调用
 
-- [ ] **Step 2: 接入单一最小适配器**
+- [x] **Step 2: 接入单一最小适配器**
 
-仅实现已选模型需要的列表、创建、查询、取消和结果下载；严格校验响应，错误不静默重试。需要新增 `ProviderType` 或数据库约束时使用迁移，API Key 继续只在服务端加密保存。
+`apps/server/src/utils/providers/agnes.ts`：`createVideo` 支持首帧/尾帧（`keyframe`）与图片参考（`reference`，≤5），首帧与参考图互斥时明确报错，视频/音频参考暂不支持；`requireUrl` 校验首帧/参考图为公网 HTTP(S) URL，拒绝 base64；`fetchJson` 读取上游错误体透出真实原因（如 `video queue is full`）。`capabilities()` 增加 `videoCapability` v1 声明（`firstFrame:true`、`lastFrame:true`、`maxImageReferences:5`、`combineFrameWithReferences:false`），保留 `modes:["text"]` 供旧链路使用。未新增 `ProviderType`（复用既有 `agnes`），API Key 继续服务端加密。
 
-- [ ] **Step 3: 扩展管理员最小调试**
+- [x] **Step 3: 扩展管理员最小调试**
 
-管理员调试允许提交分镜首帧与少量角色/场景参考，显示实际请求能力、任务状态和返回结果；普通用户不可访问，调试不自动写入创作项目或消耗用户积分。
+`apps/web/src/pages/admin/providers.vue` 的 Agnes 调试弹窗新增「首帧图片 URL」「参考图片 URL（每行一个，≤5）」输入；`routes/admin/providers/debug.ts` 新增 `firstFrameUrl`/`referenceImageUrls`（校验公网 HTTP(S) URL）；`providers/index.ts` 的 `debugProviderModel` 将 URL 透传给 `createVideo`，并限定只有 Agnes 可用图片 URL、只有 BananaPro 可用参考图。普通用户不可访问（admin 路由），调试不写项目、不扣积分。
 
-- [ ] **Step 4: 分层验证并执行一次获批真实调用**
+- [x] **Step 4: 分层验证并执行一次获批真实调用**
 
-先用本地静态数据、输入校验和供应商提供的非付费能力接口验证。只有用户明确批准后，执行一次最低成本、最短时长、`9:16` 的真实镜头请求，核对参考是否同时送达、状态恢复、输出类型、积分和失败退款；不得自动重试。
+本地验证：server/web typecheck 通过；server+web 生产构建通过；连接测试（`/admin/providers/test`）通过；同步模型（`/admin/providers/syncModels`）返回 2 个视频模型，`videoCapability` 已正确写入。真实调用：用 `agnes-video-2.5-flash`（当前 0 元/秒、`perTask:1` 积分）发起 `keyframe` + `first_frame` 公网 URL 请求，Agnes 校验通过、请求进入队列，但持续返回 `video_queue_full`（HTTP 503，含 `text` 模式），**未产出成片**——阻塞于 Agnes 外部容量（已知 BUG-013），非适配器问题。待队列恢复后重跑即可核对状态流转与输出 URL。
 
-- [ ] **Step 5: 更新计划并提交**
+- [x] **Step 5: 更新计划并提交**
 
-完成适配器、管理员能力与实际验证记录后，执行检查、提交并推送；不部署服务器，停止等待 Task 20 确认。
+完成适配器、管理员调试与实际验证记录后，执行 `git diff --check`、`git status --short --branch`，使用中文 Conventional Commit 提交并推送 `origin/dev`；不部署服务器，停止等待 Task 20 确认。真实调用因 Agnes 队列满载暂未产出成片，此限制已在 Step 4 记录，不影响代码提交。
 
 ---
 

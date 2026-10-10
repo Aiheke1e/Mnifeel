@@ -23,6 +23,8 @@
           </el-select>
         </el-form-item>
         <el-form-item label="提示词"><el-input v-model="debugPrompt" type="textarea" :rows="5" maxlength="100000" showWordLimit /></el-form-item>
+        <el-form-item v-if="debugProvider?.type === 'agnes'" label="首帧图片 URL（可选，须公网可访问）"><el-input v-model="debugFirstFrameUrl" placeholder="https://example.com/first.png" /></el-form-item>
+        <el-form-item v-if="debugProvider?.type === 'agnes'" label="参考图片 URL（可选，每行一个，最多 5 张）"><el-input v-model="debugReferenceUrls" type="textarea" :rows="3" placeholder="https://example.com/character.png" /></el-form-item>
         <el-form-item v-if="debugProvider?.type === 'bananaPro'" label="参考图（可选，最多 10 MB）">
           <input ref="referenceInput" class="fileInput" type="file" accept="image/jpeg,image/png,image/webp" aria-label="选择参考图" @change="selectReference" />
           <div class="referenceActions"><el-button @click="referenceInput?.click()">选择图片</el-button><span v-if="referenceImage">{{ referenceImage.name }}</span><el-button v-if="referenceImage" text type="danger" @click="clearReference">移除</el-button></div>
@@ -64,6 +66,8 @@ const debugProvider = ref<Provider>();
 const debugModels = ref<Model[]>([]);
 const debugModelId = ref("");
 const debugPrompt = ref("");
+const debugFirstFrameUrl = ref("");
+const debugReferenceUrls = ref("");
 const debugResult = ref<DebugResult>();
 const modelLoading = ref(false);
 const debugging = ref(false);
@@ -86,6 +90,8 @@ async function openDebugger(provider: Provider) {
   debugModels.value = [];
   debugModelId.value = "";
   debugPrompt.value = "";
+  debugFirstFrameUrl.value = "";
+  debugReferenceUrls.value = "";
   debugResult.value = undefined;
   clearReference();
   debugVisible.value = true;
@@ -137,6 +143,10 @@ async function runDebug() {
       modelId: debugModelId.value,
       prompt,
       ...(provider.type === "bananaPro" && referenceImage.value ? { referenceImage: { data: referenceImage.value.data, mimeType: referenceImage.value.mimeType } } : {}),
+      ...(provider.type === "agnes" ? {
+        firstFrameUrl: debugFirstFrameUrl.value.trim() || undefined,
+        referenceImageUrls: debugReferenceUrls.value.split("\n").map(item => item.trim()).filter(Boolean),
+      } : {}),
     }, { signal: controller.signal });
     debugResult.value = response.data.data;
   } catch (error) {
